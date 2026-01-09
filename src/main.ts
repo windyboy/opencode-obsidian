@@ -4,6 +4,7 @@ import { ProviderManager } from './provider-manager'
 import { OpenCodeObsidianView, VIEW_TYPE_OPENCODE_OBSIDIAN } from './opencode-obsidian-view'
 import { OpenCodeObsidianSettingTab } from './settings'
 import type { OpenCodeObsidianSettings } from './types'
+import { ConfigLoader } from './config-loader'
 
 const DEFAULT_SETTINGS: OpenCodeObsidianSettings = {
   apiKeys: {},
@@ -18,33 +19,77 @@ const DEFAULT_SETTINGS: OpenCodeObsidianSettings = {
 export default class OpenCodeObsidianPlugin extends Plugin {
   settings: OpenCodeObsidianSettings
   providerManager: ProviderManager
+  configLoader: ConfigLoader | null = null
 
   async onload() {
     console.log('[OpenCode Obsidian] Plugin loading...')
     
-    await this.loadSettings()
-    
-    // Migrate old settings format if needed
-    this.migrateSettings()
-    
-    console.log('[OpenCode Obsidian] Settings loaded:', {
-      providerID: this.settings.providerID,
-      agent: this.settings.agent,
-      model: this.settings.model,
-      availableProviders: Object.keys(this.settings.apiKeys).filter(key => this.settings.apiKeys[key as keyof typeof this.settings.apiKeys])
-    })
-    
-    // Initialize provider manager
-    this.providerManager = new ProviderManager({
-      apiKeys: this.settings.apiKeys,
-      defaultModel: {
+    try {
+      await this.loadSettings()
+      
+      // Migrate old settings format if needed
+      this.migrateSettings()
+      
+      // Initialize config loader (only if vault is available)
+      try {
+        if (this.app && this.app.vault) {
+          this.configLoader = new ConfigLoader(this.app.vault)
+          
+          // Load TUI features (compatible providers from .opencode/config.json)
+          // Wrap in try-catch to prevent plugin load failure
+          try {
+            await this.loadTUIFeatures()
+          } catch (error) {
+            console.error('[OpenCode Obsidian] Error loading TUI features (non-fatal):', error)
+            // Continue loading plugin even if TUI features fail to load
+          }
+        } else {
+          console.warn('[OpenCode Obsidian] Vault not available, skipping config loader initialization')
+        }
+      } catch (error) {
+        console.error('[OpenCode Obsidian] Error initializing config loader (non-fatal):', error)
+        // Continue loading plugin even if config loader fails
+        this.configLoader = null
+      }
+      
+      console.log('[OpenCode Obsidian] Settings loaded:', {
+        providerID: this.settings.providerID,
+        agent: this.settings.agent,
+        model: this.settings.model,
+        availableProviders: Object.keys(this.settings.apiKeys).filter(key => this.settings.apiKeys[key as keyof typeof this.settings.apiKeys]),
+        compatibleProvidersCount: this.settings.compatibleProviders?.length || 0
+      })
+      
+      // Initialize provider manager
+      this.providerManager = new ProviderManager({
+        apiKeys: this.settings.apiKeys,
+        compatibleProviders: (this.settings.compatibleProviders && Array.isArray(this.settings.compatibleProviders))
+          ? this.settings.compatibleProviders.map(p => ({
+              id: p.id,
+              name: p.name,
+              apiKey: p.apiKey,
+              baseURL: p.baseURL,
+              apiType: p.apiType,
+              defaultModel: p.defaultModel
+            }))
+          : undefined,
+        defaultModel: {
         anthropic: this.settings.model.providerID === 'anthropic' ? this.settings.model.modelID : undefined,
         openai: this.settings.model.providerID === 'openai' ? this.settings.model.modelID : undefined,
         google: this.settings.model.providerID === 'google' ? this.settings.model.modelID : undefined,
-        zenmux: this.settings.model.providerID === 'zenmux' ? this.settings.model.modelID : undefined
-      },
-      providerOptions: this.settings.providerOptions
-    })
+        zenmux: this.settings.model.providerID === 'zenmux' ? this.settings.model.modelID : undefined,
+        // Add default models for compatible providers
+        ...(this.settings.compatibleProviders && Array.isArray(this.settings.compatibleProviders)
+          ? this.settings.compatibleProviders.reduce((acc, p) => {
+              if (p && p.defaultModel && p.id) {
+                acc[p.id] = p.defaultModel
+              }
+              return acc
+            }, {} as Record<string, string>)
+          : {})
+        },
+        providerOptions: this.settings.providerOptions
+      })
     
     const availableProviders = this.providerManager.getAvailableProviders()
     if (availableProviders.length === 0) {
@@ -77,11 +122,16 @@ export default class OpenCodeObsidianPlugin extends Plugin {
     })
     console.log('[OpenCode Obsidian] Command registered: open-view')
 
-    // Add settings tab
-    this.addSettingTab(new OpenCodeObsidianSettingTab(this.app, this))
-    console.log('[OpenCode Obsidian] Settings tab added')
-    
-    console.log('[OpenCode Obsidian] Plugin loaded successfully ✓')
+      // Add settings tab
+      this.addSettingTab(new OpenCodeObsidianSettingTab(this.app, this))
+      console.log('[OpenCode Obsidian] Settings tab added')
+      
+      console.log('[OpenCode Obsidian] Plugin loaded successfully ✓')
+    } catch (error) {
+      console.error('[OpenCode Obsidian] Failed to load plugin:', error)
+      new Notice('Failed to load OpenCode Obsidian plugin. Check console for details.')
+      throw error // Re-throw to let Obsidian handle the error
+    }
   }
 
   onunload() {
@@ -102,6 +152,11 @@ export default class OpenCodeObsidianPlugin extends Plugin {
     // Ensure providerOptions object exists
     if (!this.settings.providerOptions) {
       this.settings.providerOptions = {}
+    }
+    
+    // Ensure compatibleProviders array exists
+    if (!this.settings.compatibleProviders) {
+      this.settings.compatibleProviders = []
     }
     
     console.log('[OpenCode Obsidian] Settings loaded from storage:', loadedData)
@@ -130,6 +185,87 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings)
+  }
+
+  /**
+   * Load TUI features from .opencode/config.json
+   * Loads compatible providers and agents
+   */
+  private async loadTUIFeatures() {
+    if (!this.configLoader) {
+      console.warn('[OpenCode Obsidian] Config loader not initialized, skipping TUI features')
+      return
+    }
+    
+    try {
+      // Load compatible providers from config
+      const compatibleProviders = await this.configLoader.loadCompatibleProviders(this.settings.apiKeys)
+      
+      if (compatibleProviders.length > 0) {
+        // Initialize compatibleProviders array if it doesn't exist
+        if (!this.settings.compatibleProviders) {
+          this.settings.compatibleProviders = []
+        }
+        
+        // Merge loaded providers with existing ones
+        // Keep existing API keys if they're already set
+        for (const loadedProvider of compatibleProviders) {
+          const existingProvider = this.settings.compatibleProviders.find(p => p.id === loadedProvider.id)
+          
+          if (existingProvider) {
+            // Update existing provider with new config, but keep existing API key if it's set
+            existingProvider.name = loadedProvider.name
+            existingProvider.baseURL = loadedProvider.baseURL
+            existingProvider.apiType = loadedProvider.apiType
+            existingProvider.defaultModel = loadedProvider.defaultModel || existingProvider.defaultModel
+            
+            // Only update API key if it's not already set (from settings)
+            if (!existingProvider.apiKey || existingProvider.apiKey.trim() === '') {
+              existingProvider.apiKey = loadedProvider.apiKey
+              // Also store in apiKeys for backward compatibility
+              this.settings.apiKeys[existingProvider.id] = loadedProvider.apiKey
+            }
+          } else {
+            // Add new provider
+            this.settings.compatibleProviders.push(loadedProvider)
+            // Also store API key in apiKeys object if provided
+            if (loadedProvider.apiKey) {
+              this.settings.apiKeys[loadedProvider.id] = loadedProvider.apiKey
+            }
+          }
+        }
+        
+        // Remove providers that are no longer in config (optional - might want to keep them)
+        // For now, we keep them but they won't be initialized if API key is missing
+        
+        console.log(`[OpenCode Obsidian] Loaded ${compatibleProviders.length} compatible provider(s) from config`)
+        
+        // Save updated settings
+        await this.saveSettings()
+      } else {
+        console.log('[OpenCode Obsidian] No compatible providers found in config')
+      }
+
+      // Load agents from .opencode/agent/*.md files
+      const loadedAgents = await this.configLoader.loadAgents()
+      
+      if (loadedAgents.length > 0) {
+        // Store loaded agents in settings
+        this.settings.agents = loadedAgents
+        console.log(`[OpenCode Obsidian] Loaded ${loadedAgents.length} agent(s) from .opencode/agent/`)
+        
+        // Save updated settings
+        await this.saveSettings()
+      } else {
+        console.log('[OpenCode Obsidian] No agents found in .opencode/agent/')
+        // Keep existing agents if any, or set to empty array
+        if (!this.settings.agents) {
+          this.settings.agents = []
+        }
+      }
+    } catch (error) {
+      console.error('[OpenCode Obsidian] Error loading TUI features:', error)
+    }
   }
 
   async activateView() {
@@ -164,7 +300,7 @@ export default class OpenCodeObsidianPlugin extends Plugin {
   }
 
   async sendPrompt(
-    providerID: 'anthropic' | 'openai' | 'google' | 'zenmux',
+    providerID: 'anthropic' | 'openai' | 'google' | 'zenmux' | string,
     prompt: string | Array<{ type: string; text?: string; filePath?: string; [key: string]: unknown }>,
     options: {
       sessionId?: string
@@ -183,10 +319,48 @@ export default class OpenCodeObsidianPlugin extends Plugin {
       ? defaultModel 
       : { providerID, modelID: this.settings.model.modelID }
     
+    // Look up agent by ID if provided
+    const agentID = options.agent || this.settings.agent
+    let systemPrompt = options.system
+    let agentModel = finalModel
+    let agentTools = options.tools
+    
+    // Check if agent exists in loaded agents
+    if (this.settings.agents && this.settings.agents.length > 0) {
+      const agent = this.settings.agents.find(a => a.id === agentID)
+      
+      if (agent) {
+        // Use agent's system prompt
+        systemPrompt = agent.systemPrompt
+        
+        // Override model if agent has specific model
+        if (agent.model) {
+          agentModel = agent.model
+        }
+        
+        // Apply agent's tools configuration (merge with options.tools if provided)
+        if (agent.tools) {
+          agentTools = { ...agent.tools, ...(options.tools || {}) }
+        }
+      } else {
+        // Agent not found in loaded agents, fallback to default behavior
+        // Use agent ID as system prompt (legacy behavior)
+        if (!systemPrompt) {
+          systemPrompt = agentID
+        }
+      }
+    } else {
+      // No agents loaded, use legacy behavior
+      if (!systemPrompt) {
+        systemPrompt = agentID
+      }
+    }
+    
     const finalOptions = {
-      model: finalModel,
-      agent: options.agent || this.settings.agent,
-      system: options.system || options.agent || this.settings.agent,
+      model: agentModel,
+      agent: agentID,
+      system: systemPrompt,
+      tools: agentTools,
       ...options
     }
 

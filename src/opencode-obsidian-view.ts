@@ -136,9 +136,16 @@ export class OpenCodeObsidianView extends ItemView {
       const currentProvider = activeConv.providerID || this.plugin.settings.providerID
       
       availableProviders.forEach(providerID => {
+        // Get display name for provider (use compatible provider name if available)
+        let displayName = providerID.charAt(0).toUpperCase() + providerID.slice(1)
+        const compatibleProvider = this.plugin.settings.compatibleProviders?.find(p => p.id === providerID)
+        if (compatibleProvider) {
+          displayName = `${compatibleProvider.name} (${compatibleProvider.apiType})`
+        }
+        
         const option = providerSelect.createEl('option', {
           value: providerID,
-          text: providerID.charAt(0).toUpperCase() + providerID.slice(1)
+          text: displayName
         })
         if (providerID === currentProvider) {
           option.selected = true
@@ -147,9 +154,11 @@ export class OpenCodeObsidianView extends ItemView {
       
       providerSelect.value = currentProvider
       providerSelect.onchange = () => {
-        activeConv.providerID = providerSelect.value as 'anthropic' | 'openai' | 'google' | 'zenmux'
+        activeConv.providerID = providerSelect.value
         this.renderView()
-        new Notice(`Provider changed to ${providerSelect.value}`)
+        const selectedProvider = this.plugin.settings.compatibleProviders?.find(p => p.id === providerSelect.value)
+        const displayName = selectedProvider ? selectedProvider.name : providerSelect.value
+        new Notice(`Provider changed to ${displayName}`)
       }
     }
   }
@@ -350,12 +359,45 @@ export class OpenCodeObsidianView extends ItemView {
 
     // Agent selector
     const agentSelect = toolbar.createEl('select', { cls: 'opencode-obsidian-agent-select' })
-    agentSelect.createEl('option', { value: 'assistant', text: 'Assistant' })
-    agentSelect.createEl('option', { value: 'bootstrap', text: 'Bootstrap' })
-    agentSelect.createEl('option', { value: 'thinking-partner', text: 'Thinking Partner' })
-    agentSelect.createEl('option', { value: 'research-assistant', text: 'Research Assistant' })
-    agentSelect.createEl('option', { value: 'read-only', text: 'Read Only' })
-    agentSelect.value = this.plugin.settings.agent
+    
+    // Default agents (fallback if no custom agents loaded)
+    const defaultAgents: Array<{ id: string; name: string }> = [
+      { id: 'assistant', name: 'Assistant' },
+      { id: 'bootstrap', name: 'Bootstrap' },
+      { id: 'thinking-partner', name: 'Thinking Partner' },
+      { id: 'research-assistant', name: 'Research Assistant' },
+      { id: 'read-only', name: 'Read Only' }
+    ]
+    
+    // Get loaded agents (filter out hidden ones)
+    const loadedAgents = this.plugin.settings.agents?.filter(a => !a.hidden) || []
+    
+    // Use loaded agents if available, otherwise use defaults
+    const agentsToShow = loadedAgents.length > 0 ? loadedAgents : defaultAgents
+    
+    // Add agents to dropdown
+    agentsToShow.forEach(agent => {
+      const option = agentSelect.createEl('option', { 
+        value: agent.id, 
+        text: agent.name 
+      })
+      
+      // Add color indicator if agent has color (only for Agent type, not default agents)
+      if ('color' in agent && typeof agent.color === 'string') {
+        option.style.color = agent.color
+      }
+    })
+    
+    // Set current value (ensure it exists in options)
+    const currentValue = this.plugin.settings.agent
+    if (agentsToShow.some(a => a.id === currentValue)) {
+      agentSelect.value = currentValue
+    } else if (agentsToShow.length > 0 && agentsToShow[0]) {
+      // If current agent not found, use first available
+      agentSelect.value = agentsToShow[0].id
+      this.plugin.settings.agent = agentsToShow[0].id
+      this.plugin.saveSettings()
+    }
     
     agentSelect.onchange = async () => {
       this.plugin.settings.agent = agentSelect.value

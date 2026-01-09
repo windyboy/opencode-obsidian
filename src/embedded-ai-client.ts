@@ -26,9 +26,12 @@ export interface ResponseChunk {
 
 export interface EmbeddedAIClientConfig {
   apiKey: string
-  provider: 'anthropic' | 'openai' | 'google' | 'zenmux'
+  provider: 'anthropic' | 'openai' | 'google' | 'zenmux' | 'compatible'
   model?: string
-  baseURL?: string // For custom API endpoints like ZenMux
+  baseURL?: string // For custom API endpoints like ZenMux or compatible providers
+  apiType?: 'openai-compatible' | 'anthropic-compatible' // For compatible providers
+  providerId?: string // For compatible providers (original provider ID from config)
+  providerName?: string // For compatible providers (display name)
 }
 
 export interface EmbeddedSession {
@@ -78,6 +81,24 @@ export class EmbeddedAIClient {
         break
       case 'google':
         this.googleClient = new GoogleGenerativeAI(this.config.apiKey)
+        break
+      case 'compatible':
+        // Handle compatible providers based on apiType
+        if (this.config.apiType === 'openai-compatible') {
+          this.openaiClient = new OpenAI({
+            apiKey: this.config.apiKey,
+            baseURL: this.config.baseURL,
+            dangerouslyAllowBrowser: true,
+          })
+        } else if (this.config.apiType === 'anthropic-compatible') {
+          // Note: Anthropic SDK may not support baseURL directly
+          // This is a limitation - compatible providers using Anthropic API may need special handling
+          this.anthropicClient = new Anthropic({
+            apiKey: this.config.apiKey,
+            // baseURL: this.config.baseURL, // Uncomment if Anthropic SDK supports this in future
+          })
+          console.warn(`[EmbeddedAIClient] Anthropic-compatible provider ${this.config.providerName || this.config.providerId} initialized, but baseURL support may be limited`)
+        }
         break
     }
   }
@@ -168,6 +189,19 @@ export class EmbeddedAIClient {
         yield* this.sendZenMuxRequest(session, model, systemPrompt, options.abortController)
       } else if (this.config.provider === 'google' && this.googleClient) {
         yield* this.sendGoogleRequest(session, model, systemPrompt, options.abortController)
+      } else if (this.config.provider === 'compatible') {
+        // Handle compatible providers based on apiType
+        if (this.config.apiType === 'openai-compatible' && this.openaiClient) {
+          yield* this.sendOpenAIRequest(session, model, systemPrompt, options.abortController)
+        } else if (this.config.apiType === 'anthropic-compatible' && this.anthropicClient) {
+          yield* this.sendAnthropicRequest(session, model, systemPrompt, options.abortController)
+        } else {
+          yield {
+            type: 'error',
+            content: `Compatible provider ${this.config.providerName || this.config.providerId || 'unknown'} not properly initialized (apiType: ${this.config.apiType})`,
+          }
+          return
+        }
       } else {
         yield {
           type: 'error',
@@ -606,6 +640,78 @@ export class EmbeddedAIClient {
           // For now, return empty - users must enter model ID manually
           // Could potentially fetch from https://docs.anthropic.com but that's not an official API
           return []
+        case 'compatible':
+          // Handle compatible providers - fetch models from their /models endpoint
+          try {
+            if (!this.config.baseURL || !this.config.apiKey) {
+              console.error('[EmbeddedAIClient] No baseURL or API key configured for compatible provider')
+              return []
+            }
+            
+            // Use same approach as ZenMux for OpenAI-compatible providers
+            if (this.config.apiType === 'openai-compatible') {
+              const url = new URL(`${this.config.baseURL}/models`)
+              
+              const data = await new Promise<any>((resolve, reject) => {
+                const req = https.request(
+                  {
+                    hostname: url.hostname,
+                    port: url.port || 443,
+                    path: url.pathname + url.search,
+                    method: 'GET',
+                    headers: {
+                      'Authorization': `Bearer ${this.config.apiKey}`,
+                      'Content-Type': 'application/json',
+                      'User-Agent': 'OpenCode-Obsidian-Plugin'
+                    }
+                  },
+                  (res) => {
+                    let responseData = ''
+                    
+                    res.on('data', (chunk) => {
+                      responseData += chunk
+                    })
+                    
+                    res.on('end', () => {
+                      if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                        try {
+                          const parsed = JSON.parse(responseData)
+                          resolve(parsed)
+                        } catch (parseError) {
+                          reject(new Error(`Failed to parse response: ${parseError}`))
+                        }
+                      } else {
+                        reject(new Error(`HTTP error! status: ${res.statusCode}, message: ${responseData}`))
+                      }
+                    })
+                  }
+                )
+                
+                req.on('error', (error) => {
+                  reject(error)
+                })
+                
+                req.end()
+              })
+              
+              // Handle both OpenAI-compatible format and direct array format
+              const models = data.data || data.models || (Array.isArray(data) ? data : [])
+              console.log(`[EmbeddedAIClient] Fetched ${models.length} models from compatible provider ${this.config.providerName || this.config.providerId}`)
+              return models.map((model: any) => ({ 
+                id: model.id || model.name || model 
+              }))
+            } else if (this.config.apiType === 'anthropic-compatible') {
+              // Anthropic-compatible providers may not have a models endpoint
+              // Return empty for now - users must enter model ID manually
+              console.log(`[EmbeddedAIClient] Anthropic-compatible providers may not support model listing`)
+              return []
+            }
+            
+            return []
+          } catch (error: any) {
+            console.error(`[EmbeddedAIClient] Error fetching models from compatible provider ${this.config.providerName || this.config.providerId}:`, error)
+            return []
+          }
         default:
           return []
       }

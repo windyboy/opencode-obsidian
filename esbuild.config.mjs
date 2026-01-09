@@ -47,17 +47,32 @@ const fixDefaultExport = {
         
         // If we couldn't extract from wrapper, find the class that extends Plugin
         if (!defaultExportName) {
-          const pluginClassPattern = /((var\s+)?(\w+)\s*=\s*class[\s\S]*?extends[\s\S]*?Plugin[\s\S]*?})\s*;?/g
+          // Pattern for minified: Oi=class extends mn.Plugin{...}
+          // Pattern for non-minified: class OpenCodeObsidianPlugin extends Plugin {...}
+          // Match all classes that extend Plugin and get the last one (main plugin class)
+          const pluginClassPattern = /(\w+)\s*=\s*class\s+[^{]*extends\s+[^.{]*\.Plugin\s*\{/g
           let pluginMatch
-          let lastMatch = null
+          let matches = []
           
-          // Find the last occurrence (should be the main plugin class)
+          // Find all classes that extend Plugin
           while ((pluginMatch = pluginClassPattern.exec(code)) !== null) {
-            lastMatch = pluginMatch
+            matches.push(pluginMatch[1])
           }
           
-          if (lastMatch) {
-            defaultExportName = lastMatch[3]
+          // If we found matches, use the last one (should be the main plugin class)
+          if (matches.length > 0) {
+            defaultExportName = matches[matches.length - 1]
+          } else {
+            // Fallback: try a simpler pattern for non-minified code
+            const simplePattern = /class\s+(\w+)\s+extends\s+Plugin\s*\{/g
+            let simpleMatch
+            let simpleMatches = []
+            while ((simpleMatch = simplePattern.exec(code)) !== null) {
+              simpleMatches.push(simpleMatch[1])
+            }
+            if (simpleMatches.length > 0) {
+              defaultExportName = simpleMatches[simpleMatches.length - 1]
+            }
           }
         }
         

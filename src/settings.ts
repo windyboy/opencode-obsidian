@@ -37,9 +37,8 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         text.onChange(async (value: string) => {
           this.plugin.settings.apiKeys.anthropic = value
           await this.plugin.saveSettings()
-          // Update provider manager
-          this.plugin.providerManager.updateProviderApiKey('anthropic', value, 
-            this.plugin.settings.model.providerID === 'anthropic' ? this.plugin.settings.model.modelID : undefined)
+          // Update provider manager with full config
+          this.updateProviderManagerConfig()
           new Notice('Anthropic API key updated')
         })
       })
@@ -55,9 +54,8 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         text.onChange(async (value: string) => {
           this.plugin.settings.apiKeys.openai = value
           await this.plugin.saveSettings()
-          // Update provider manager
-          this.plugin.providerManager.updateProviderApiKey('openai', value,
-            this.plugin.settings.model.providerID === 'openai' ? this.plugin.settings.model.modelID : undefined)
+          // Update provider manager with full config
+          this.updateProviderManagerConfig()
           new Notice('OpenAI API key updated')
         })
       })
@@ -73,9 +71,8 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         text.onChange(async (value: string) => {
           this.plugin.settings.apiKeys.google = value
           await this.plugin.saveSettings()
-          // Update provider manager
-          this.plugin.providerManager.updateProviderApiKey('google', value,
-            this.plugin.settings.model.providerID === 'google' ? this.plugin.settings.model.modelID : undefined)
+          // Update provider manager with full config
+          this.updateProviderManagerConfig()
           new Notice('Google API key updated')
         })
       })
@@ -91,17 +88,8 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         text.onChange(async (value: string) => {
           this.plugin.settings.apiKeys.zenmux = value
           await this.plugin.saveSettings()
-          // Update provider manager with full config to include baseURL
-          this.plugin.providerManager.updateConfig({
-            apiKeys: this.plugin.settings.apiKeys,
-            defaultModel: {
-              anthropic: this.plugin.settings.model.providerID === 'anthropic' ? this.plugin.settings.model.modelID : undefined,
-              openai: this.plugin.settings.model.providerID === 'openai' ? this.plugin.settings.model.modelID : undefined,
-              google: this.plugin.settings.model.providerID === 'google' ? this.plugin.settings.model.modelID : undefined,
-              zenmux: this.plugin.settings.model.providerID === 'zenmux' ? this.plugin.settings.model.modelID : undefined
-            },
-            providerOptions: this.plugin.settings.providerOptions
-          })
+          // Update provider manager with full config
+          this.updateProviderManagerConfig()
           // Clear cache and refresh model list if ZenMux is the current provider
           if (this.plugin.settings.providerID === 'zenmux') {
             this.modelCache.delete('zenmux')
@@ -117,7 +105,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
       .setDesc('Custom API endpoint for ZenMux (optional). Default: https://zenmux.ai/api/v1')
       .addText(text => {
         text.setPlaceholder('https://zenmux.ai/api/v1')
-          .setValue(this.plugin.settings.providerOptions?.zenmux?.baseURL || '')
+        .setValue(this.plugin.settings.providerOptions?.zenmux?.baseURL || '')
         text.onChange(async (value: string) => {
           // Initialize providerOptions if not exists
           if (!this.plugin.settings.providerOptions) {
@@ -137,52 +125,126 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings()
           
           // Update provider manager with new config
-          this.plugin.providerManager.updateConfig({
-            apiKeys: this.plugin.settings.apiKeys,
-            defaultModel: {
-              anthropic: this.plugin.settings.model.providerID === 'anthropic' ? this.plugin.settings.model.modelID : undefined,
-              openai: this.plugin.settings.model.providerID === 'openai' ? this.plugin.settings.model.modelID : undefined,
-              google: this.plugin.settings.model.providerID === 'google' ? this.plugin.settings.model.modelID : undefined,
-              zenmux: this.plugin.settings.model.providerID === 'zenmux' ? this.plugin.settings.model.modelID : undefined
-            },
-            providerOptions: this.plugin.settings.providerOptions
-          })
+          this.updateProviderManagerConfig()
           new Notice('ZenMux baseURL updated')
         })
       })
 
+    // Compatible Providers section
+    containerEl.createEl('h3', { text: 'Compatible Providers' })
+    containerEl.createEl('p', {
+      text: 'Providers loaded from .opencode/config.json. Configure API keys here. The config file only contains provider structure - API keys are stored securely in Obsidian settings.',
+      cls: 'setting-item-description'
+    })
+
+    // Show compatible providers loaded from config
+    if (this.plugin.settings.compatibleProviders && this.plugin.settings.compatibleProviders.length > 0) {
+      for (const provider of this.plugin.settings.compatibleProviders) {
+        new Setting(containerEl)
+          .setName(`${provider.name} (${provider.apiType})`)
+          .setDesc(`Base URL: ${provider.baseURL}${provider.defaultModel ? ` | Default Model: ${provider.defaultModel}` : ''}`)
+          .addText(text => {
+            text.setPlaceholder('Enter API key')
+              .setValue(provider.apiKey || '')
+            text.inputEl.type = 'password'
+            text.onChange(async (value: string) => {
+              provider.apiKey = value
+              // Also store in apiKeys for backward compatibility
+              this.plugin.settings.apiKeys[provider.id] = value
+              await this.plugin.saveSettings()
+              
+              // Update provider manager with full config
+              this.updateProviderManagerConfig()
+              new Notice(`${provider.name} API key updated`)
+            })
+          })
+      }
+    } else {
+      containerEl.createEl('p', {
+        text: 'No compatible providers found. Create .opencode/config.json in your vault to add providers. See the plan documentation for the config format.',
+        cls: 'setting-item-description'
+      })
+    }
+
     // Agent setting
-    new Setting(containerEl)
+    const agentSetting = new Setting(containerEl)
       .setName('Default Agent')
       .setDesc('The default agent to use for conversations')
-      .addDropdown(dropdown => dropdown
-        .addOption('assistant', 'Assistant')
-        .addOption('bootstrap', 'Bootstrap')
-        .addOption('thinking-partner', 'Thinking Partner')
-        .addOption('research-assistant', 'Research Assistant')
-        .addOption('read-only', 'Read Only')
-        .setValue(this.plugin.settings.agent)
-        .onChange(async (value) => {
-          this.plugin.settings.agent = value
-          await this.plugin.saveSettings()
-        })
+    
+    // Build agent dropdown dynamically
+    const agentDropdown = agentSetting.addDropdown(dropdown => {
+      // Default agents (fallback if no custom agents loaded)
+      const defaultAgents: Array<{ id: string; name: string }> = [
+        { id: 'assistant', name: 'Assistant' },
+        { id: 'bootstrap', name: 'Bootstrap' },
+        { id: 'thinking-partner', name: 'Thinking Partner' },
+        { id: 'research-assistant', name: 'Research Assistant' },
+        { id: 'read-only', name: 'Read Only' }
+      ]
+      
+      // Get loaded agents (filter out hidden ones)
+      const loadedAgents = this.plugin.settings.agents?.filter(a => !a.hidden) || []
+      
+      // Use loaded agents if available, otherwise use defaults
+      const agentsToShow = loadedAgents.length > 0 ? loadedAgents : defaultAgents
+      
+      // Add agents to dropdown
+      agentsToShow.forEach(agent => {
+        const displayName = ('description' in agent && agent.description)
+          ? `${agent.name} - ${agent.description}` 
+          : agent.name
+        dropdown.addOption(agent.id, displayName)
+      })
+      
+      // Set current value (ensure it exists in options)
+      const currentValue = this.plugin.settings.agent
+      if (agentsToShow.some(a => a.id === currentValue)) {
+        dropdown.setValue(currentValue)
+      } else if (agentsToShow.length > 0 && agentsToShow[0]) {
+        // If current agent not found, use first available
+        dropdown.setValue(agentsToShow[0].id)
+        this.plugin.settings.agent = agentsToShow[0].id
+        this.plugin.saveSettings()
+      }
+      
+      dropdown.onChange(async (value) => {
+        this.plugin.settings.agent = value
+        await this.plugin.saveSettings()
+      })
+    })
+    
+    // Add info message if agents are loaded from .opencode/agent/
+    if (this.plugin.settings.agents && this.plugin.settings.agents.length > 0) {
+      agentSetting.setDesc(
+        `The default agent to use for conversations. ${this.plugin.settings.agents.length} agent(s) loaded from .opencode/agent/ directory.`
       )
+    }
 
     // Default Provider setting
     containerEl.createEl('h3', { text: 'Default Settings' })
     
-    new Setting(containerEl)
+    // Build provider dropdown options including compatible providers
+    const providerDropdown = new Setting(containerEl)
       .setName('Default AI Provider')
       .setDesc('The default provider to use for new conversations')
-      .addDropdown(dropdown => dropdown
-        .addOption('anthropic', 'Anthropic (Claude)')
-        .addOption('openai', 'OpenAI (GPT)')
-        .addOption('google', 'Google (Gemini)')
-        .addOption('zenmux', 'ZenMux')
-        .setValue(this.plugin.settings.providerID)
-        .onChange(async (value) => {
+      .addDropdown(dropdown => {
+        // Add built-in providers
+        dropdown.addOption('anthropic', 'Anthropic (Claude)')
+        dropdown.addOption('openai', 'OpenAI (GPT)')
+        dropdown.addOption('google', 'Google (Gemini)')
+        dropdown.addOption('zenmux', 'ZenMux')
+        
+        // Add compatible providers
+        if (this.plugin.settings.compatibleProviders && this.plugin.settings.compatibleProviders.length > 0) {
+          for (const provider of this.plugin.settings.compatibleProviders) {
+            dropdown.addOption(provider.id, `${provider.name} (${provider.apiType})`)
+          }
+        }
+        
+        dropdown.setValue(this.plugin.settings.providerID)
+        dropdown.onChange(async (value) => {
           const oldProviderID = this.plugin.settings.providerID
-          this.plugin.settings.providerID = value as 'anthropic' | 'openai' | 'google' | 'zenmux'
+          this.plugin.settings.providerID = value
           
           // If model provider doesn't match new provider, set to default model
           if (this.plugin.settings.model.providerID !== value) {
@@ -201,7 +263,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
           
           new Notice('Default provider updated')
         })
-      )
+      })
 
     // Model ID setting with dropdown
     this.createModelSetting(containerEl).catch(error => {
@@ -245,6 +307,13 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
    * Get default model ID for a provider
    */
   private getDefaultModelForProvider(providerID: string): string {
+    // Check if it's a compatible provider with a default model
+    const compatibleProvider = this.plugin.settings.compatibleProviders?.find(p => p.id === providerID)
+    if (compatibleProvider?.defaultModel) {
+      return compatibleProvider.defaultModel
+    }
+    
+    // Built-in providers
     switch (providerID) {
       case 'anthropic':
         return 'claude-3-5-sonnet-20241022'
@@ -255,6 +324,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
       case 'zenmux':
         return 'x-ai/grok-code-fast-1'
       default:
+        // Fallback for unknown providers
         return 'claude-3-5-sonnet-20241022'
     }
   }
@@ -263,14 +333,46 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
    * Update ProviderManager with current model settings
    */
   private async updateProviderManagerModel(providerID: string, modelID: string) {
+    this.updateProviderManagerConfig(providerID, modelID)
+  }
+
+  /**
+   * Update ProviderManager with full configuration
+   */
+  private updateProviderManagerConfig(providerID?: string, modelID?: string) {
+    const effectiveProviderID = providerID || this.plugin.settings.model.providerID
+    const effectiveModelID = modelID || this.plugin.settings.model.modelID
+    
+    // Build defaultModel object including compatible providers
+    const defaultModel: Record<string, string | undefined> = {
+      anthropic: effectiveProviderID === 'anthropic' ? effectiveModelID : undefined,
+      openai: effectiveProviderID === 'openai' ? effectiveModelID : undefined,
+      google: effectiveProviderID === 'google' ? effectiveModelID : undefined,
+      zenmux: effectiveProviderID === 'zenmux' ? effectiveModelID : undefined
+    }
+    
+    // Add default models for compatible providers
+    if (this.plugin.settings.compatibleProviders) {
+      for (const provider of this.plugin.settings.compatibleProviders) {
+        if (provider.defaultModel) {
+          defaultModel[provider.id] = effectiveProviderID === provider.id ? effectiveModelID : provider.defaultModel
+        } else {
+          defaultModel[provider.id] = effectiveProviderID === provider.id ? effectiveModelID : undefined
+        }
+      }
+    }
+    
     this.plugin.providerManager.updateConfig({
       apiKeys: this.plugin.settings.apiKeys,
-      defaultModel: {
-        anthropic: providerID === 'anthropic' ? modelID : undefined,
-        openai: providerID === 'openai' ? modelID : undefined,
-        google: providerID === 'google' ? modelID : undefined,
-        zenmux: providerID === 'zenmux' ? modelID : undefined
-      },
+      compatibleProviders: this.plugin.settings.compatibleProviders?.map(p => ({
+        id: p.id,
+        name: p.name,
+        apiKey: p.apiKey,
+        baseURL: p.baseURL,
+        apiType: p.apiType,
+        defaultModel: p.defaultModel
+      })),
+      defaultModel: defaultModel,
       providerOptions: this.plugin.settings.providerOptions
     })
   }

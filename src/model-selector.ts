@@ -320,13 +320,20 @@ export class ModelSelectorModal extends Modal {
   }
 
   private formatProviderName(providerID: string): string {
+    // Check if it's a compatible provider first
+    const compatibleProvider = this.plugin.settings.compatibleProviders?.find(p => p.id === providerID)
+    if (compatibleProvider) {
+      return `${compatibleProvider.name} (${compatibleProvider.apiType})`
+    }
+    
+    // Built-in providers
     const names: Record<string, string> = {
       anthropic: 'Anthropic (Claude)',
       openai: 'OpenAI (GPT)',
       google: 'Google (Gemini)',
       zenmux: 'ZenMux'
     }
-    return names[providerID] || providerID
+    return names[providerID] || providerID.charAt(0).toUpperCase() + providerID.slice(1)
   }
 
   onClose() {
