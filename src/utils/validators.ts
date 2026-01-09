@@ -7,19 +7,29 @@ import type { OpenCodeConfig, AgentFrontmatter, SkillFrontmatter } from '../conf
 
 /**
  * Validation result interface
+ * Contains the validation outcome with errors and warnings
+ * 
+ * @interface ValidationResult
  */
 export interface ValidationResult {
+  /** Whether validation passed (no errors, and no warnings if strict mode) */
   valid: boolean
+  /** Array of validation error messages */
   errors: string[]
+  /** Array of validation warning messages */
   warnings: string[]
 }
 
 /**
  * Validator configuration options
+ * 
+ * @interface ValidatorOptions
  */
 export interface ValidatorOptions {
-  strict?: boolean // If true, treat warnings as errors
-  allowEmpty?: boolean // If true, allow empty strings/arrays
+  /** If true, treat warnings as errors (validation fails if warnings present) */
+  strict?: boolean
+  /** If true, allow empty strings and arrays (otherwise they're considered invalid) */
+  allowEmpty?: boolean
 }
 
 /**
@@ -120,6 +130,22 @@ function validateProviderID(value: string | undefined, fieldName: string = 'Prov
 
 /**
  * Validate OpenCodeConfig structure
+ * 
+ * Validates the structure of an OpenCode configuration object loaded from config.json.
+ * Checks providers array and instructions array if present.
+ * 
+ * @param {unknown} config - Configuration object to validate
+ * @param {ValidatorOptions} [options] - Optional validation options
+ * @returns {ValidationResult} Validation result with errors and warnings
+ * 
+ * @example
+ * ```typescript
+ * const config = { providers: [...], instructions: [...] }
+ * const result = validateOpenCodeConfig(config)
+ * if (!result.valid) {
+ *   console.error('Validation errors:', result.errors)
+ * }
+ * ```
  */
 export function validateOpenCodeConfig(config: unknown, options?: ValidatorOptions): ValidationResult {
   const errors: string[] = []
@@ -172,7 +198,14 @@ export function validateOpenCodeConfig(config: unknown, options?: ValidatorOptio
 }
 
 /**
- * Validate provider configuration (from config.json)
+ * Validate provider configuration from config.json
+ * 
+ * Validates a provider configuration object including required fields,
+ * URL format, API type, and model format.
+ * 
+ * @param {unknown} provider - Provider configuration object to validate
+ * @param {ValidatorOptions} [options] - Optional validation options
+ * @returns {ValidationResult} Validation result with errors and warnings
  */
 export function validateProviderConfig(provider: unknown, options?: ValidatorOptions): ValidationResult {
   const errors: string[] = []
@@ -230,7 +263,14 @@ export function validateProviderConfig(provider: unknown, options?: ValidatorOpt
 }
 
 /**
- * Validate CompatibleProvider (with API key)
+ * Validate CompatibleProvider with API key
+ * 
+ * Validates a complete CompatibleProvider object including API key.
+ * This is used for providers that are fully configured and ready to use.
+ * 
+ * @param {CompatibleProvider} provider - Compatible provider object to validate
+ * @param {ValidatorOptions} [options] - Optional validation options
+ * @returns {ValidationResult} Validation result with errors and warnings
  */
 export function validateCompatibleProvider(provider: CompatibleProvider, options?: ValidatorOptions): ValidationResult {
   const errors: string[] = []
@@ -267,6 +307,13 @@ export function validateCompatibleProvider(provider: CompatibleProvider, options
 
 /**
  * Validate AgentFrontmatter structure
+ * 
+ * Validates YAML frontmatter parsed from an agent markdown file.
+ * Checks all optional fields including model format, tools structure, skills, and color.
+ * 
+ * @param {unknown} frontmatter - Agent frontmatter object to validate
+ * @param {ValidatorOptions} [options] - Optional validation options
+ * @returns {ValidationResult} Validation result with errors and warnings
  */
 export function validateAgentFrontmatter(frontmatter: unknown, options?: ValidatorOptions): ValidationResult {
   const errors: string[] = []
@@ -357,6 +404,13 @@ export function validateAgentFrontmatter(frontmatter: unknown, options?: Validat
 
 /**
  * Validate Agent structure
+ * 
+ * Validates a complete Agent object including required fields (id, name, systemPrompt),
+ * model structure, tools configuration, skills array, and optional fields.
+ * 
+ * @param {Agent} agent - Agent object to validate
+ * @param {ValidatorOptions} [options] - Optional validation options
+ * @returns {ValidationResult} Validation result with errors and warnings
  */
 export function validateAgent(agent: Agent, options?: ValidatorOptions): ValidationResult {
   const errors: string[] = []
@@ -439,6 +493,13 @@ export function validateAgent(agent: Agent, options?: ValidatorOptions): Validat
 
 /**
  * Validate SkillFrontmatter structure
+ * 
+ * Validates YAML frontmatter parsed from a skill markdown file.
+ * Skills have simpler structure than agents - only name and description.
+ * 
+ * @param {unknown} frontmatter - Skill frontmatter object to validate
+ * @param {ValidatorOptions} [options] - Optional validation options
+ * @returns {ValidationResult} Validation result with errors and warnings
  */
 export function validateSkillFrontmatter(frontmatter: unknown, options?: ValidatorOptions): ValidationResult {
   const errors: string[] = []
@@ -479,6 +540,13 @@ export function validateSkillFrontmatter(frontmatter: unknown, options?: Validat
 
 /**
  * Validate Skill structure
+ * 
+ * Validates a complete Skill object including required fields (id, name, content)
+ * and optional description field.
+ * 
+ * @param {Skill} skill - Skill object to validate
+ * @param {ValidatorOptions} [options] - Optional validation options
+ * @returns {ValidationResult} Validation result with errors and warnings
  */
 export function validateSkill(skill: Skill, options?: ValidatorOptions): ValidationResult {
   const errors: string[] = []
@@ -510,7 +578,20 @@ export function validateSkill(skill: Skill, options?: ValidatorOptions): Validat
 }
 
 /**
- * Helper function to format validation result as a readable string
+ * Format validation result as a readable string
+ * 
+ * Converts a ValidationResult object into a human-readable string format
+ * with checkmarks/crosses and formatted error/warning lists.
+ * 
+ * @param {ValidationResult} result - Validation result to format
+ * @returns {string} Formatted string representation of the validation result
+ * 
+ * @example
+ * ```typescript
+ * const result = validateAgent(agent)
+ * console.log(formatValidationResult(result))
+ * // Output: "✓ Validation passed" or "✗ Validation failed\nErrors:\n  - ..."
+ * ```
  */
 export function formatValidationResult(result: ValidationResult): string {
   const parts: string[] = []

@@ -1,6 +1,8 @@
 import { TFile, Vault, TFolder } from 'obsidian'
 import type { CompatibleProvider, Agent, Skill } from './types'
 import * as yaml from 'js-yaml'
+import { SECURITY_CONFIG } from './utils/constants'
+import { validateOpenCodeConfig, validateProviderConfig, validateAgent, validateAgentFrontmatter, validateSkill, validateSkillFrontmatter } from './utils/validators'
 
 export interface OpenCodeConfig {
   providers?: Array<{
@@ -71,6 +73,104 @@ export class ConfigLoader {
   }
 
   /**
+   * Validate file path to prevent path traversal attacks
+   * Returns true if path is safe, false otherwise
+   */
+  private validateFilePath(path: string): boolean {
+    // Check path length
+    if (path.length > SECURITY_CONFIG.MAX_FILE_PATH_LENGTH) {
+      console.warn(`[ConfigLoader] File path too long: ${path.length} characters (max: ${SECURITY_CONFIG.MAX_FILE_PATH_LENGTH})`)
+      return false
+    }
+
+    // Normalize path and check for path traversal attempts
+    // Paths should not contain '..', should not start with '/' (absolute paths), 
+    // and should not contain null bytes or other dangerous characters
+    if (path.includes('..') || path.startsWith('/') || path.includes('\0')) {
+      console.warn(`[ConfigLoader] Unsafe file path detected: ${path}`)
+      return false
+    }
+
+    // Additional check: ensure path doesn't escape vault root using backslashes (Windows)
+    const normalizedPath = path.replace(/\\/g, '/')
+    if (normalizedPath.includes('../') || normalizedPath.startsWith('../')) {
+      console.warn(`[ConfigLoader] Path traversal attempt detected: ${path}`)
+      return false
+    }
+
+    return true
+  }
+
+  /**
+   * Validate file size before reading
+   * Returns true if file size is acceptable, false otherwise
+   */
+  private validateFileSize(file: TFile, maxSize: number): boolean {
+    const fileSize = file.stat.size
+    if (fileSize > maxSize) {
+      console.warn(`[ConfigLoader] File too large: ${file.path} (${fileSize} bytes, max: ${maxSize} bytes)`)
+      return false
+    }
+    return true
+  }
+
+  /**
+   * Validate JSON structure depth and complexity to prevent DoS attacks
+   * Returns true if JSON is safe, false otherwise
+   */
+  private validateJsonStructure(obj: unknown, depth: number = 0, propertyCount: { count: number } = { count: 0 }): boolean {
+    // Check depth
+    if (depth > SECURITY_CONFIG.MAX_JSON_DEPTH) {
+      console.warn(`[ConfigLoader] JSON structure too deep: ${depth} levels (max: ${SECURITY_CONFIG.MAX_JSON_DEPTH})`)
+      return false
+    }
+
+    // Check property count
+    if (propertyCount.count > SECURITY_CONFIG.MAX_JSON_PROPERTIES) {
+      console.warn(`[ConfigLoader] JSON structure too complex: ${propertyCount.count} properties (max: ${SECURITY_CONFIG.MAX_JSON_PROPERTIES})`)
+      return false
+    }
+
+    // Validate strings
+    if (typeof obj === 'string') {
+      if (obj.length > SECURITY_CONFIG.MAX_JSON_STRING_LENGTH) {
+        console.warn(`[ConfigLoader] JSON string too long: ${obj.length} characters (max: ${SECURITY_CONFIG.MAX_JSON_STRING_LENGTH})`)
+        return false
+      }
+      return true
+    }
+
+    // Validate arrays
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        propertyCount.count++
+        if (!this.validateJsonStructure(item, depth + 1, propertyCount)) {
+          return false
+        }
+      }
+      return true
+    }
+
+    // Validate objects
+    if (obj && typeof obj === 'object') {
+      for (const key in obj) {
+        propertyCount.count++
+        if (propertyCount.count > SECURITY_CONFIG.MAX_JSON_PROPERTIES) {
+          return false
+        }
+        const value = (obj as Record<string, unknown>)[key]
+        if (!this.validateJsonStructure(value, depth + 1, propertyCount)) {
+          return false
+        }
+      }
+      return true
+    }
+
+    // Primitive types (number, boolean, null) are safe
+    return true
+  }
+
+  /**
    * Strip comments from JSONC content
    */
   private stripJsoncComments(content: string): string {
@@ -86,6 +186,7 @@ export class ConfigLoader {
   /**
    * Load full config from configuration files in priority order
    * Checks files in CONFIG_FILE_PRIORITY order and returns the first found
+   * Includes security validations: file path, file size, and JSON structure
    */
   async loadConfig(): Promise<OpenCodeConfig | null> {
     try {
@@ -93,6 +194,11 @@ export class ConfigLoader {
       let configFile: TFile | null = null
       
       for (const configPath of ConfigLoader.CONFIG_FILE_PRIORITY) {
+        // Validate file path
+        if (!this.validateFilePath(configPath)) {
+          continue
+        }
+
         const file = this.vault.getAbstractFileByPath(configPath)
         if (file instanceof TFile) {
           configFile = file
@@ -102,6 +208,11 @@ export class ConfigLoader {
 
       if (!configFile) {
         console.log('[ConfigLoader] No opencode config file found (checked:', ConfigLoader.CONFIG_FILE_PRIORITY.join(', '), ')')
+        return null
+      }
+
+      // Validate file size
+      if (!this.validateFileSize(configFile, SECURITY_CONFIG.MAX_CONFIG_FILE_SIZE)) {
         return null
       }
 
@@ -116,23 +227,40 @@ export class ConfigLoader {
         ? this.stripJsoncComments(content)
         : content
       
-      const config: OpenCodeConfig = JSON.parse(processedContent)
-      
-      // Validate config structure
-      if (!config || typeof config !== 'object') {
-        console.warn(`[ConfigLoader] Invalid config file format: ${configFile.path}`)
+      let config: OpenCodeConfig
+      try {
+        config = JSON.parse(processedContent)
+      } catch (parseError) {
+        if (parseError instanceof SyntaxError) {
+          console.error(`[ConfigLoader] Invalid JSON in config file ${configFile.path}: ${parseError.message}`)
+        } else {
+          console.error(`[ConfigLoader] Error parsing JSON in config file ${configFile.path}:`, parseError)
+        }
         return null
+      }
+      
+      // Validate JSON structure (depth, complexity)
+      if (!this.validateJsonStructure(config)) {
+        console.warn(`[ConfigLoader] JSON structure validation failed for ${configFile.path}`)
+        return null
+      }
+      
+      // Validate config using validator
+      const validationResult = validateOpenCodeConfig(config, { strict: false })
+      if (!validationResult.valid) {
+        console.warn(`[ConfigLoader] Config validation failed for ${configFile.path}:`)
+        validationResult.errors.forEach(error => console.warn(`  - ${error}`))
+        validationResult.warnings.forEach(warning => console.warn(`  - ${warning}`))
+        // Continue loading even with warnings, but fail on errors
+        if (validationResult.errors.length > 0) {
+          return null
+        }
       }
       
       console.log(`[ConfigLoader] Loaded config from ${configFile.path}`)
       return config
     } catch (error) {
-      // Handle JSON parse errors specifically
-      if (error instanceof SyntaxError) {
-        console.error('[ConfigLoader] Invalid JSON in config file:', error.message)
-      } else {
-        console.error('[ConfigLoader] Error loading config:', error)
-      }
+      console.error('[ConfigLoader] Error loading config:', error)
       return null
     }
   }
@@ -150,9 +278,11 @@ export class ConfigLoader {
     const compatibleProviders: CompatibleProvider[] = []
     
     for (const providerConfig of config.providers) {
-      // Validate required fields
-      if (!providerConfig.baseURL || !providerConfig.apiType || !providerConfig.id) {
-        console.warn(`[ConfigLoader] Skipping invalid provider config: missing required fields`, providerConfig)
+      // Validate provider config using validator
+      const validationResult = validateProviderConfig(providerConfig, { strict: false })
+      if (!validationResult.valid) {
+        console.warn(`[ConfigLoader] Skipping invalid provider config:`, providerConfig)
+        validationResult.errors.forEach(error => console.warn(`  - ${error}`))
         continue
       }
       
@@ -239,10 +369,28 @@ export class ConfigLoader {
 
   /**
    * Parse an agent file (markdown with YAML frontmatter)
+   * Includes validation of frontmatter and agent structure
    */
   private parseAgentFile(content: string, filename: string): Agent | null {
     try {
+      // Validate filename path
+      if (!this.validateFilePath(filename)) {
+        console.warn(`[ConfigLoader] Invalid agent filename: ${filename}`)
+        return null
+      }
+
       const { frontmatter, body } = this.parseYamlFrontmatter<AgentFrontmatter>(content)
+      
+      // Validate frontmatter
+      const frontmatterValidation = validateAgentFrontmatter(frontmatter, { strict: false })
+      if (!frontmatterValidation.valid && frontmatterValidation.errors.length > 0) {
+        console.warn(`[ConfigLoader] Agent frontmatter validation failed for ${filename}:`)
+        frontmatterValidation.errors.forEach(error => console.warn(`  - ${error}`))
+        // Continue parsing even with warnings, but skip on critical errors
+        if (frontmatterValidation.errors.some(e => e.includes('must be') && !e.includes('cannot be empty'))) {
+          return null
+        }
+      }
       
       // Extract agent ID from filename (remove .md extension)
       const id = filename.replace(/\.md$/, '')
@@ -305,6 +453,17 @@ export class ConfigLoader {
         mode: frontmatter.mode
       }
       
+      // Validate agent structure
+      const agentValidation = validateAgent(agent, { strict: false })
+      if (!agentValidation.valid) {
+        console.warn(`[ConfigLoader] Agent validation failed for ${filename}:`)
+        agentValidation.errors.forEach(error => console.warn(`  - ${error}`))
+        // Return null on validation errors (these are critical)
+        if (agentValidation.errors.length > 0) {
+          return null
+        }
+      }
+      
       return agent
     } catch (error) {
       console.warn(`[ConfigLoader] Failed to parse agent file ${filename}:`, error)
@@ -314,10 +473,24 @@ export class ConfigLoader {
 
   /**
    * Parse a skill file (markdown with YAML frontmatter)
+   * Includes validation of frontmatter and skill structure
    */
   private parseSkillFile(content: string, skillDirName: string): Skill | null {
     try {
+      // Validate directory name path
+      if (!this.validateFilePath(skillDirName)) {
+        console.warn(`[ConfigLoader] Invalid skill directory name: ${skillDirName}`)
+        return null
+      }
+
       const { frontmatter, body } = this.parseYamlFrontmatter<SkillFrontmatter>(content)
+      
+      // Validate frontmatter
+      const frontmatterValidation = validateSkillFrontmatter(frontmatter, { strict: false })
+      if (!frontmatterValidation.valid && frontmatterValidation.errors.length > 0) {
+        console.warn(`[ConfigLoader] Skill frontmatter validation failed for ${skillDirName}:`)
+        frontmatterValidation.errors.forEach(error => console.warn(`  - ${error}`))
+      }
       
       // Use directory name as skill ID
       const id = skillDirName
@@ -332,6 +505,17 @@ export class ConfigLoader {
         name,
         description: frontmatter.description,
         content: body
+      }
+      
+      // Validate skill structure
+      const skillValidation = validateSkill(skill, { strict: false })
+      if (!skillValidation.valid) {
+        console.warn(`[ConfigLoader] Skill validation failed for ${skillDirName}:`)
+        skillValidation.errors.forEach(error => console.warn(`  - ${error}`))
+        // Return null on validation errors (these are critical)
+        if (skillValidation.errors.length > 0) {
+          return null
+        }
       }
       
       return skill
@@ -370,6 +554,15 @@ export class ConfigLoader {
         }
         
         try {
+          // Validate file path and size
+          if (!this.validateFilePath(skillFile.path)) {
+            console.warn(`[ConfigLoader] Invalid skill file path: ${skillFile.path}`)
+            continue
+          }
+          if (!this.validateFileSize(skillFile, SECURITY_CONFIG.MAX_SKILL_FILE_SIZE)) {
+            continue
+          }
+
           const content = await this.vault.read(skillFile)
           const skill = this.parseSkillFile(content, child.name)
           
@@ -410,6 +603,15 @@ export class ConfigLoader {
         if (!(file instanceof TFile)) continue
         
         try {
+          // Validate file path and size
+          if (!this.validateFilePath(file.path)) {
+            console.warn(`[ConfigLoader] Invalid agent file path: ${file.path}`)
+            continue
+          }
+          if (!this.validateFileSize(file, SECURITY_CONFIG.MAX_AGENT_FILE_SIZE)) {
+            continue
+          }
+
           const content = await this.vault.read(file)
           const agent = this.parseAgentFile(content, file.name)
           
@@ -531,7 +733,12 @@ export class ConfigLoader {
           filesToLoad.push(...matchedFiles)
           console.log(`[ConfigLoader] Glob pattern "${pattern}" matched ${matchedFiles.length} file(s)`)
         } else {
-          // Direct file path
+          // Direct file path - validate path first
+          if (!this.validateFilePath(pattern)) {
+            console.warn(`[ConfigLoader] Invalid instruction file path: ${pattern}`)
+            continue
+          }
+
           const file = this.vault.getAbstractFileByPath(pattern)
           if (file instanceof TFile) {
             filesToLoad.push(file)
@@ -549,6 +756,15 @@ export class ConfigLoader {
       // Load and cache file contents
       for (const file of uniqueFiles) {
         try {
+          // Validate file path and size
+          if (!this.validateFilePath(file.path)) {
+            console.warn(`[ConfigLoader] Invalid instruction file path: ${file.path}`)
+            continue
+          }
+          if (!this.validateFileSize(file, SECURITY_CONFIG.MAX_INSTRUCTION_FILE_SIZE)) {
+            continue
+          }
+
           // Check cache first
           const cached = this.instructionCache.get(file.path)
           const fileStat = file.stat
@@ -562,6 +778,13 @@ export class ConfigLoader {
           } else {
             // Load and cache
             content = await this.vault.read(file)
+            
+            // Validate content size (additional check after reading)
+            if (content.length > SECURITY_CONFIG.MAX_INSTRUCTION_FILE_SIZE) {
+              console.warn(`[ConfigLoader] Instruction file content too large: ${file.path} (${content.length} bytes, max: ${SECURITY_CONFIG.MAX_INSTRUCTION_FILE_SIZE} bytes)`)
+              continue
+            }
+
             this.instructionCache.set(file.path, {
               content,
               path: file.path,

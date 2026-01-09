@@ -9,7 +9,10 @@
     "version": "node version-bump.mjs && git add manifest.json versions.json",
     "lint": "eslint .",
     "debug": "node scripts/debug.js",
-    "check": "tsc -noEmit -skipLibCheck"
+    "check": "tsc -noEmit -skipLibCheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui"
   },
   "keywords": [
     "obsidian",
@@ -31,13 +34,15 @@
     "@eslint/js": "^9.30.1",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^16.11.6",
+    "@vitest/ui": "^4.0.16",
     "esbuild": "^0.24.0",
     "eslint-plugin-obsidianmd": "^0.1.9",
     "globals": "^14.0.0",
     "jiti": "^2.6.1",
     "tslib": "^2.4.0",
     "typescript": "^5.8.3",
-    "typescript-eslint": "^8.35.1"
+    "typescript-eslint": "^8.35.1",
+    "vitest": "^4.0.16"
   },
   "packageManager": "pnpm@9.15.4"
 }
