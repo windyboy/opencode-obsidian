@@ -60,6 +60,31 @@ export interface OpenCodeObsidianSettings {
   agents?: Agent[] // Loaded agents from .opencode/agent/*.md
   skills?: Skill[] // Loaded skills from .opencode/skill/{skill-name}/SKILL.md
   instructions?: string[] // Instruction file paths or glob patterns (can be set via UI or loaded from config.json)
+  
+  // Hook configuration
+  disabledHooks?: string[]
+  
+  // Context management configuration
+  contextManagement?: {
+    preemptiveCompactionThreshold?: number // Default 0.85 (85%)
+    maxContextTokens?: number // Default 50000
+    enableTokenEstimation?: boolean // Default true
+  }
+  
+  // TODO management configuration
+  todoManagement?: {
+    enabled?: boolean // Default true
+    autoContinue?: boolean // Default true
+    respectUserInterrupt?: boolean // Default true
+  }
+  
+  // MCP configuration
+  mcpServers?: {
+    [serverName: string]: {
+      enabled: boolean
+      config: Record<string, unknown>
+    }
+  }
 }
 
 export interface Message {
@@ -106,3 +131,7 @@ export interface ModelInfo {
 }
 
 // ServerEvent removed - no longer needed for embedded client
+
+// Hook system types
+export type { Hook, HookContext, HookResult } from './hooks/types'
+export { HookEvent } from './hooks/types'

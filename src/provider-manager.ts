@@ -1,4 +1,6 @@
-import { EmbeddedAIClient, type ResponseChunk } from './embedded-ai-client'
+import { EmbeddedAIClient, type ResponseChunk, type ProviderType, type CompatibleApiType } from './embedded-ai-client'
+import { ErrorHandler, ErrorSeverity } from './utils/error-handler'
+import { UI_CONFIG } from './utils/constants'
 
 export type ProviderID = 'anthropic' | 'openai' | 'google' | 'zenmux' | string
 
@@ -7,7 +9,7 @@ export interface CompatibleProviderConfig {
   name: string
   apiKey: string
   baseURL: string
-  apiType: 'openai-compatible' | 'anthropic-compatible'
+  apiType: CompatibleApiType
   defaultModel?: string
 }
 
@@ -35,13 +37,100 @@ export interface ProviderConfig {
   }
 }
 
+interface CachedModelList {
+  models: Array<{ id: string; name?: string }>
+  timestamp: number
+}
+
 export class ProviderManager {
   private clients: Map<ProviderID, EmbeddedAIClient> = new Map()
   private config: ProviderConfig
+  private errorHandler: ErrorHandler
+  private modelCache: Map<ProviderID, CachedModelList> = new Map()
+  private pendingFetches: Map<ProviderID, Promise<Array<{ id: string; name?: string }>>> = new Map()
+  private lastFetchTime: Map<ProviderID, number> = new Map()
 
-  constructor(config: ProviderConfig) {
+  constructor(config: ProviderConfig, errorHandler?: ErrorHandler) {
     this.config = config
+    this.errorHandler = errorHandler || new ErrorHandler()
     this.initializeAvailableProviders()
+  }
+
+  /**
+   * Create an EmbeddedAIClient for a given provider
+   * This factory method centralizes the client creation logic to eliminate duplication
+   */
+  private createProviderClient(
+    providerID: ProviderID,
+    apiKey: string,
+    options?: { model?: string; baseURL?: string }
+  ): EmbeddedAIClient | null {
+    // Check if it's a compatible provider
+    const compatibleProvider = this.config.compatibleProviders?.find(p => p.id === providerID)
+    
+    if (compatibleProvider) {
+      // Create compatible provider client
+      try {
+        const model = options?.model || this.config.defaultModel?.[providerID] || compatibleProvider.defaultModel
+        return new EmbeddedAIClient({
+          apiKey: apiKey,
+          provider: 'compatible',
+          model: model,
+          baseURL: compatibleProvider.baseURL,
+          apiType: compatibleProvider.apiType,
+          providerId: compatibleProvider.id,
+          providerName: compatibleProvider.name
+        }, this.errorHandler)
+      } catch (error) {
+        this.errorHandler.handleError(error, {
+          module: 'ProviderManager',
+          function: 'createProviderClient',
+          operation: `Creating compatible provider client: ${providerID}`,
+          metadata: { providerID, providerType: 'compatible' }
+        }, ErrorSeverity.Error)
+        return null
+      }
+    }
+    
+    // Create built-in provider client
+    const builtInProvider = providerID as 'anthropic' | 'openai' | 'google' | 'zenmux'
+    if (!['anthropic', 'openai', 'google', 'zenmux'].includes(providerID)) {
+      this.errorHandler.handleError(
+        new Error(`Unknown provider type: ${providerID}`),
+        {
+          module: 'ProviderManager',
+          function: 'createProviderClient',
+          operation: 'Validating provider type',
+          metadata: { providerID }
+        },
+        ErrorSeverity.Warning
+      )
+      return null
+    }
+    
+    try {
+      const model = options?.model || this.config.defaultModel?.[providerID]
+      // Get baseURL from config if available, otherwise use default for ZenMux
+      let baseURL: string | undefined = options?.baseURL
+      if (!baseURL && providerID === 'zenmux') {
+        baseURL = this.config.providerOptions?.zenmux?.baseURL || 'https://zenmux.ai/api/v1'
+      }
+      
+      return new EmbeddedAIClient({
+        apiKey: apiKey,
+        provider: builtInProvider,
+        model: model,
+        baseURL: baseURL
+      }, this.errorHandler)
+    } catch (error) {
+      this.errorHandler.handleError(error, {
+        module: 'ProviderManager',
+        function: 'createProviderClient',
+        operation: `Creating built-in provider client: ${providerID}`,
+        metadata: { providerID, providerType: 'built-in' }
+      }, ErrorSeverity.Error)
+      return null
+    }
   }
 
   /**
@@ -54,22 +143,13 @@ export class ProviderManager {
     for (const provider of providers) {
       const apiKey = this.config.apiKeys[provider]
       if (apiKey && apiKey.trim() !== '') {
-        try {
-          const model = this.config.defaultModel?.[provider]
-          // Get baseURL from config if available, otherwise use default for ZenMux
-          let baseURL: string | undefined = undefined
-          if (provider === 'zenmux') {
-            baseURL = this.config.providerOptions?.zenmux?.baseURL || 'https://zenmux.ai/api/v1'
-          }
-          this.clients.set(provider, new EmbeddedAIClient({
-            apiKey: apiKey,
-            provider: provider as 'anthropic' | 'openai' | 'google' | 'zenmux',
-            model: model,
-            baseURL: baseURL
-          }))
+        const client = this.createProviderClient(provider, apiKey)
+        if (client) {
+          this.clients.set(provider, client)
+          const baseURL = provider === 'zenmux' 
+            ? (this.config.providerOptions?.zenmux?.baseURL || 'https://zenmux.ai/api/v1')
+            : undefined
           console.log(`[ProviderManager] Initialized ${provider} client${baseURL ? ` with baseURL: ${baseURL}` : ''}`)
-        } catch (error) {
-          console.error(`[ProviderManager] Failed to initialize ${provider}:`, error)
         }
       }
     }
@@ -83,21 +163,10 @@ export class ProviderManager {
           continue
         }
         
-        try {
-          const model = this.config.defaultModel?.[compatibleProvider.id] || compatibleProvider.defaultModel
-          
-          this.clients.set(compatibleProvider.id, new EmbeddedAIClient({
-            apiKey: compatibleProvider.apiKey,
-            provider: 'compatible' as any,
-            model: model,
-            baseURL: compatibleProvider.baseURL,
-            apiType: compatibleProvider.apiType,
-            providerId: compatibleProvider.id,
-            providerName: compatibleProvider.name
-          }))
+        const client = this.createProviderClient(compatibleProvider.id, compatibleProvider.apiKey)
+        if (client) {
+          this.clients.set(compatibleProvider.id, client)
           console.log(`[ProviderManager] Initialized compatible provider ${compatibleProvider.name} (${compatibleProvider.id}) with baseURL: ${compatibleProvider.baseURL}, apiType: ${compatibleProvider.apiType}`)
-        } catch (error) {
-          console.error(`[ProviderManager] Failed to initialize compatible provider ${compatibleProvider.id}:`, error)
         }
       }
     }
@@ -130,49 +199,34 @@ export class ProviderManager {
   updateProviderApiKey(providerID: ProviderID, apiKey: string, model?: string) {
     this.config.apiKeys[providerID] = apiKey
     
+    // Clear model cache when API key changes
+    this.clearModelCache(providerID)
+    
     // Remove existing client if API key is empty
     if (!apiKey || apiKey.trim() === '') {
       this.clients.delete(providerID)
       return
     }
 
-    // Create or update client
-    try {
-      // Check if it's a compatible provider
-      const compatibleProvider = this.config.compatibleProviders?.find(p => p.id === providerID)
-      
+    // Update API key in config for compatible providers
+    const compatibleProvider = this.config.compatibleProviders?.find(p => p.id === providerID)
+    if (compatibleProvider) {
+      compatibleProvider.apiKey = apiKey
+    }
+    
+    // Create or update client using factory method
+    const client = this.createProviderClient(providerID, apiKey, { model, baseURL: compatibleProvider?.baseURL })
+    if (client) {
+      this.clients.set(providerID, client)
       if (compatibleProvider) {
-        // Update compatible provider
-        compatibleProvider.apiKey = apiKey
-        const client = new EmbeddedAIClient({
-          apiKey: apiKey,
-          provider: 'compatible' as any,
-          model: model || this.config.defaultModel?.[providerID] || compatibleProvider.defaultModel,
-          baseURL: compatibleProvider.baseURL,
-          apiType: compatibleProvider.apiType,
-          providerId: compatibleProvider.id,
-          providerName: compatibleProvider.name
-        })
-        this.clients.set(providerID, client)
         console.log(`[ProviderManager] Updated compatible provider ${compatibleProvider.name} (${providerID}) client`)
       } else {
-        // Update built-in provider
-        // Get baseURL from config if available, otherwise use default for ZenMux
-        let baseURL: string | undefined = undefined
-        if (providerID === 'zenmux') {
-          baseURL = this.config.providerOptions?.zenmux?.baseURL || 'https://zenmux.ai/api/v1'
-        }
-        const client = new EmbeddedAIClient({
-          apiKey: apiKey,
-          provider: providerID as 'anthropic' | 'openai' | 'google' | 'zenmux',
-          model: model || this.config.defaultModel?.[providerID],
-          baseURL: baseURL
-        })
-        this.clients.set(providerID, client)
+        const baseURL = providerID === 'zenmux' 
+          ? (this.config.providerOptions?.zenmux?.baseURL || 'https://zenmux.ai/api/v1')
+          : undefined
         console.log(`[ProviderManager] Updated ${providerID} client${baseURL ? ` with baseURL: ${baseURL}` : ''}`)
       }
-    } catch (error) {
-      console.error(`[ProviderManager] Failed to update ${providerID}:`, error)
+    } else {
       this.clients.delete(providerID)
     }
   }
@@ -187,76 +241,127 @@ export class ProviderManager {
   }
 
   /**
-   * Fetch available models for a provider
+   * Fetch available models for a provider (with caching and throttling)
    */
   async fetchModels(providerID: ProviderID): Promise<Array<{ id: string; name?: string }>> {
+    // Check cache first
+    const cached = this.modelCache.get(providerID)
+    const now = Date.now()
+    if (cached && (now - cached.timestamp) < UI_CONFIG.MODEL_FETCH_CACHE_DURATION) {
+      // Return cached result if still valid
+      return cached.models
+    }
+
+    // Throttle: If there's a pending fetch, return it instead of starting a new one
+    const pendingFetch = this.pendingFetches.get(providerID)
+    if (pendingFetch) {
+      return await pendingFetch
+    }
+
+    // Throttle: Check if enough time has passed since last fetch
+    const lastFetch = this.lastFetchTime.get(providerID) || 0
+    const timeSinceLastFetch = now - lastFetch
+    if (timeSinceLastFetch < UI_CONFIG.MODEL_FETCH_THROTTLE_DELAY) {
+      // Return cached result even if expired, to avoid too frequent requests
+      if (cached) {
+        return cached.models
+      }
+      // If no cache, wait for the remaining time and then fetch
+      await new Promise(resolve => setTimeout(resolve, UI_CONFIG.MODEL_FETCH_THROTTLE_DELAY - timeSinceLastFetch))
+    }
+
+    // Create fetch promise and cache it
+    const fetchPromise = this.fetchModelsInternal(providerID)
+    this.pendingFetches.set(providerID, fetchPromise)
+
+    try {
+      const models = await fetchPromise
+
+      // Cache the result
+      this.modelCache.set(providerID, {
+        models,
+        timestamp: Date.now()
+      })
+
+      this.lastFetchTime.set(providerID, Date.now())
+      return models
+    } finally {
+      // Clear pending fetch
+      this.pendingFetches.delete(providerID)
+    }
+  }
+
+  /**
+   * Internal method to actually fetch models (without caching/throttling)
+   */
+  private async fetchModelsInternal(providerID: ProviderID): Promise<Array<{ id: string; name?: string }>> {
     const client = this.getClient(providerID)
     if (client) {
       try {
         return await client.fetchAvailableModels()
       } catch (error) {
-        console.error(`[ProviderManager] Error fetching models from initialized client for ${providerID}:`, error)
+        this.errorHandler.handleError(error, {
+          module: 'ProviderManager',
+          function: 'fetchModelsInternal',
+          operation: `Fetching models from initialized client: ${providerID}`,
+          metadata: { providerID }
+        }, ErrorSeverity.Warning)
         // Fall through to try creating a temporary client
       }
     }
     
     // If client not initialized or fetch failed, try to create a temporary one if API key exists
-    // Check if it's a compatible provider first
     const compatibleProvider = this.config.compatibleProviders?.find(p => p.id === providerID)
+    const apiKey = compatibleProvider?.apiKey || this.config.apiKeys[providerID]
     
-    if (compatibleProvider && compatibleProvider.apiKey && compatibleProvider.apiKey.trim() !== '') {
-      try {
-        console.log(`[ProviderManager] Creating temporary compatible provider client for ${providerID}`)
-        const tempClient = new EmbeddedAIClient({
-          apiKey: compatibleProvider.apiKey,
-          provider: 'compatible' as any,
-          baseURL: compatibleProvider.baseURL,
-          apiType: compatibleProvider.apiType,
-          providerId: compatibleProvider.id,
-          providerName: compatibleProvider.name
-        })
-        const models = await tempClient.fetchAvailableModels()
-        console.log(`[ProviderManager] Successfully fetched ${models.length} models for compatible provider ${providerID}`)
-        return models
-      } catch (error) {
-        console.error(`[ProviderManager] Failed to fetch models for compatible provider ${providerID}:`, error)
-        if (error instanceof Error) {
-          console.error(`[ProviderManager] Error message: ${error.message}`)
-          console.error(`[ProviderManager] Error stack: ${error.stack}`)
-        }
-        return []
-      }
-    }
-    
-    const apiKey = this.config.apiKeys[providerID]
     if (apiKey && apiKey.trim() !== '') {
       try {
-        let baseURL: string | undefined = undefined
-        if (providerID === 'zenmux') {
-          baseURL = this.config.providerOptions?.zenmux?.baseURL || 'https://zenmux.ai/api/v1'
-        }
+        const baseURL = compatibleProvider?.baseURL || 
+          (providerID === 'zenmux' ? (this.config.providerOptions?.zenmux?.baseURL || 'https://zenmux.ai/api/v1') : undefined)
         console.log(`[ProviderManager] Creating temporary client for ${providerID}${baseURL ? ` with baseURL: ${baseURL}` : ''}`)
-        const tempClient = new EmbeddedAIClient({
-          apiKey: apiKey,
-          provider: providerID as 'anthropic' | 'openai' | 'google' | 'zenmux',
-          baseURL: baseURL
-        })
-        const models = await tempClient.fetchAvailableModels()
-        console.log(`[ProviderManager] Successfully fetched ${models.length} models for ${providerID}`)
-        return models
-      } catch (error) {
-        console.error(`[ProviderManager] Failed to fetch models for ${providerID}:`, error)
-        // Log more details about the error
-        if (error instanceof Error) {
-          console.error(`[ProviderManager] Error message: ${error.message}`)
-          console.error(`[ProviderManager] Error stack: ${error.stack}`)
+        const tempClient = this.createProviderClient(providerID, apiKey, { baseURL })
+        
+        if (tempClient) {
+          const models = await tempClient.fetchAvailableModels()
+          console.log(`[ProviderManager] Successfully fetched ${models.length} models for ${providerID}`)
+          return models
         }
-        return []
+      } catch (error) {
+        this.errorHandler.handleError(error, {
+          module: 'ProviderManager',
+          function: 'fetchModelsInternal',
+          operation: `Fetching models for ${providerID}`,
+          metadata: { providerID, isTemporaryClient: true }
+        }, ErrorSeverity.Error)
       }
     }
     
-    console.warn(`[ProviderManager] No API key configured for ${providerID}`)
+    this.errorHandler.handleError(
+      new Error(`No API key configured for ${providerID}`),
+      {
+        module: 'ProviderManager',
+        function: 'fetchModelsInternal',
+        operation: 'Validating API key',
+        metadata: { providerID }
+      },
+      ErrorSeverity.Warning
+    )
     return []
+  }
+
+  /**
+   * Clear model cache for a specific provider (useful when API key changes)
+   */
+  clearModelCache(providerID?: ProviderID): void {
+    if (providerID) {
+      this.modelCache.delete(providerID)
+      this.pendingFetches.delete(providerID)
+      this.lastFetchTime.delete(providerID)
+    } else {
+      this.modelCache.clear()
+      this.pendingFetches.clear()
+      this.lastFetchTime.clear()
+    }
   }
 
   /**
@@ -289,40 +394,21 @@ export class ProviderManager {
       
       // Try to initialize on the fly
       try {
-        // Check if it's a compatible provider
         const compatibleProvider = this.config.compatibleProviders?.find(p => p.id === providerID)
+        const model = options.model?.modelID || 
+          this.config.defaultModel?.[providerID] || 
+          compatibleProvider?.defaultModel
+        const baseURL = compatibleProvider?.baseURL || 
+          (providerID === 'zenmux' ? (this.config.providerOptions?.zenmux?.baseURL || 'https://zenmux.ai/api/v1') : undefined)
         
-        if (compatibleProvider) {
-          // Initialize compatible provider
-          const model = options.model?.modelID || this.config.defaultModel?.[providerID] || compatibleProvider.defaultModel
-          const newClient = new EmbeddedAIClient({
-            apiKey: compatibleProvider.apiKey,
-            provider: 'compatible' as any,
-            model: model,
-            baseURL: compatibleProvider.baseURL,
-            apiType: compatibleProvider.apiType,
-            providerId: compatibleProvider.id,
-            providerName: compatibleProvider.name
-          })
-          this.clients.set(providerID, newClient)
-          yield* newClient.sendPrompt(prompt, options)
-          return
-        } else {
-          // Initialize built-in provider
-          let baseURL: string | undefined = undefined
-          if (providerID === 'zenmux') {
-            baseURL = this.config.providerOptions?.zenmux?.baseURL || 'https://zenmux.ai/api/v1'
-          }
-          const newClient = new EmbeddedAIClient({
-            apiKey: apiKey,
-            provider: providerID as 'anthropic' | 'openai' | 'google' | 'zenmux',
-            model: options.model?.modelID || this.config.defaultModel?.[providerID],
-            baseURL: baseURL
-          })
+        const newClient = this.createProviderClient(providerID, apiKey, { model, baseURL })
+        if (newClient) {
           this.clients.set(providerID, newClient)
           yield* newClient.sendPrompt(prompt, options)
           return
         }
+        
+        throw new Error(`Failed to create client for ${providerID}`)
       } catch (error) {
         yield {
           type: 'error',

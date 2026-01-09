@@ -5,6 +5,11 @@ import { OpenCodeObsidianView, VIEW_TYPE_OPENCODE_OBSIDIAN } from './opencode-ob
 import { OpenCodeObsidianSettingTab } from './settings'
 import type { OpenCodeObsidianSettings } from './types'
 import { ConfigLoader } from './config-loader'
+import { HookRegistry } from './hooks/hook-registry'
+import { CONTEXT_CONFIG, SESSION_CONFIG, UI_CONFIG } from './utils/constants'
+import { AgentResolver } from './agent/agent-resolver'
+import { ErrorHandler, ErrorSeverity } from './utils/error-handler'
+import { debounceAsync } from './utils/debounce-throttle'
 
 const DEFAULT_SETTINGS: OpenCodeObsidianSettings = {
   apiKeys: {},
@@ -14,19 +19,61 @@ const DEFAULT_SETTINGS: OpenCodeObsidianSettings = {
     providerID: 'anthropic',
     modelID: 'claude-3-5-sonnet-20241022'
   },
-  instructions: []
+  instructions: [],
+  disabledHooks: [],
+  contextManagement: {
+    preemptiveCompactionThreshold: CONTEXT_CONFIG.PREEMPTIVE_THRESHOLD,
+    maxContextTokens: CONTEXT_CONFIG.MAX_TOKENS,
+    enableTokenEstimation: true,
+  },
+  todoManagement: {
+    enabled: true,
+    autoContinue: true,
+    respectUserInterrupt: true,
+  },
+  mcpServers: {},
 }
 
 export default class OpenCodeObsidianPlugin extends Plugin {
   settings: OpenCodeObsidianSettings
   providerManager: ProviderManager
   configLoader: ConfigLoader | null = null
+  hookRegistry: HookRegistry
+  agentResolver: AgentResolver
+  errorHandler: ErrorHandler
 
   async onload() {
     console.log('[OpenCode Obsidian] Plugin loading...')
     
     try {
+      // Initialize error handler with Obsidian Notice integration
+      this.errorHandler = new ErrorHandler({
+        showUserNotifications: true,
+        logToConsole: true,
+        collectErrors: false,
+        notificationCallback: (message: string, severity: ErrorSeverity) => {
+          new Notice(message, severity === ErrorSeverity.Critical ? 10000 : 5000)
+        }
+      })
+      console.log('[OpenCode Obsidian] Error handler initialized')
+      
+      // Initialize hook registry first
+      this.hookRegistry = new HookRegistry(this.errorHandler)
+      console.log('[OpenCode Obsidian] Hook registry initialized')
+      
+      // Initialize agent resolver
+      this.agentResolver = new AgentResolver()
+      console.log('[OpenCode Obsidian] Agent resolver initialized')
+      
       await this.loadSettings()
+      
+      // Disable hooks as specified in settings
+      if (this.settings.disabledHooks) {
+        for (const hookId of this.settings.disabledHooks) {
+          this.hookRegistry.disableHook(hookId)
+        }
+        console.log(`[OpenCode Obsidian] Disabled hooks: ${this.settings.disabledHooks.join(', ')}`)
+      }
       
       // Migrate old settings format if needed
       this.migrateSettings()
@@ -41,14 +88,26 @@ export default class OpenCodeObsidianPlugin extends Plugin {
           try {
             await this.loadTUIFeatures()
           } catch (error) {
-            console.error('[OpenCode Obsidian] Error loading TUI features (non-fatal):', error)
+            this.errorHandler.handleError(error, {
+              module: 'OpenCodeObsidianPlugin',
+              function: 'onload.loadTUIFeatures',
+              operation: 'Loading TUI features'
+            }, ErrorSeverity.Warning)
             // Continue loading plugin even if TUI features fail to load
           }
         } else {
-          console.warn('[OpenCode Obsidian] Vault not available, skipping config loader initialization')
+          this.errorHandler.handleError(
+            new Error('Vault not available'),
+            { module: 'OpenCodeObsidianPlugin', function: 'onload', operation: 'Config loader initialization' },
+            ErrorSeverity.Warning
+          )
         }
       } catch (error) {
-        console.error('[OpenCode Obsidian] Error initializing config loader (non-fatal):', error)
+        this.errorHandler.handleError(error, {
+          module: 'OpenCodeObsidianPlugin',
+          function: 'onload',
+          operation: 'Initializing config loader'
+        }, ErrorSeverity.Warning)
         // Continue loading plugin even if config loader fails
         this.configLoader = null
       }
@@ -90,12 +149,15 @@ export default class OpenCodeObsidianPlugin extends Plugin {
           : {})
         },
         providerOptions: this.settings.providerOptions
-      })
+      }, this.errorHandler)
     
     const availableProviders = this.providerManager.getAvailableProviders()
     if (availableProviders.length === 0) {
-      console.warn('[OpenCode Obsidian] No API keys configured')
-      new Notice('Please configure at least one API key in settings')
+      this.errorHandler.handleError(
+        new Error('No API keys configured'),
+        { module: 'OpenCodeObsidianPlugin', function: 'onload', operation: 'Provider initialization' },
+        ErrorSeverity.Warning
+      )
     } else {
       console.log(`[OpenCode Obsidian] Provider manager initialized with ${availableProviders.length} provider(s): ${availableProviders.join(', ')}`)
     }
@@ -129,8 +191,16 @@ export default class OpenCodeObsidianPlugin extends Plugin {
       
       console.log('[OpenCode Obsidian] Plugin loaded successfully ✓')
     } catch (error) {
-      console.error('[OpenCode Obsidian] Failed to load plugin:', error)
-      new Notice('Failed to load OpenCode Obsidian plugin. Check console for details.')
+      if (this.errorHandler) {
+        this.errorHandler.handleError(error, {
+          module: 'OpenCodeObsidianPlugin',
+          function: 'onload',
+          operation: 'Plugin loading'
+        }, ErrorSeverity.Critical)
+      } else {
+        console.error('[OpenCode Obsidian] Failed to load plugin:', error)
+        new Notice('Failed to load OpenCode Obsidian plugin. Check console for details.')
+      }
       throw error // Re-throw to let Obsidian handle the error
     }
   }
@@ -169,7 +239,35 @@ export default class OpenCodeObsidianPlugin extends Plugin {
     if (!this.settings.skills) {
       this.settings.skills = []
     }
-    
+
+    // Ensure hook configuration exists
+    if (!this.settings.disabledHooks) {
+      this.settings.disabledHooks = []
+    }
+
+    // Ensure context management configuration exists
+    if (!this.settings.contextManagement) {
+      this.settings.contextManagement = {
+        preemptiveCompactionThreshold: CONTEXT_CONFIG.PREEMPTIVE_THRESHOLD,
+        maxContextTokens: CONTEXT_CONFIG.MAX_TOKENS,
+        enableTokenEstimation: true,
+      }
+    }
+
+    // Ensure TODO management configuration exists
+    if (!this.settings.todoManagement) {
+      this.settings.todoManagement = {
+        enabled: true,
+        autoContinue: true,
+        respectUserInterrupt: true,
+      }
+    }
+
+    // Ensure MCP servers configuration exists
+    if (!this.settings.mcpServers) {
+      this.settings.mcpServers = {}
+    }
+
     console.log('[OpenCode Obsidian] Settings loaded from storage:', loadedData)
   }
 
@@ -197,6 +295,14 @@ export default class OpenCodeObsidianPlugin extends Plugin {
   async saveSettings() {
     await this.saveData(this.settings)
   }
+
+  /**
+   * Debounced version of saveSettings for use in frequently-triggered callbacks
+   * (e.g., input field onChange handlers)
+   */
+  debouncedSaveSettings = debounceAsync(async () => {
+    await this.saveSettings()
+  }, UI_CONFIG.DEBOUNCE_DELAY)
 
   /**
    * Load TUI features from .opencode/config.json
@@ -263,6 +369,8 @@ export default class OpenCodeObsidianPlugin extends Plugin {
       if (loadedAgents.length > 0) {
         // Store loaded agents in settings
         this.settings.agents = loadedAgents
+        // Update agent resolver
+        this.agentResolver.setAgents(loadedAgents)
         console.log(`[OpenCode Obsidian] Loaded ${loadedAgents.length} agent(s) from .opencode/agent/`)
         
         // Save updated settings
@@ -273,6 +381,8 @@ export default class OpenCodeObsidianPlugin extends Plugin {
         if (!this.settings.agents) {
           this.settings.agents = []
         }
+        // Update agent resolver with existing agents
+        this.agentResolver.setAgents(this.settings.agents)
       }
 
       // Load skills from .opencode/skill/{skill-name}/SKILL.md files
@@ -281,6 +391,8 @@ export default class OpenCodeObsidianPlugin extends Plugin {
       if (loadedSkills.length > 0) {
         // Store loaded skills in settings
         this.settings.skills = loadedSkills
+        // Update agent resolver
+        this.agentResolver.setSkills(loadedSkills)
         console.log(`[OpenCode Obsidian] Loaded ${loadedSkills.length} skill(s) from .opencode/skill/`)
         
         // Save updated settings
@@ -291,7 +403,12 @@ export default class OpenCodeObsidianPlugin extends Plugin {
         if (!this.settings.skills) {
           this.settings.skills = []
         }
+        // Update agent resolver with existing skills
+        this.agentResolver.setSkills(this.settings.skills)
       }
+
+      // Update agent resolver with config loader
+      this.agentResolver.setConfigLoader(this.configLoader)
 
       // Load instructions from config.json and settings
       const instructions = await this.configLoader.loadInstructions(this.settings.instructions)
@@ -301,7 +418,11 @@ export default class OpenCodeObsidianPlugin extends Plugin {
         console.log('[OpenCode Obsidian] No instructions found in config or settings')
       }
     } catch (error) {
-      console.error('[OpenCode Obsidian] Error loading TUI features:', error)
+      this.errorHandler.handleError(error, {
+        module: 'OpenCodeObsidianPlugin',
+        function: 'loadTUIFeatures',
+        operation: 'Loading TUI features'
+      }, ErrorSeverity.Error)
     }
   }
 
@@ -356,76 +477,23 @@ export default class OpenCodeObsidianPlugin extends Plugin {
       ? defaultModel 
       : { providerID, modelID: this.settings.model.modelID }
     
-    // Look up agent by ID if provided
+    // Resolve agent configuration using AgentResolver
     const agentID = options.agent || this.settings.agent
-    let systemPrompt = options.system
-    let agentModel = finalModel
-    let agentTools = options.tools
-    
-    // Check if agent exists in loaded agents
-    if (this.settings.agents && this.settings.agents.length > 0) {
-      const agent = this.settings.agents.find(a => a.id === agentID)
-      
-      if (agent) {
-        // Use agent's system prompt
-        systemPrompt = agent.systemPrompt
-        
-        // Override model if agent has specific model
-        if (agent.model) {
-          agentModel = agent.model
-        }
-        
-        // Apply agent's tools configuration (merge with options.tools if provided)
-        if (agent.tools) {
-          agentTools = { ...agent.tools, ...(options.tools || {}) }
-        }
-        
-        // Merge referenced skills into system prompt
-        if (agent.skills && agent.skills.length > 0 && this.settings.skills) {
-          const skillContents: string[] = []
-          for (const skillId of agent.skills) {
-            const skill = this.settings.skills.find(s => s.id === skillId)
-            if (skill && skill.content) {
-              skillContents.push(`\n\n---\n# Skill: ${skill.name}\n---\n\n${skill.content}`)
-            } else {
-              console.warn(`[OpenCode Obsidian] Skill "${skillId}" referenced by agent "${agentID}" not found`)
-            }
-          }
-          if (skillContents.length > 0) {
-            systemPrompt = systemPrompt + skillContents.join('')
-          }
-        }
-      } else {
-        // Agent not found in loaded agents, fallback to default behavior
-        // Use agent ID as system prompt (legacy behavior)
-        if (!systemPrompt) {
-          systemPrompt = agentID
-        }
-      }
-    } else {
-      // No agents loaded, use legacy behavior
-      if (!systemPrompt) {
-        systemPrompt = agentID
-      }
-    }
-    
-    // Merge instructions into system prompt if available
-    if (this.configLoader) {
-      const instructions = this.configLoader.getCachedInstructions()
-      if (instructions && instructions.trim()) {
-        // Append instructions to system prompt
-        // Instructions are already formatted with separators in loadInstructions()
-        systemPrompt = systemPrompt 
-          ? `${systemPrompt}\n\n${instructions}`
-          : instructions
-      }
-    }
+    const resolvedConfig = this.agentResolver.resolveAgentConfig(
+      {
+        agentID,
+        systemPrompt: options.system,
+        model: finalModel,
+        tools: options.tools
+      },
+      finalModel
+    )
     
     const finalOptions = {
-      model: agentModel,
+      model: resolvedConfig.model,
       agent: agentID,
-      system: systemPrompt,
-      tools: agentTools,
+      system: resolvedConfig.systemPrompt,
+      tools: resolvedConfig.tools,
       ...options
     }
 

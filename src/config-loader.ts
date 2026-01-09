@@ -1,5 +1,6 @@
 import { TFile, Vault, TFolder } from 'obsidian'
 import type { CompatibleProvider, Agent, Skill } from './types'
+import * as yaml from 'js-yaml'
 
 export interface OpenCodeConfig {
   providers?: Array<{
@@ -18,10 +19,52 @@ export interface InstructionCache {
   lastModified: number
 }
 
+/**
+ * YAML frontmatter structure for Agent files
+ */
+export interface AgentFrontmatter extends Record<string, unknown> {
+  name?: string
+  description?: string
+  model?: string // Format: "providerID/modelID" or just "modelID"
+  tools?: Record<string, boolean> // Tool enablement config
+  skills?: string[] | string // Array of skill IDs or single skill ID
+  color?: string // UI color (e.g., "#38A3EE")
+  hidden?: boolean
+  mode?: string // e.g., "primary"
+}
+
+/**
+ * YAML frontmatter structure for Skill files
+ */
+export interface SkillFrontmatter extends Record<string, unknown> {
+  name?: string
+  description?: string
+}
+
+/**
+ * Parsed frontmatter result with type-safe structure
+ */
+export interface ParsedFrontmatter<T = AgentFrontmatter | SkillFrontmatter> {
+  frontmatter: T
+  body: string
+}
+
 export class ConfigLoader {
   private vault: Vault
   private instructionCache: Map<string, InstructionCache> = new Map()
   private mergedInstructions: string = '' // Cached merged instructions content
+
+  /**
+   * Configuration file paths in priority order
+   * Higher priority files are checked first
+   */
+  private static readonly CONFIG_FILE_PRIORITY = [
+    '.opencode/config.json',
+    'opencode.json',
+    '.opencode.json',
+    'opencode.jsonc',
+    '.opencode/opencode.jsonc',
+  ] as const
 
   constructor(vault: Vault) {
     this.vault = vault
@@ -41,54 +84,43 @@ export class ConfigLoader {
   }
 
   /**
-   * Load full config from .opencode/config.json, opencode.json, .opencode.json, opencode.jsonc, or .opencode/opencode.jsonc
+   * Load full config from configuration files in priority order
+   * Checks files in CONFIG_FILE_PRIORITY order and returns the first found
    */
   async loadConfig(): Promise<OpenCodeConfig | null> {
     try {
-      // Try .opencode/config.json first
-      let configFile = this.vault.getAbstractFileByPath('.opencode/config.json')
+      // Try each config file path in priority order
+      let configFile: TFile | null = null
       
-      // Fallback to opencode.json in root
-      if (!configFile || !(configFile instanceof TFile)) {
-        configFile = this.vault.getAbstractFileByPath('opencode.json')
-      }
-      
-      // Fallback to .opencode.json
-      if (!configFile || !(configFile instanceof TFile)) {
-        configFile = this.vault.getAbstractFileByPath('.opencode.json')
+      for (const configPath of ConfigLoader.CONFIG_FILE_PRIORITY) {
+        const file = this.vault.getAbstractFileByPath(configPath)
+        if (file instanceof TFile) {
+          configFile = file
+          break
+        }
       }
 
-      // Fallback to opencode.jsonc
-      if (!configFile || !(configFile instanceof TFile)) {
-        configFile = this.vault.getAbstractFileByPath('opencode.jsonc')
-      }
-
-      // Fallback to .opencode/opencode.jsonc
-      if (!configFile || !(configFile instanceof TFile)) {
-        configFile = this.vault.getAbstractFileByPath('.opencode/opencode.jsonc')
-      }
-
-      if (!configFile || !(configFile instanceof TFile)) {
-        console.log('[ConfigLoader] No opencode config file found')
+      if (!configFile) {
+        console.log('[ConfigLoader] No opencode config file found (checked:', ConfigLoader.CONFIG_FILE_PRIORITY.join(', '), ')')
         return null
       }
 
-      let content = await this.vault.read(configFile)
+      const content = await this.vault.read(configFile)
       if (!content || content.trim() === '') {
-        console.warn('[ConfigLoader] Config file is empty')
+        console.warn(`[ConfigLoader] Config file is empty: ${configFile.path}`)
         return null
       }
       
       // Strip comments if it's a JSONC file
-      if (configFile.path.endsWith('.jsonc')) {
-        content = this.stripJsoncComments(content)
-      }
+      const processedContent = configFile.path.endsWith('.jsonc')
+        ? this.stripJsoncComments(content)
+        : content
       
-      const config: OpenCodeConfig = JSON.parse(content)
+      const config: OpenCodeConfig = JSON.parse(processedContent)
       
       // Validate config structure
       if (!config || typeof config !== 'object') {
-        console.warn('[ConfigLoader] Invalid config file format')
+        console.warn(`[ConfigLoader] Invalid config file format: ${configFile.path}`)
         return null
       }
       
@@ -154,64 +186,55 @@ export class ConfigLoader {
   }
 
   /**
-   * Parse YAML frontmatter from markdown content
-   * Returns frontmatter object and body content
+   * Parse YAML frontmatter from markdown content using js-yaml library
+   * Returns frontmatter object and body content with type safety
+   * 
+   * Supports full YAML syntax including:
+   * - Complex nested objects and arrays
+   * - Multi-line strings
+   * - YAML anchors and aliases
+   * - Various data types (strings, numbers, booleans, null, dates)
    */
-  private parseYamlFrontmatter(content: string): { frontmatter: Record<string, any>, body: string } {
+  private parseYamlFrontmatter<T extends Record<string, unknown> = Record<string, unknown>>(
+    content: string
+  ): ParsedFrontmatter<T> {
     const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/
     const match = content.match(frontmatterRegex)
     
     if (!match || !match[1]) {
       // No frontmatter found, return empty frontmatter and full content as body
-      return { frontmatter: {}, body: content.trim() }
+      return { frontmatter: {} as T, body: content.trim() }
     }
     
     const frontmatterText = match[1]
     const body = match[2] || ''
     
-    // Simple YAML parser for basic key-value pairs
-    // This handles simple cases like: key: value, key: "value", key: true, key: false
-    const frontmatter: Record<string, any> = {}
-    const lines = frontmatterText.split('\n')
-    
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith('#')) continue
+    try {
+      // Use js-yaml to parse YAML frontmatter
+      // yaml.load() is safe by default in js-yaml 4.x, preventing code execution
+      const frontmatter = yaml.load(frontmatterText, {
+        schema: yaml.DEFAULT_SCHEMA,
+        json: true, // Use JSON-compatible types for better TypeScript compatibility
+      }) as Record<string, unknown>
       
-      const colonIndex = trimmed.indexOf(':')
-      if (colonIndex === -1) continue
-      
-      const key = trimmed.substring(0, colonIndex).trim()
-      let value = trimmed.substring(colonIndex + 1).trim()
-      
-      // Remove quotes if present
-      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-        value = value.slice(1, -1)
+      // Ensure frontmatter is an object
+      if (!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) {
+        console.warn('[ConfigLoader] YAML frontmatter is not an object, using empty object')
+        return { frontmatter: {} as T, body: body.trim() }
       }
       
-      // Parse boolean values
-      let parsedValue: any = value
-      if (value === 'true') {
-        parsedValue = true
-      } else if (value === 'false') {
-        parsedValue = false
+      return { frontmatter: frontmatter as T, body: body.trim() }
+    } catch (error) {
+      // Handle YAML parsing errors gracefully
+      if (error instanceof yaml.YAMLException) {
+        console.warn(`[ConfigLoader] Failed to parse YAML frontmatter: ${error.message}`)
       } else {
-        // Handle nested objects (simple case for tools: { "*": false, "github-triage": true })
-        if (value.startsWith('{') && value.endsWith('}')) {
-          try {
-            // Try to parse as JSON
-            parsedValue = JSON.parse(value)
-          } catch {
-            // If JSON parsing fails, keep as string
-            parsedValue = value
-          }
-        }
+        console.warn('[ConfigLoader] Unexpected error parsing YAML frontmatter:', error)
       }
       
-      frontmatter[key] = parsedValue
+      // Return empty frontmatter on parse error, but keep the body
+      return { frontmatter: {} as T, body: body.trim() }
     }
-    
-    return { frontmatter, body: body.trim() }
   }
 
   /**
@@ -219,7 +242,7 @@ export class ConfigLoader {
    */
   private parseAgentFile(content: string, filename: string): Agent | null {
     try {
-      const { frontmatter, body } = this.parseYamlFrontmatter(content)
+      const { frontmatter, body } = this.parseYamlFrontmatter<AgentFrontmatter>(content)
       
       // Extract agent ID from filename (remove .md extension)
       const id = filename.replace(/\.md$/, '')
@@ -294,7 +317,7 @@ export class ConfigLoader {
    */
   private parseSkillFile(content: string, skillDirName: string): Skill | null {
     try {
-      const { frontmatter, body } = this.parseYamlFrontmatter(content)
+      const { frontmatter, body } = this.parseYamlFrontmatter<SkillFrontmatter>(content)
       
       // Use directory name as skill ID
       const id = skillDirName

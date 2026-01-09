@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, Notice, Modal, Setting } from 'obsidian'
+import { ItemView, WorkspaceLeaf, Notice, Modal, Setting, MarkdownRenderer } from 'obsidian'
 import type OpenCodeObsidianPlugin from './main'
 import type { Conversation, Message, ToolUse, ToolResult } from './types'
 import type { ResponseChunk } from './embedded-ai-client'
@@ -69,6 +69,89 @@ export class OpenCodeObsidianView extends ItemView {
     this.renderInputArea(inputArea)
   }
 
+  /**
+   * Incremental DOM update methods to avoid full re-renders
+   */
+  private getOrCreateContainerElement(className: string): HTMLElement | null {
+    const container = this.containerEl.children[1]
+    if (!container) return null
+    
+    // Use querySelector to find element by class name
+    const element = container.querySelector(`.${className}`) as HTMLElement
+    if (!element) {
+      // Element doesn't exist, fallback to full render
+      return null
+    }
+    return element
+  }
+
+  /**
+   * Incrementally update header (connection status and controls)
+   */
+  private updateHeader(): void {
+    const header = this.getOrCreateContainerElement('opencode-obsidian-header')
+    if (header) {
+      this.renderHeader(header)
+    }
+  }
+
+  /**
+   * Incrementally update conversation selector
+   */
+  private updateConversationSelector(): void {
+    const conversationSelector = this.getOrCreateContainerElement('opencode-obsidian-conversation-selector')
+    if (conversationSelector) {
+      this.renderConversationSelector(conversationSelector)
+    }
+  }
+
+  /**
+   * Incrementally update messages container
+   */
+  private updateMessages(): void {
+    const messagesContainer = this.getOrCreateContainerElement('opencode-obsidian-messages')
+    if (messagesContainer) {
+      this.renderMessages(messagesContainer)
+    }
+  }
+
+  /**
+   * Incrementally update input area (toolbar, textarea, buttons)
+   */
+  private updateInputArea(): void {
+    const inputArea = this.getOrCreateContainerElement('opencode-obsidian-input')
+    if (inputArea) {
+      this.renderInputArea(inputArea)
+    }
+  }
+
+  /**
+   * Update streaming status in input area without full re-render
+   */
+  private updateStreamingStatus(isStreaming: boolean): void {
+    const statusBar = this.containerEl.querySelector('.opencode-obsidian-input-status')
+    if (!statusBar) return
+
+    const streamingStatus = statusBar.querySelector('.opencode-obsidian-streaming-status') as HTMLElement
+    if (streamingStatus) {
+      if (isStreaming) {
+        streamingStatus.textContent = 'Streaming response...'
+        streamingStatus.addClass('opencode-obsidian-streaming')
+      } else {
+        streamingStatus.textContent = ''
+        streamingStatus.removeClass('opencode-obsidian-streaming')
+      }
+    }
+
+    // Update send button text
+    const sendBtn = this.containerEl.querySelector('.opencode-obsidian-input-buttons button.mod-cta, .opencode-obsidian-input-buttons button.mod-warning') as HTMLElement
+    if (sendBtn) {
+      sendBtn.textContent = isStreaming ? 'Stop' : 'Send'
+      sendBtn.removeClass('mod-cta', 'mod-warning')
+      sendBtn.addClass(isStreaming ? 'mod-warning' : 'mod-cta')
+    }
+  }
+
   private renderHeader(container: HTMLElement) {
     container.empty()
 
@@ -118,8 +201,8 @@ export class OpenCodeObsidianView extends ItemView {
       }
     })
 
-    select.onchange = () => {
-      this.switchConversation(select.value)
+    select.onchange = async () => {
+      await this.switchConversation(select.value)
     }
 
     // Add provider selector for active conversation
@@ -155,7 +238,8 @@ export class OpenCodeObsidianView extends ItemView {
       providerSelect.value = currentProvider
       providerSelect.onchange = () => {
         activeConv.providerID = providerSelect.value
-        this.renderView()
+        // Only update conversation selector to reflect provider change
+        this.updateConversationSelector()
         const selectedProvider = this.plugin.settings.compatibleProviders?.find(p => p.id === providerSelect.value)
         const displayName = selectedProvider ? selectedProvider.name : providerSelect.value
         new Notice(`Provider changed to ${displayName}`)
@@ -182,6 +266,7 @@ export class OpenCodeObsidianView extends ItemView {
 
   private renderMessage(container: HTMLElement, message: Message) {
     const messageEl = container.createDiv(`opencode-obsidian-message opencode-obsidian-message-${message.role}`)
+    messageEl.setAttribute('data-message-id', message.id)
     
     const header = messageEl.createDiv('opencode-obsidian-message-header')
     header.createSpan('opencode-obsidian-message-role').textContent = message.role
@@ -215,52 +300,78 @@ export class OpenCodeObsidianView extends ItemView {
   }
 
   private renderMessageContent(container: HTMLElement, content: string) {
-    // Simple markdown-like rendering
+    // Use Obsidian's MarkdownRenderer for full markdown support
+    // But preserve code blocks with copy functionality
     const lines = content.split('\n')
-    let currentParagraph = ''
+    let inCodeBlock = false
+    let codeBlockLanguage = ''
+    let codeBlockContent: string[] = []
+    let textBeforeCodeBlock = ''
     
-    for (const line of lines) {
-      if (line.trim() === '') {
-        if (currentParagraph) {
-          this.createParagraph(container, currentParagraph)
-          currentParagraph = ''
+    // First pass: separate code blocks from regular markdown
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      if (!line) continue
+      
+      if (line.startsWith('```')) {
+        if (inCodeBlock) {
+          // End of code block
+          inCodeBlock = false
+          // Render text before code block
+          if (textBeforeCodeBlock.trim()) {
+            const textContainer = container.createDiv('opencode-obsidian-markdown-text')
+            MarkdownRenderer.renderMarkdown(
+              textBeforeCodeBlock.trim(),
+              textContainer,
+              '',
+              this.plugin
+            )
+            textBeforeCodeBlock = ''
+          }
+          // Render code block with copy button
+          const codeBlock = container.createEl('pre')
+          codeBlock.addClass('opencode-obsidian-code-block')
+          const code = codeBlock.createEl('code')
+          if (codeBlockLanguage) {
+            code.addClass(`language-${codeBlockLanguage}`)
+          }
+          code.textContent = codeBlockContent.join('\n')
+          this.addCodeBlockActions(codeBlock, codeBlockContent.join('\n'))
+          codeBlockContent = []
+          codeBlockLanguage = ''
+        } else {
+          // Start of code block
+          inCodeBlock = true
+          codeBlockLanguage = line.slice(3).trim()
         }
-      } else if (line.startsWith('```')) {
-        if (currentParagraph) {
-          this.createParagraph(container, currentParagraph)
-          currentParagraph = ''
-        }
-        // Handle code blocks
-        const codeBlock = container.createEl('pre')
-        codeBlock.addClass('opencode-obsidian-code-block')
-        const code = codeBlock.createEl('code')
-        
-        // Extract language if specified
-        const language = line.slice(3).trim()
-        if (language) {
-          code.addClass(`language-${language}`)
-        }
-        
-        // Find the closing ```
-        let codeContent = ''
-        let i = lines.indexOf(line) + 1
-        while (i < lines.length) {
-          const currentLine = lines[i]
-          if (!currentLine || currentLine.startsWith('```')) break
-          codeContent += currentLine + '\n'
-          i++
-        }
-        code.textContent = codeContent.trim()
-        
-        // Add copy button
-        this.addCodeBlockActions(codeBlock, codeContent.trim())
+      } else if (inCodeBlock) {
+        codeBlockContent.push(line)
       } else {
-        currentParagraph += (currentParagraph ? '\n' : '') + line
+        textBeforeCodeBlock += (textBeforeCodeBlock ? '\n' : '') + line
       }
     }
     
-    if (currentParagraph) {
-      this.createParagraph(container, currentParagraph)
+    // Handle remaining text or code block
+    if (inCodeBlock && codeBlockContent.length > 0) {
+      // Unclosed code block, render as code
+      const codeBlock = container.createEl('pre')
+      codeBlock.addClass('opencode-obsidian-code-block')
+      const code = codeBlock.createEl('code')
+      if (codeBlockLanguage) {
+        code.addClass(`language-${codeBlockLanguage}`)
+      }
+      code.textContent = codeBlockContent.join('\n')
+      this.addCodeBlockActions(codeBlock, codeBlockContent.join('\n'))
+    }
+    
+    if (textBeforeCodeBlock.trim()) {
+      const textContainer = container.createDiv('opencode-obsidian-markdown-text')
+      MarkdownRenderer.renderMarkdown(
+        textBeforeCodeBlock.trim(),
+        textContainer,
+        '',
+        this.plugin
+      )
     }
   }
 
@@ -401,7 +512,8 @@ export class OpenCodeObsidianView extends ItemView {
     
     agentSelect.onchange = async () => {
       this.plugin.settings.agent = agentSelect.value
-      await this.plugin.saveSettings()
+      // Use debounced save for agent selector changes
+      await this.plugin.debouncedSaveSettings()
     }
     
     const textarea = inputContainer.createEl('textarea', {
@@ -508,14 +620,54 @@ export class OpenCodeObsidianView extends ItemView {
   }
 
   private async loadConversations() {
-    // In a real implementation, this would load from storage
-    // For now, create a default conversation if none exist
-    if (this.conversations.length === 0) {
-      this.createNewConversation()
+    try {
+      const saved = await this.plugin.loadData()
+      const conversations = (saved as any)?.conversations
+      if (conversations && Array.isArray(conversations) && conversations.length > 0) {
+        this.conversations = conversations
+        // Restore active conversation if it exists
+        if (this.conversations.length > 0) {
+          // Try to restore the last active conversation, or use the first one
+          const lastActiveId = (saved as any)?.activeConversationId
+          if (lastActiveId && typeof lastActiveId === 'string' && this.conversations.find(c => c.id === lastActiveId)) {
+            this.activeConversationId = lastActiveId
+          } else {
+            const firstConv = this.conversations[0]
+            if (firstConv) {
+              this.activeConversationId = firstConv.id
+            }
+          }
+        }
+      } else {
+        // No saved conversations, create a default one
+        if (this.conversations.length === 0) {
+          await this.createNewConversation()
+        }
+      }
+    } catch (error) {
+      console.error('[OpenCode Obsidian] Failed to load conversations:', error)
+      // Fallback: create a default conversation
+      if (this.conversations.length === 0) {
+        await this.createNewConversation()
+      }
     }
   }
 
-  private createNewConversation() {
+  private async saveConversations() {
+    try {
+      const currentData = await this.plugin.loadData()
+      const dataToSave = {
+        ...currentData,
+        conversations: this.conversations,
+        activeConversationId: this.activeConversationId
+      }
+      await this.plugin.saveData(dataToSave)
+    } catch (error) {
+      console.error('[OpenCode Obsidian] Failed to save conversations:', error)
+    }
+  }
+
+  private async createNewConversation() {
     // Use default provider or first available provider
     const availableProviders = this.plugin.providerManager.getAvailableProviders()
     const defaultProvider = availableProviders.length > 0 
@@ -535,12 +687,18 @@ export class OpenCodeObsidianView extends ItemView {
 
     this.conversations.unshift(conversation)
     this.activeConversationId = conversation.id
-    this.renderView()
+    await this.saveConversations()
+    // Update conversation selector and messages (new conversation is empty)
+    this.updateConversationSelector()
+    this.updateMessages()
   }
 
-  private switchConversation(conversationId: string) {
+  private async switchConversation(conversationId: string) {
     this.activeConversationId = conversationId
-    this.renderView()
+    await this.saveConversations()
+    // Only update conversation selector (to show selected state) and messages
+    this.updateConversationSelector()
+    this.updateMessages()
   }
 
   private getActiveConversation(): Conversation | null {
@@ -550,7 +708,7 @@ export class OpenCodeObsidianView extends ItemView {
   private async sendMessage(content: string): Promise<void> {
     const activeConv = this.getActiveConversation()
     if (!activeConv) {
-      this.createNewConversation()
+      await this.createNewConversation()
       await this.sendMessage(content)
       return
     }
@@ -575,7 +733,9 @@ export class OpenCodeObsidianView extends ItemView {
 
     this.isStreaming = true
     this.currentAbortController = new AbortController()
-    this.renderView()
+    // Only update messages (to show new messages) and input area (streaming status)
+    this.updateMessages()
+    this.updateStreamingStatus(true)
 
     try {
       // Check if there's a pending image path to attach
@@ -629,7 +789,8 @@ export class OpenCodeObsidianView extends ItemView {
         if (chunk.type === 'text' && chunk.content) {
           fullContent += chunk.content
           assistantMessage.content = fullContent
-          this.renderView()
+          // Use incremental update instead of full render
+          this.updateMessageContent(assistantMessage.id, fullContent)
         }
 
         if (chunk.type === 'session_init' && chunk.sessionId) {
@@ -648,7 +809,11 @@ export class OpenCodeObsidianView extends ItemView {
     } finally {
       this.isStreaming = false
       this.currentAbortController = null
-      this.renderView()
+      activeConv.updatedAt = Date.now()
+      await this.saveConversations()
+      // Update messages (final state) and input area (streaming status off)
+      this.updateMessages()
+      this.updateStreamingStatus(false)
     }
   }
 
@@ -776,7 +941,8 @@ export class OpenCodeObsidianView extends ItemView {
       this.currentAbortController = null
     }
     this.isStreaming = false
-    this.renderView()
+    // Only update input area to reflect streaming stopped
+    this.updateStreamingStatus(false)
   }
 
   private async regenerateResponse(message: Message) {
@@ -800,7 +966,7 @@ export class OpenCodeObsidianView extends ItemView {
       try {
         const activeConv = this.getActiveConversation()
         if (!activeConv) {
-          this.createNewConversation()
+          await this.createNewConversation()
         }
 
         // Save file to vault's attachments folder (05_Attachments)
@@ -893,6 +1059,24 @@ export class OpenCodeObsidianView extends ItemView {
   }
 
   // Permission request handling removed - not needed in embedded mode
+
+  private updateMessageContent(messageId: string, content: string) {
+    const messageEl = this.containerEl.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement
+    if (messageEl) {
+      const contentEl = messageEl.querySelector('.opencode-obsidian-message-content') as HTMLElement
+      if (contentEl) {
+        // Clear existing content
+        contentEl.empty()
+        // Render new content
+        this.renderMessageContent(contentEl, content)
+        // Auto-scroll to bottom
+        const messagesContainer = this.containerEl.querySelector('.opencode-obsidian-messages') as HTMLElement
+        if (messagesContainer) {
+          messagesContainer.scrollTop = messagesContainer.scrollHeight
+        }
+      }
+    }
+  }
 
   private getCurrentModelDisplayName(): string {
     return this.getModelDisplayName(this.plugin.settings.model.modelID)

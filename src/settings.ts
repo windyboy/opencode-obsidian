@@ -36,10 +36,11 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         text.inputEl.type = 'password'
         text.onChange(async (value: string) => {
           this.plugin.settings.apiKeys.anthropic = value
-          await this.plugin.saveSettings()
-          // Update provider manager with full config
+          // Use debounced save for input fields
+          await this.plugin.debouncedSaveSettings()
+          // Update provider manager with full config (non-blocking)
           this.updateProviderManagerConfig()
-          new Notice('Anthropic API key updated')
+          // Note: Notice is deferred until debounce fires
         })
       })
 
@@ -53,10 +54,10 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         text.inputEl.type = 'password'
         text.onChange(async (value: string) => {
           this.plugin.settings.apiKeys.openai = value
-          await this.plugin.saveSettings()
-          // Update provider manager with full config
+          // Use debounced save for input fields
+          await this.plugin.debouncedSaveSettings()
+          // Update provider manager with full config (non-blocking)
           this.updateProviderManagerConfig()
-          new Notice('OpenAI API key updated')
         })
       })
 
@@ -70,10 +71,10 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         text.inputEl.type = 'password'
         text.onChange(async (value: string) => {
           this.plugin.settings.apiKeys.google = value
-          await this.plugin.saveSettings()
-          // Update provider manager with full config
+          // Use debounced save for input fields
+          await this.plugin.debouncedSaveSettings()
+          // Update provider manager with full config (non-blocking)
           this.updateProviderManagerConfig()
-          new Notice('Google API key updated')
         })
       })
 
@@ -87,15 +88,15 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         text.inputEl.type = 'password'
         text.onChange(async (value: string) => {
           this.plugin.settings.apiKeys.zenmux = value
-          await this.plugin.saveSettings()
-          // Update provider manager with full config
+          // Use debounced save for input fields
+          await this.plugin.debouncedSaveSettings()
+          // Update provider manager with full config (non-blocking)
           this.updateProviderManagerConfig()
           // Clear cache and refresh model list if ZenMux is the current provider
           if (this.plugin.settings.providerID === 'zenmux') {
             this.modelCache.delete('zenmux')
             await this.updateModelSetting()
           }
-          new Notice('ZenMux API key updated')
         })
       })
 
@@ -122,11 +123,11 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
             delete this.plugin.settings.providerOptions.zenmux.baseURL
           }
           
-          await this.plugin.saveSettings()
+          // Use debounced save for input fields
+          await this.plugin.debouncedSaveSettings()
           
-          // Update provider manager with new config
+          // Update provider manager with new config (non-blocking)
           this.updateProviderManagerConfig()
-          new Notice('ZenMux baseURL updated')
         })
       })
 
@@ -151,11 +152,11 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
               provider.apiKey = value
               // Also store in apiKeys for backward compatibility
               this.plugin.settings.apiKeys[provider.id] = value
-              await this.plugin.saveSettings()
+              // Use debounced save for input fields
+              await this.plugin.debouncedSaveSettings()
               
-              // Update provider manager with full config
+              // Update provider manager with full config (non-blocking)
               this.updateProviderManagerConfig()
-              new Notice(`${provider.name} API key updated`)
             })
           })
       }
@@ -266,7 +267,8 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
       
       dropdown.onChange(async (value) => {
         this.plugin.settings.agent = value
-        await this.plugin.saveSettings()
+        // Use debounced save for dropdown changes
+        await this.plugin.debouncedSaveSettings()
       })
     })
     
@@ -358,6 +360,168 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
           this.displayClientStatus(statusContainer)
         })
       )
+
+    // Hook Configuration section
+    containerEl.createEl('h3', { text: 'Hook Configuration' })
+    containerEl.createEl('p', {
+      text: 'Configure hooks that intercept and modify AI interactions. Disable hooks to prevent automatic behaviors.',
+      cls: 'setting-item-description'
+    })
+
+    // Disabled hooks
+    const disabledHooksSetting = new Setting(containerEl)
+      .setName('Disabled Hooks')
+      .setDesc('Comma-separated list of hook IDs to disable (e.g., "tool-output-truncator,preemptive-compaction")')
+      .addText(text => {
+        text.setPlaceholder('tool-output-truncator, preemptive-compaction')
+          .setValue((this.plugin.settings.disabledHooks || []).join(', '))
+        text.inputEl.style.width = '100%'
+        text.onChange(async (value: string) => {
+          const hooks = value.split(',').map(h => h.trim()).filter(h => h.length > 0)
+          this.plugin.settings.disabledHooks = hooks.length > 0 ? hooks : undefined
+          await this.plugin.saveSettings()
+          
+          // Update hook registry
+          if (this.plugin.hookRegistry) {
+            // Re-enable all hooks first
+            const allHooks = this.plugin.hookRegistry.getAllHooks()
+            for (const hook of allHooks) {
+              this.plugin.hookRegistry.enableHook(hook.id)
+            }
+            // Then disable specified hooks
+            for (const hookId of hooks) {
+              this.plugin.hookRegistry.disableHook(hookId)
+            }
+          }
+          
+          new Notice('Hook configuration updated')
+        })
+      })
+
+    // Context Management section
+    containerEl.createEl('h3', { text: 'Context Management' })
+    containerEl.createEl('p', {
+      text: 'Configure how context window is managed to prevent token limit overflow.',
+      cls: 'setting-item-description'
+    })
+
+    // Preemptive compaction threshold
+    const compactionThreshold = new Setting(containerEl)
+      .setName('Preemptive Compaction Threshold')
+      .setDesc('Trigger compression when context usage reaches this percentage (default: 85%)')
+      .addSlider(slider => {
+        slider
+          .setLimits(50, 95, 5)
+          .setValue((this.plugin.settings.contextManagement?.preemptiveCompactionThreshold ?? 0.85) * 100)
+          .setDynamicTooltip()
+          .onChange(async (value: number) => {
+            if (!this.plugin.settings.contextManagement) {
+              this.plugin.settings.contextManagement = {}
+            }
+            this.plugin.settings.contextManagement.preemptiveCompactionThreshold = value / 100
+            await this.plugin.saveSettings()
+          })
+      })
+
+    // Max context tokens
+    const maxContextTokens = new Setting(containerEl)
+      .setName('Max Context Tokens')
+      .setDesc('Maximum context window size in tokens (default: 50000)')
+      .addText(text => {
+        text.setPlaceholder('50000')
+          .setValue(String(this.plugin.settings.contextManagement?.maxContextTokens ?? 50000))
+        text.inputEl.type = 'number'
+        text.onChange(async (value: string) => {
+          const numValue = parseInt(value, 10)
+          if (!isNaN(numValue) && numValue > 0) {
+            if (!this.plugin.settings.contextManagement) {
+              this.plugin.settings.contextManagement = {}
+            }
+            this.plugin.settings.contextManagement.maxContextTokens = numValue
+            await this.plugin.saveSettings()
+          }
+        })
+      })
+
+    // Enable token estimation
+    const enableTokenEstimation = new Setting(containerEl)
+      .setName('Enable Token Estimation')
+      .setDesc('Estimate token usage for context management (recommended)')
+      .addToggle(toggle => {
+        toggle.setValue(this.plugin.settings.contextManagement?.enableTokenEstimation ?? true)
+        toggle.onChange(async (value: boolean) => {
+          if (!this.plugin.settings.contextManagement) {
+            this.plugin.settings.contextManagement = {}
+          }
+          this.plugin.settings.contextManagement.enableTokenEstimation = value
+          await this.plugin.saveSettings()
+        })
+      })
+
+    // TODO Management section
+    containerEl.createEl('h3', { text: 'TODO Management' })
+    containerEl.createEl('p', {
+      text: 'Configure automatic TODO tracking and continuation.',
+      cls: 'setting-item-description'
+    })
+
+    // Enable TODO management
+    const enableTodoManagement = new Setting(containerEl)
+      .setName('Enable TODO Management')
+      .setDesc('Automatically extract and track TODOs from conversations')
+      .addToggle(toggle => {
+        toggle.setValue(this.plugin.settings.todoManagement?.enabled ?? true)
+        toggle.onChange(async (value: boolean) => {
+          if (!this.plugin.settings.todoManagement) {
+            this.plugin.settings.todoManagement = {}
+          }
+          this.plugin.settings.todoManagement.enabled = value
+          await this.plugin.saveSettings()
+        })
+      })
+
+    // Auto-continue TODOs
+    const autoContinueTodos = new Setting(containerEl)
+      .setName('Auto-Continue TODOs')
+      .setDesc('Automatically prompt agent to continue unfinished TODOs when it stops')
+      .addToggle(toggle => {
+        toggle.setValue(this.plugin.settings.todoManagement?.autoContinue ?? true)
+        toggle.onChange(async (value: boolean) => {
+          if (!this.plugin.settings.todoManagement) {
+            this.plugin.settings.todoManagement = {}
+          }
+          this.plugin.settings.todoManagement.autoContinue = value
+          await this.plugin.saveSettings()
+        })
+      })
+
+    // Respect user interrupt
+    const respectUserInterrupt = new Setting(containerEl)
+      .setName('Respect User Interrupt')
+      .setDesc('Do not auto-continue TODOs if user manually stopped the conversation')
+      .addToggle(toggle => {
+        toggle.setValue(this.plugin.settings.todoManagement?.respectUserInterrupt ?? true)
+        toggle.onChange(async (value: boolean) => {
+          if (!this.plugin.settings.todoManagement) {
+            this.plugin.settings.todoManagement = {}
+          }
+          this.plugin.settings.todoManagement.respectUserInterrupt = value
+          await this.plugin.saveSettings()
+        })
+      })
+
+    // MCP Configuration section
+    containerEl.createEl('h3', { text: 'MCP Servers' })
+    containerEl.createEl('p', {
+      text: 'Configure Model Context Protocol servers for enhanced tool capabilities. MCP integration is experimental.',
+      cls: 'setting-item-description'
+    })
+
+    containerEl.createEl('p', {
+      text: 'Note: Full MCP integration is a placeholder and will be implemented in a future update.',
+      cls: 'setting-item-description',
+      attr: { style: 'color: var(--text-muted); font-style: italic;' }
+    })
   }
 
   /**
