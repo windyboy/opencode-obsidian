@@ -2,37 +2,68 @@ import { EmbeddedAIClient, type ResponseChunk, type ProviderType, type Compatibl
 import { ErrorHandler, ErrorSeverity } from './utils/error-handler'
 import { UI_CONFIG } from './utils/constants'
 
+/**
+ * Provider identifier type
+ * Supports built-in providers and custom provider IDs from compatible providers
+ */
 export type ProviderID = 'anthropic' | 'openai' | 'google' | 'zenmux' | string
 
+/**
+ * Compatible provider configuration
+ * Represents a custom provider that is compatible with OpenAI or Anthropic API formats
+ * 
+ * @interface CompatibleProviderConfig
+ */
 export interface CompatibleProviderConfig {
+  /** Unique provider identifier */
   id: string
+  /** Display name for the provider */
   name: string
+  /** API key for authentication */
   apiKey: string
+  /** Base URL for the provider's API endpoint */
   baseURL: string
+  /** API compatibility type */
   apiType: CompatibleApiType
+  /** Optional default model ID for this provider */
   defaultModel?: string
 }
 
+/**
+ * Provider manager configuration
+ * Contains API keys, compatible providers, default models, and provider-specific options
+ * 
+ * @interface ProviderConfig
+ */
 export interface ProviderConfig {
+  /** API keys for built-in providers */
   apiKeys: {
     anthropic?: string
     openai?: string
     google?: string
     zenmux?: string
+    /** Dynamic keys for compatible providers */
     [key: string]: string | undefined
   }
+  /** Compatible providers loaded from config.json */
   compatibleProviders?: CompatibleProviderConfig[]
+  /** Default model IDs for each provider */
   defaultModel?: {
     anthropic?: string
     openai?: string
     google?: string
     zenmux?: string
+    /** Dynamic default models for compatible providers */
     [key: string]: string | undefined
   }
+  /** Provider-specific configuration options */
   providerOptions?: {
+    /** ZenMux-specific options */
     zenmux?: {
+      /** Custom baseURL for ZenMux API */
       baseURL?: string
     }
+    /** Allow other provider options in the future */
     [key: string]: any
   }
 }
@@ -42,6 +73,17 @@ interface CachedModelList {
   timestamp: number
 }
 
+/**
+ * Provider Manager
+ * 
+ * Manages AI provider clients and model fetching. Provides:
+ * - Centralized client creation and caching
+ * - Model list fetching with throttling and caching
+ * - Support for built-in and compatible providers
+ * - Factory method for consistent client creation
+ * 
+ * @class ProviderManager
+ */
 export class ProviderManager {
   private clients: Map<ProviderID, EmbeddedAIClient> = new Map()
   private config: ProviderConfig
@@ -50,6 +92,12 @@ export class ProviderManager {
   private pendingFetches: Map<ProviderID, Promise<Array<{ id: string; name?: string }>>> = new Map()
   private lastFetchTime: Map<ProviderID, number> = new Map()
 
+  /**
+   * Create a new ProviderManager instance
+   * 
+   * @param {ProviderConfig} config - Provider configuration with API keys and providers
+   * @param {ErrorHandler} [errorHandler] - Optional error handler (creates default if not provided)
+   */
   constructor(config: ProviderConfig, errorHandler?: ErrorHandler) {
     this.config = config
     this.errorHandler = errorHandler || new ErrorHandler()
@@ -173,7 +221,10 @@ export class ProviderManager {
   }
 
   /**
-   * Get client for a specific provider
+   * Get the client instance for a specific provider
+   * 
+   * @param {ProviderID} providerID - The provider identifier
+   * @returns {EmbeddedAIClient | null} The client instance or null if not initialized
    */
   getClient(providerID: ProviderID): EmbeddedAIClient | null {
     return this.clients.get(providerID) || null
@@ -181,20 +232,31 @@ export class ProviderManager {
 
   /**
    * Check if a provider is available (has API key and client initialized)
+   * 
+   * @param {ProviderID} providerID - The provider identifier to check
+   * @returns {boolean} True if provider is available and initialized
    */
   isProviderAvailable(providerID: ProviderID): boolean {
     return this.clients.has(providerID)
   }
 
   /**
-   * Get list of available providers
+   * Get list of available provider IDs
+   * Returns all providers that have been initialized (have valid API keys)
+   * 
+   * @returns {ProviderID[]} Array of available provider identifiers
    */
   getAvailableProviders(): ProviderID[] {
     return Array.from(this.clients.keys())
   }
 
   /**
-   * Update API key for a provider and reinitialize client
+   * Update API key for a provider and reinitialize the client
+   * Also clears the model cache for the provider when API key changes
+   * 
+   * @param {ProviderID} providerID - The provider identifier
+   * @param {string} apiKey - The new API key (empty string to disable provider)
+   * @param {string} [model] - Optional model ID to use for the new client
    */
   updateProviderApiKey(providerID: ProviderID, apiKey: string, model?: string) {
     this.config.apiKeys[providerID] = apiKey
@@ -232,7 +294,10 @@ export class ProviderManager {
   }
 
   /**
-   * Update configuration and reinitialize all providers
+   * Update the entire provider configuration and reinitialize all providers
+   * Clears all existing clients and model caches
+   * 
+   * @param {ProviderConfig} config - New provider configuration
    */
   updateConfig(config: ProviderConfig) {
     this.config = config
@@ -241,7 +306,17 @@ export class ProviderManager {
   }
 
   /**
-   * Fetch available models for a provider (with caching and throttling)
+   * Fetch available models for a provider with caching and throttling
+   * 
+   * Uses a 30-second cache and 2-second throttle to prevent excessive API calls.
+   * Returns cached results if available and still valid, otherwise fetches from API.
+   * 
+   * @param {ProviderID} providerID - The provider identifier
+   * @returns {Promise<Array<{id: string, name?: string}>>} Array of available models
+   * 
+   * @example
+   * const models = await providerManager.fetchModels('anthropic')
+   * // Returns: [{ id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet' }, ...]
    */
   async fetchModels(providerID: ProviderID): Promise<Array<{ id: string; name?: string }>> {
     // Check cache first
@@ -350,7 +425,12 @@ export class ProviderManager {
   }
 
   /**
-   * Clear model cache for a specific provider (useful when API key changes)
+   * Clear model cache for a specific provider or all providers
+   * 
+   * Useful when API keys change or when you want to force a fresh fetch.
+   * Also clears pending fetches and fetch timestamps.
+   * 
+   * @param {ProviderID} [providerID] - Optional provider ID to clear cache for. If not provided, clears all caches.
    */
   clearModelCache(providerID?: ProviderID): void {
     if (providerID) {

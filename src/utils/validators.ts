@@ -138,14 +138,12 @@ function validateProviderID(value: string | undefined, fieldName: string = 'Prov
  * @param {ValidatorOptions} [options] - Optional validation options
  * @returns {ValidationResult} Validation result with errors and warnings
  * 
- * @example
- * ```typescript
- * const config = { providers: [...], instructions: [...] }
- * const result = validateOpenCodeConfig(config)
- * if (!result.valid) {
- *   console.error('Validation errors:', result.errors)
- * }
- * ```
+   * @example
+   * const config = { providers: [...], instructions: [...] }
+   * const result = validateOpenCodeConfig(config)
+   * if (!result.valid) {
+   *   console.error('Validation errors:', result.errors)
+   * }
  */
 export function validateOpenCodeConfig(config: unknown, options?: ValidatorOptions): ValidationResult {
   const errors: string[] = []
@@ -586,12 +584,10 @@ export function validateSkill(skill: Skill, options?: ValidatorOptions): Validat
  * @param {ValidationResult} result - Validation result to format
  * @returns {string} Formatted string representation of the validation result
  * 
- * @example
- * ```typescript
- * const result = validateAgent(agent)
- * console.log(formatValidationResult(result))
- * // Output: "✓ Validation passed" or "✗ Validation failed\nErrors:\n  - ..."
- * ```
+   * @example
+   * const result = validateAgent(agent)
+   * console.log(formatValidationResult(result))
+   * // Output: "Validation passed" or "Validation failed\nErrors:\n  - ..."
  */
 export function formatValidationResult(result: ValidationResult): string {
   const parts: string[] = []

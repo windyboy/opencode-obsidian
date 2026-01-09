@@ -173,9 +173,13 @@ describe('ErrorHandler', () => {
       handler.handleError(error, {}, ErrorSeverity.Error)
       
       expect(notificationCallback).toHaveBeenCalled()
-      const [message] = notificationCallback.mock.calls[0]
-      expect(message.length).toBeLessThanOrEqual(200)
-      expect(message).toContain('...')
+      const callArgs = notificationCallback.mock.calls[0]
+      expect(callArgs).toBeDefined()
+      if (callArgs) {
+        const [message] = callArgs
+        expect(message.length).toBeLessThanOrEqual(200)
+        expect(message).toContain('...')
+      }
     })
 
     it('should add operation context to notification message', () => {
@@ -204,9 +208,13 @@ describe('ErrorHandler', () => {
       
       const errors = handler.getCollectedErrors()
       expect(errors).toHaveLength(1)
-      expect(errors[0].error.message).toBe('Test error')
-      expect(errors[0].severity).toBe(ErrorSeverity.Error)
-      expect(errors[0].context.module).toBe('Test')
+      const firstError = errors[0]
+      expect(firstError).toBeDefined()
+      if (firstError) {
+        expect(firstError.error.message).toBe('Test error')
+        expect(firstError.severity).toBe(ErrorSeverity.Error)
+        expect(firstError.context.module).toBe('Test')
+      }
     })
 
     it('should not collect errors when disabled', () => {
@@ -233,8 +241,14 @@ describe('ErrorHandler', () => {
       const errors = handler.getCollectedErrors()
       expect(errors).toHaveLength(5)
       // Should keep the most recent 5 errors
-      expect(errors[0].error.message).toBe('Error 2')
-      expect(errors[4].error.message).toBe('Error 6')
+      const firstError = errors[0]
+      const lastError = errors[4]
+      expect(firstError).toBeDefined()
+      expect(lastError).toBeDefined()
+      if (firstError && lastError) {
+        expect(firstError.error.message).toBe('Error 2')
+        expect(lastError.error.message).toBe('Error 6')
+      }
     })
 
     it('should clear collected errors', () => {

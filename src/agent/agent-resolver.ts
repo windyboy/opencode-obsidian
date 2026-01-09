@@ -115,14 +115,12 @@ export class AgentResolver {
    * @returns {ResolvedAgentConfig} Resolved configuration with merged prompts, model, and tools
    * 
    * @example
-   * ```typescript
    * const resolver = new AgentResolver(agents, skills, configLoader)
    * const config = resolver.resolveAgentConfig(
    *   { agentID: 'assistant' },
    *   { providerID: 'anthropic', modelID: 'claude-3-5-sonnet' }
    * )
    * // Returns: { systemPrompt: '...', model: {...}, tools: {...} }
-   * ```
    */
   resolveAgentConfig(
     options: AgentResolveOptions,
@@ -210,12 +208,10 @@ export class AgentResolver {
    * @returns {string} Prompt with skills merged in format: prompt + skill sections
    * 
    * @example
-   * ```typescript
    * const prompt = "You are a helpful assistant."
    * const skillIds = ['code-review', 'testing']
    * const merged = resolver.mergeSkillsIntoPrompt(prompt, skillIds)
    * // Returns: "You are a helpful assistant.\n\n---\n# Skill: Code Review\n---\n\n..."
-   * ```
    */
   mergeSkillsIntoPrompt(prompt: string, skillIds: string[]): string {
     if (skillIds.length === 0 || this.skills.length === 0) {

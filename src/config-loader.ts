@@ -51,6 +51,23 @@ export interface ParsedFrontmatter<T = AgentFrontmatter | SkillFrontmatter> {
   body: string
 }
 
+/**
+ * Configuration Loader
+ * 
+ * Loads and parses configuration files from the Obsidian vault including:
+ * - Main configuration file (config.json) with priority-based lookup
+ * - Agent files from `.opencode/agent/*.md`
+ * - Skill files from `.opencode/skill/{skill-name}/SKILL.md`
+ * - Instruction files with glob pattern support
+ * 
+ * Includes comprehensive security validations:
+ * - File path validation (prevents path traversal)
+ * - File size limits (prevents DoS attacks)
+ * - JSON structure validation (prevents deep nesting DoS)
+ * - Input validation using validators
+ * 
+ * @class ConfigLoader
+ */
 export class ConfigLoader {
   private vault: Vault
   private instructionCache: Map<string, InstructionCache> = new Map()
@@ -58,7 +75,14 @@ export class ConfigLoader {
 
   /**
    * Configuration file paths in priority order
-   * Higher priority files are checked first
+   * Higher priority files are checked first and used if found
+   * 
+   * Priority order:
+   * 1. .opencode/config.json (highest priority)
+   * 2. opencode.json
+   * 3. .opencode.json
+   * 4. opencode.jsonc
+   * 5. .opencode/opencode.jsonc (lowest priority)
    */
   private static readonly CONFIG_FILE_PRIORITY = [
     '.opencode/config.json',
@@ -68,6 +92,11 @@ export class ConfigLoader {
     '.opencode/opencode.jsonc',
   ] as const
 
+  /**
+   * Create a new ConfigLoader instance
+   * 
+   * @param {Vault} vault - Obsidian vault instance for file operations
+   */
   constructor(vault: Vault) {
     this.vault = vault
   }
@@ -266,8 +295,20 @@ export class ConfigLoader {
   }
 
   /**
-   * Load compatible providers from config
-   * API keys are merged from Obsidian settings (security: API keys not stored in config.json)
+   * Load compatible providers from configuration file
+   * 
+   * Loads provider definitions from config.json and merges API keys from Obsidian settings.
+   * API keys are stored securely in Obsidian settings, not in config.json files.
+   * All providers are validated using validateProviderConfig before being returned.
+   * 
+   * @param {Record<string, string | undefined>} apiKeys - API keys from Obsidian settings, keyed by provider ID
+   * @returns {Promise<CompatibleProvider[]>} Array of validated compatible providers with API keys merged
+   * 
+   * @example
+   * ```typescript
+   * const apiKeys = { 'my-provider': 'sk-...', 'another-provider': 'sk-...' }
+   * const providers = await configLoader.loadCompatibleProviders(apiKeys)
+   * ```
    */
   async loadCompatibleProviders(apiKeys: Record<string, string | undefined>): Promise<CompatibleProvider[]> {
     const config = await this.loadConfig()
@@ -304,7 +345,9 @@ export class ConfigLoader {
   }
 
   /**
-   * Check if .opencode directory exists
+   * Check if .opencode directory exists in the vault
+   * 
+   * @returns {Promise<boolean>} True if .opencode directory exists, false otherwise
    */
   async hasOpenCodeDir(): Promise<boolean> {
     try {
@@ -527,6 +570,19 @@ export class ConfigLoader {
 
   /**
    * Load skills from .opencode/skill/{skill-name}/SKILL.md files
+   * 
+   * Each skill is loaded from a directory structure:
+   * - Directory name becomes the skill ID
+   * - SKILL.md file contains the skill content with YAML frontmatter
+   * 
+   * All skills are validated using validateSkill before being returned.
+   * Invalid skills are skipped with warnings, but don't prevent loading other skills.
+   * 
+   * @returns {Promise<Skill[]>} Array of loaded and validated skills
+   * 
+   * @example
+   * const skills = await configLoader.loadSkills()
+   * // Returns: [{ id: 'code-review', name: 'Code Review', content: '...' }, ...]
    */
   async loadSkills(): Promise<Skill[]> {
     try {
@@ -586,6 +642,20 @@ export class ConfigLoader {
 
   /**
    * Load agents from .opencode/agent/*.md files
+   * 
+   * Each markdown file in .opencode/agent/ becomes an agent:
+   * - Filename (without .md) becomes the agent ID
+   * - YAML frontmatter contains agent metadata
+   * - Markdown body becomes the system prompt
+   * 
+   * All agents are validated using validateAgent and validateAgentFrontmatter.
+   * Invalid agents are skipped with warnings, but don't prevent loading other agents.
+   * 
+   * @returns {Promise<Agent[]>} Array of loaded and validated agents
+   * 
+   * @example
+   * const agents = await configLoader.loadAgents()
+   * // Returns: [{ id: 'assistant', name: 'Assistant', systemPrompt: '...' }, ...]
    */
   async loadAgents(): Promise<Agent[]> {
     try {
@@ -684,9 +754,24 @@ export class ConfigLoader {
   }
 
   /**
-   * Load instruction files from config.json instructions array or provided instructions array
-   * Supports glob patterns and caches content
-   * @param customInstructions Optional instructions array from settings (will be merged with config.json)
+   * Load instruction files from config.json or custom instructions array
+   * 
+   * Supports both direct file paths and glob patterns (e.g., double-star-slash-star-dot-md, docs/rules.md).
+   * Instruction files are cached based on modification time to avoid unnecessary re-reading.
+   * All files are validated for path safety and size limits before loading.
+   * 
+   * Instructions are merged with separators and formatted with headers.
+   * The merged result is cached for quick access via getCachedInstructions().
+   * 
+   * @param {string[]} [customInstructions] - Optional instructions array from settings. Will be merged with config.json instructions, avoiding duplicates.
+   * @returns {Promise<string>} Merged instruction content with formatted sections, or empty string if no instructions found
+   * 
+   * @example
+   * // Load from config.json
+   * const instructions = await configLoader.loadInstructions()
+   * 
+   * // Load with custom instructions
+   * const instructions = await configLoader.loadInstructions(['docs/rules.md', 'guidelines/*.md'])
    */
   async loadInstructions(customInstructions?: string[]): Promise<string> {
     try {
@@ -811,7 +896,14 @@ export class ConfigLoader {
   }
 
   /**
-   * Clear instruction cache (useful for reloading)
+   * Clear instruction cache
+   * 
+   * Clears both the file-level cache and the merged instructions cache.
+   * Useful when you want to force a reload of instruction files (e.g., after file changes).
+   * 
+   * @example
+   * configLoader.clearInstructionCache()
+   * const freshInstructions = await configLoader.loadInstructions()
    */
   clearInstructionCache(): void {
     this.instructionCache.clear()
@@ -821,7 +913,15 @@ export class ConfigLoader {
 
   /**
    * Get cached merged instruction content
-   * Returns the merged instructions that were loaded by loadInstructions()
+   * 
+   * Returns the last merged instructions that were loaded by loadInstructions().
+   * This avoids re-reading and re-merging instruction files on every access.
+   * 
+   * @returns {string} Cached merged instruction content, or empty string if not loaded yet
+   * 
+   * @example
+   * await configLoader.loadInstructions()
+   * const cached = configLoader.getCachedInstructions() // Fast access to cached result
    */
   getCachedInstructions(): string {
     return this.mergedInstructions

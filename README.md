@@ -18,11 +18,16 @@ OpenCode Obsidian is an Obsidian plugin that provides a chat interface to intera
 -   **Chat Interface**: Clean, intuitive chat UI integrated into Obsidian
 -   **Real-time Streaming**: See AI responses stream in real-time
 -   **Image Support**: Attach images to your conversations
--   **Multiple Sessions**: Manage multiple conversation sessions
--   **Multi-Provider Support**: Choose from Anthropic Claude, OpenAI GPT, or Google Gemini
+-   **Multiple Sessions**: Manage multiple conversation sessions with LRU cache management
+-   **Multi-Provider Support**: Choose from Anthropic Claude, OpenAI GPT, Google Gemini, or ZenMux
+-   **Compatible Providers**: Add custom providers via `.opencode/config.json`
 -   **Model Selection**: Choose from different AI models for each provider
 -   **Agent Configuration**: Switch between different agent profiles
+-   **Skill System**: Create reusable prompt components (skills) that can be referenced by agents
+-   **Instructions**: Merge global instructions from config files into system prompts
 -   **Settings Panel**: Configure API keys, providers, and default settings
+-   **Error Handling**: Unified error handling system with user-friendly notifications
+-   **Performance Optimized**: Incremental DOM updates, debounced settings, throttled API calls
 
 ## Installation
 
@@ -88,7 +93,7 @@ OpenCode Obsidian is an Obsidian plugin that provides a chat interface to intera
 2. Go to Community Plugins
 3. Enable "OpenCode Obsidian"
 4. Open the plugin settings
-5. Enter your API Key
+5. Enter your API Key(s) for one or more providers
 6. Select your preferred AI Provider
 7. Choose a model
 
@@ -96,15 +101,77 @@ OpenCode Obsidian is an Obsidian plugin that provides a chat interface to intera
 
 Configure the following settings in the plugin settings panel:
 
--   **API Key**: Your AI provider API key (stored securely)
--   **AI Provider**: Choose from Anthropic (Claude), OpenAI (GPT), or Google (Gemini)
+-   **API Keys**: Enter API keys for multiple providers (stored securely in Obsidian settings)
+    -   Anthropic (Claude)
+    -   OpenAI (GPT)
+    -   Google (Gemini)
+    -   ZenMux
+    -   Compatible Providers (from `.opencode/config.json`)
+-   **AI Provider**: Choose from available providers
 -   **Model ID**: The specific model to use (e.g., `claude-3-5-sonnet-20241022`, `gpt-4`, `gemini-pro`)
 -   **Default Agent**: The default agent/system prompt to use for conversations
-    -   Assistant
-    -   Bootstrap
-    -   Thinking Partner
-    -   Research Assistant
-    -   Read Only
+    -   Built-in agents: Assistant, Bootstrap, Thinking Partner, Research Assistant, Read Only
+    -   Custom agents: Loaded from `.opencode/agent/*.md` files
+-   **Context Management**: Configure context window thresholds and token limits
+-   **TODO Management**: Configure TODO extraction and continuation behavior
+-   **Instructions**: Add instruction files or glob patterns to merge into system prompts
+
+### Advanced Configuration
+
+#### Custom Agents and Skills
+
+Create custom agents and skills by adding files to your vault:
+
+**Agents**: `.opencode/agent/{agent-name}.md`
+```markdown
+---
+name: My Custom Agent
+description: A specialized agent for code review
+model: anthropic/claude-3-5-sonnet-20241022
+skills:
+  - code-review
+  - testing
+tools:
+  "*": false
+  "github-triage": true
+color: "#FF6B6B"
+---
+
+You are an expert code reviewer...
+```
+
+**Skills**: `.opencode/skill/{skill-name}/SKILL.md`
+```markdown
+---
+name: Code Review
+description: Guidelines for code review
+---
+
+When reviewing code, focus on:
+1. Code quality and maintainability
+2. Security vulnerabilities
+3. Performance optimizations
+...
+```
+
+**Configuration File**: `.opencode/config.json` or `opencode.json`
+```json
+{
+  "providers": [
+    {
+      "id": "my-custom-provider",
+      "name": "My Custom Provider",
+      "baseURL": "https://api.example.com/v1",
+      "apiType": "openai-compatible",
+      "defaultModel": "custom-model"
+    }
+  ],
+  "instructions": [
+    ".opencode/instructions/**/*.md",
+    "docs/rules.md"
+  ]
+}
+```
 
 ## Usage
 
@@ -143,16 +210,43 @@ Configure the following settings in the plugin settings panel:
 ```
 opencode-obsidian/
 ├── src/
-│   ├── main.ts                      # Main plugin file
-│   ├── opencode-obsidian-view.ts    # Chat view component
-│   ├── embedded-ai-client.ts        # Embedded AI client (multi-provider support)
-│   ├── settings.ts                  # Settings panel
-│   └── types.ts                     # TypeScript types
+│   ├── main.ts                      # Main plugin entry point
+│   ├── opencode-obsidian-view.ts    # Chat view component with incremental DOM updates
+│   ├── embedded-ai-client.ts        # Multi-provider AI client with LRU session cache
+│   ├── provider-manager.ts          # Provider management with caching/throttling
+│   ├── settings.ts                  # Settings panel UI
+│   ├── types.ts                     # TypeScript type definitions
+│   ├── config-loader.ts             # Configuration file loading with security validations
+│   ├── agent/
+│   │   └── agent-resolver.ts        # Agent configuration resolution and skill merging
+│   ├── hooks/
+│   │   ├── hook-registry.ts         # Hook system for extensibility
+│   │   └── *.ts                     # Individual hook implementations
+│   ├── context/
+│   │   ├── context-manager.ts       # Context token management
+│   │   ├── compaction-manager.ts    # Context compaction logic
+│   │   └── token-estimator.ts       # Token estimation
+│   ├── session/
+│   │   ├── session-manager.ts       # Session lifecycle management
+│   │   └── session-storage.ts       # Session persistence
+│   ├── todo/
+│   │   ├── todo-manager.ts          # TODO extraction and management
+│   │   └── todo-extractor.ts        # TODO parsing logic
+│   ├── utils/
+│   │   ├── error-handler.ts         # Unified error handling system
+│   │   ├── validators.ts            # Input validation utilities
+│   │   ├── constants.ts             # Configuration constants
+│   │   ├── debounce-throttle.ts     # Debounce/throttle utilities
+│   │   └── error-handler.test.ts    # Unit tests
+│   └── mcp/                         # MCP (Model Context Protocol) - placeholder
+├── docs/
+│   └── ARCHITECTURE.md              # Architecture Decision Records
 ├── styles.css                       # Styles (automatically loaded by Obsidian)
 ├── manifest.json                    # Plugin manifest
 ├── versions.json                    # Version compatibility mapping
 ├── package.json                     # Dependencies
 ├── tsconfig.json                    # TypeScript configuration
+├── vitest.config.ts                 # Vitest test configuration
 ├── eslint.config.mts                # ESLint configuration
 ├── esbuild.config.mjs               # Build configuration
 └── version-bump.mjs                 # Version management script
@@ -178,6 +272,28 @@ pnpm lint
 ```
 
 A GitHub Action is preconfigured to automatically lint every commit on all branches.
+
+### Testing
+
+This project uses [Vitest](https://vitest.dev/) for unit testing. Core modules are tested including error handling, agent resolution, and validation logic.
+
+```bash
+# Run tests once
+pnpm test
+
+# Run tests in watch mode
+pnpm test:watch
+
+# Run tests with UI
+pnpm test:ui
+```
+
+### Type Checking
+
+```bash
+# Run TypeScript type checking
+pnpm check
+```
 
 ### Version Management
 
@@ -218,6 +334,21 @@ To bump the plugin version:
 -   Check that the `05_Attachments` folder exists (created automatically)
 -   Verify image file size is under 10MB
 
+### Configuration not loading
+
+-   Verify `.opencode/config.json` or `opencode.json` exists and is valid JSON
+-   Check file path - should be in vault root
+-   Verify file size is under 1MB
+-   Check Obsidian console for validation errors
+-   Ensure YAML frontmatter in agent/skill files is valid (use js-yaml format)
+
+### Performance issues
+
+-   Check if too many instruction files are loaded (large files slow down startup)
+-   Reduce instruction file sizes (max 10MB per file)
+-   Limit number of conversations (sessions are cached with LRU, max 50)
+-   Check if model fetching is throttled (2s minimum interval)
+
 ## Releasing new releases
 
 1. Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
@@ -236,13 +367,38 @@ Contributions are welcome! Please follow these guidelines:
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Run `pnpm build` and `pnpm lint` to ensure code quality
+4. Run `pnpm build`, `pnpm lint`, and `pnpm test` to ensure code quality
 5. Test thoroughly
-6. Submit a pull request
+6. Update documentation if needed
+7. Submit a pull request
 
-## API Documentation
+### Code Quality Standards
 
-See https://docs.obsidian.md for more information on developing plugins.
+-   Follow TypeScript best practices with strict typing
+-   Add JSDoc comments for all public interfaces and methods
+-   Write unit tests for new features (using Vitest)
+-   Ensure all tests pass before submitting
+-   Follow existing code style and patterns
+-   Use the error handling system for consistent error reporting
+-   Extract constants to `src/utils/constants.ts`
+
+## Documentation
+
+### Architecture Documentation
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture decision records, module responsibilities, and data flow documentation.
+
+### API Documentation
+
+-   **ErrorHandler**: Unified error handling system (`src/utils/error-handler.ts`)
+-   **AgentResolver**: Agent configuration resolution (`src/agent/agent-resolver.ts`)
+-   **ConfigLoader**: Configuration file loading (`src/config-loader.ts`)
+-   **ProviderManager**: Provider and model management (`src/provider-manager.ts`)
+-   **EmbeddedAIClient**: AI provider client interface (`src/embedded-ai-client.ts`)
+
+All public interfaces and classes include comprehensive JSDoc comments. See source files for detailed API documentation.
+
+For Obsidian plugin development, see https://docs.obsidian.md for more information.
 
 ## License
 
