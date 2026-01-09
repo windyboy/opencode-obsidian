@@ -1,5 +1,5 @@
 import { TFile, Vault, TFolder } from 'obsidian'
-import type { CompatibleProvider, Agent } from './types'
+import type { CompatibleProvider, Agent, Skill } from './types'
 
 export interface OpenCodeConfig {
   providers?: Array<{
@@ -9,10 +9,19 @@ export interface OpenCodeConfig {
     apiType: 'openai-compatible' | 'anthropic-compatible'
     defaultModel?: string
   }>
+  instructions?: string[] // Array of file paths or glob patterns
+}
+
+export interface InstructionCache {
+  content: string
+  path: string
+  lastModified: number
 }
 
 export class ConfigLoader {
   private vault: Vault
+  private instructionCache: Map<string, InstructionCache> = new Map()
+  private mergedInstructions: string = '' // Cached merged instructions content
 
   constructor(vault: Vault) {
     this.vault = vault
@@ -249,6 +258,17 @@ export class ConfigLoader {
         }
       }
       
+      // Parse skills array
+      let skills: string[] | undefined
+      if (frontmatter.skills) {
+        if (Array.isArray(frontmatter.skills)) {
+          skills = frontmatter.skills.filter((s): s is string => typeof s === 'string')
+        } else if (typeof frontmatter.skills === 'string') {
+          // Handle single skill as string
+          skills = [frontmatter.skills]
+        }
+      }
+      
       const agent: Agent = {
         id,
         name,
@@ -256,6 +276,7 @@ export class ConfigLoader {
         systemPrompt: body,
         model,
         tools,
+        skills,
         color: frontmatter.color,
         hidden: frontmatter.hidden === true,
         mode: frontmatter.mode
@@ -265,6 +286,85 @@ export class ConfigLoader {
     } catch (error) {
       console.warn(`[ConfigLoader] Failed to parse agent file ${filename}:`, error)
       return null
+    }
+  }
+
+  /**
+   * Parse a skill file (markdown with YAML frontmatter)
+   */
+  private parseSkillFile(content: string, skillDirName: string): Skill | null {
+    try {
+      const { frontmatter, body } = this.parseYamlFrontmatter(content)
+      
+      // Use directory name as skill ID
+      const id = skillDirName
+      
+      // Get name from frontmatter or derive from ID
+      const name = frontmatter.name || id.split('-').map(word => 
+        word.charAt(0).toUpperCase() + word.slice(1)
+      ).join(' ')
+      
+      const skill: Skill = {
+        id,
+        name,
+        description: frontmatter.description,
+        content: body
+      }
+      
+      return skill
+    } catch (error) {
+      console.warn(`[ConfigLoader] Failed to parse skill file in ${skillDirName}:`, error)
+      return null
+    }
+  }
+
+  /**
+   * Load skills from .opencode/skill/{skill-name}/SKILL.md files
+   */
+  async loadSkills(): Promise<Skill[]> {
+    try {
+      const skillDir = this.vault.getAbstractFileByPath('.opencode/skill')
+      
+      if (!skillDir || !(skillDir instanceof TFolder)) {
+        console.log('[ConfigLoader] No .opencode/skill directory found')
+        return []
+      }
+      
+      const skills: Skill[] = []
+      
+      // Iterate through subdirectories in .opencode/skill/
+      for (const child of skillDir.children) {
+        if (!(child instanceof TFolder)) continue
+        
+        // Look for SKILL.md file in this subdirectory
+        const skillFile = child.children.find(
+          file => file instanceof TFile && file.name === 'SKILL.md'
+        )
+        
+        if (!(skillFile instanceof TFile)) {
+          console.warn(`[ConfigLoader] No SKILL.md found in ${child.path}`)
+          continue
+        }
+        
+        try {
+          const content = await this.vault.read(skillFile)
+          const skill = this.parseSkillFile(content, child.name)
+          
+          if (skill) {
+            skills.push(skill)
+            console.log(`[ConfigLoader] Loaded skill: ${skill.id} (${skill.name})`)
+          }
+        } catch (error) {
+          console.warn(`[ConfigLoader] Failed to load skill file ${skillFile.path}:`, error)
+          // Continue loading other skills
+        }
+      }
+      
+      console.log(`[ConfigLoader] Loaded ${skills.length} skill(s) from .opencode/skill/`)
+      return skills
+    } catch (error) {
+      console.error('[ConfigLoader] Error loading skills:', error)
+      return []
     }
   }
 
@@ -306,5 +406,178 @@ export class ConfigLoader {
       console.error('[ConfigLoader] Error loading agents:', error)
       return []
     }
+  }
+
+  /**
+   * Convert glob pattern to regex pattern
+   * Supports basic glob patterns: *, **, ?
+   */
+  private globToRegex(glob: string): RegExp {
+    // Escape special regex characters except * and ?
+    let pattern = glob
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      // Convert ** to match any path separator
+      .replace(/\*\*/g, '___GLOB_STAR_STAR___')
+      // Convert * to match any characters except path separator
+      .replace(/\*/g, '[^/]*')
+      // Convert ? to match single character except path separator
+      .replace(/\?/g, '[^/]')
+      // Restore ** to match any characters including path separators
+      .replace(/___GLOB_STAR_STAR___/g, '.*')
+    
+    return new RegExp(`^${pattern}$`)
+  }
+
+  /**
+   * Find files matching a glob pattern
+   */
+  private findFilesByGlob(pattern: string): TFile[] {
+    const regex = this.globToRegex(pattern)
+    const matchingFiles: TFile[] = []
+    
+    // Recursively search through vault
+    const searchInFolder = (folder: TFolder | null) => {
+      if (!folder) return
+      
+      for (const child of folder.children) {
+        if (child instanceof TFile) {
+          // Check if file path matches pattern
+          if (regex.test(child.path)) {
+            matchingFiles.push(child)
+          }
+        } else if (child instanceof TFolder) {
+          searchInFolder(child)
+        }
+      }
+    }
+    
+    // Start from root
+    const rootFolder = this.vault.getRoot()
+    searchInFolder(rootFolder)
+    
+    return matchingFiles
+  }
+
+  /**
+   * Load instruction files from config.json instructions array or provided instructions array
+   * Supports glob patterns and caches content
+   * @param customInstructions Optional instructions array from settings (will be merged with config.json)
+   */
+  async loadInstructions(customInstructions?: string[]): Promise<string> {
+    try {
+      const config = await this.loadConfig()
+      
+      // Merge instructions from config.json and settings
+      const instructions: string[] = []
+      
+      // Add instructions from config.json first
+      if (config && config.instructions && Array.isArray(config.instructions)) {
+        instructions.push(...config.instructions)
+      }
+      
+      // Add custom instructions from settings (avoid duplicates)
+      if (customInstructions && Array.isArray(customInstructions)) {
+        for (const customInstruction of customInstructions) {
+          if (customInstruction && !instructions.includes(customInstruction)) {
+            instructions.push(customInstruction)
+          }
+        }
+      }
+      
+      if (instructions.length === 0) {
+        console.log('[ConfigLoader] No instructions found in config or settings')
+        return ''
+      }
+
+      const instructionContents: string[] = []
+      const filesToLoad: TFile[] = []
+
+      // Collect all files matching patterns
+      for (const pattern of instructions) {
+        if (!pattern || typeof pattern !== 'string') {
+          console.warn('[ConfigLoader] Invalid instruction pattern:', pattern)
+          continue
+        }
+
+        // Check if pattern contains glob characters
+        const hasGlob = pattern.includes('*') || pattern.includes('?')
+        
+        if (hasGlob) {
+          // Use glob pattern matching
+          const matchedFiles = this.findFilesByGlob(pattern)
+          filesToLoad.push(...matchedFiles)
+          console.log(`[ConfigLoader] Glob pattern "${pattern}" matched ${matchedFiles.length} file(s)`)
+        } else {
+          // Direct file path
+          const file = this.vault.getAbstractFileByPath(pattern)
+          if (file instanceof TFile) {
+            filesToLoad.push(file)
+          } else {
+            console.warn(`[ConfigLoader] Instruction file not found: ${pattern}`)
+          }
+        }
+      }
+
+      // Remove duplicates
+      const uniqueFiles = Array.from(new Set(filesToLoad.map(f => f.path)))
+        .map(path => filesToLoad.find(f => f.path === path))
+        .filter((f): f is TFile => f instanceof TFile)
+
+      // Load and cache file contents
+      for (const file of uniqueFiles) {
+        try {
+          // Check cache first
+          const cached = this.instructionCache.get(file.path)
+          const fileStat = file.stat
+          const lastModified = fileStat.mtime
+
+          let content: string
+          if (cached && cached.lastModified === lastModified) {
+            // Use cached content
+            content = cached.content
+            console.log(`[ConfigLoader] Using cached instruction: ${file.path}`)
+          } else {
+            // Load and cache
+            content = await this.vault.read(file)
+            this.instructionCache.set(file.path, {
+              content,
+              path: file.path,
+              lastModified
+            })
+            console.log(`[ConfigLoader] Loaded and cached instruction: ${file.path}`)
+          }
+
+          instructionContents.push(`\n\n---\n# ${file.name}\n---\n\n${content}`)
+        } catch (error) {
+          console.warn(`[ConfigLoader] Failed to load instruction file ${file.path}:`, error)
+          // Continue loading other files
+        }
+      }
+
+      const mergedInstructions = instructionContents.join('\n\n')
+      this.mergedInstructions = mergedInstructions
+      console.log(`[ConfigLoader] Loaded ${uniqueFiles.length} instruction file(s), total length: ${mergedInstructions.length} chars`)
+      return mergedInstructions
+    } catch (error) {
+      console.error('[ConfigLoader] Error loading instructions:', error)
+      return ''
+    }
+  }
+
+  /**
+   * Clear instruction cache (useful for reloading)
+   */
+  clearInstructionCache(): void {
+    this.instructionCache.clear()
+    this.mergedInstructions = ''
+    console.log('[ConfigLoader] Instruction cache cleared')
+  }
+
+  /**
+   * Get cached merged instruction content
+   * Returns the merged instructions that were loaded by loadInstructions()
+   */
+  getCachedInstructions(): string {
+    return this.mergedInstructions
   }
 }

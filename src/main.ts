@@ -13,7 +13,8 @@ const DEFAULT_SETTINGS: OpenCodeObsidianSettings = {
   model: {
     providerID: 'anthropic',
     modelID: 'claude-3-5-sonnet-20241022'
-  }
+  },
+  instructions: []
 }
 
 export default class OpenCodeObsidianPlugin extends Plugin {
@@ -159,6 +160,16 @@ export default class OpenCodeObsidianPlugin extends Plugin {
       this.settings.compatibleProviders = []
     }
     
+    // Ensure instructions array exists
+    if (!this.settings.instructions) {
+      this.settings.instructions = []
+    }
+    
+    // Ensure skills array exists
+    if (!this.settings.skills) {
+      this.settings.skills = []
+    }
+    
     console.log('[OpenCode Obsidian] Settings loaded from storage:', loadedData)
   }
 
@@ -263,6 +274,32 @@ export default class OpenCodeObsidianPlugin extends Plugin {
           this.settings.agents = []
         }
       }
+
+      // Load skills from .opencode/skill/{skill-name}/SKILL.md files
+      const loadedSkills = await this.configLoader.loadSkills()
+      
+      if (loadedSkills.length > 0) {
+        // Store loaded skills in settings
+        this.settings.skills = loadedSkills
+        console.log(`[OpenCode Obsidian] Loaded ${loadedSkills.length} skill(s) from .opencode/skill/`)
+        
+        // Save updated settings
+        await this.saveSettings()
+      } else {
+        console.log('[OpenCode Obsidian] No skills found in .opencode/skill/')
+        // Keep existing skills if any, or set to empty array
+        if (!this.settings.skills) {
+          this.settings.skills = []
+        }
+      }
+
+      // Load instructions from config.json and settings
+      const instructions = await this.configLoader.loadInstructions(this.settings.instructions)
+      if (instructions) {
+        console.log(`[OpenCode Obsidian] Loaded instructions (${instructions.length} chars)`)
+      } else {
+        console.log('[OpenCode Obsidian] No instructions found in config or settings')
+      }
     } catch (error) {
       console.error('[OpenCode Obsidian] Error loading TUI features:', error)
     }
@@ -342,6 +379,22 @@ export default class OpenCodeObsidianPlugin extends Plugin {
         if (agent.tools) {
           agentTools = { ...agent.tools, ...(options.tools || {}) }
         }
+        
+        // Merge referenced skills into system prompt
+        if (agent.skills && agent.skills.length > 0 && this.settings.skills) {
+          const skillContents: string[] = []
+          for (const skillId of agent.skills) {
+            const skill = this.settings.skills.find(s => s.id === skillId)
+            if (skill && skill.content) {
+              skillContents.push(`\n\n---\n# Skill: ${skill.name}\n---\n\n${skill.content}`)
+            } else {
+              console.warn(`[OpenCode Obsidian] Skill "${skillId}" referenced by agent "${agentID}" not found`)
+            }
+          }
+          if (skillContents.length > 0) {
+            systemPrompt = systemPrompt + skillContents.join('')
+          }
+        }
       } else {
         // Agent not found in loaded agents, fallback to default behavior
         // Use agent ID as system prompt (legacy behavior)
@@ -353,6 +406,18 @@ export default class OpenCodeObsidianPlugin extends Plugin {
       // No agents loaded, use legacy behavior
       if (!systemPrompt) {
         systemPrompt = agentID
+      }
+    }
+    
+    // Merge instructions into system prompt if available
+    if (this.configLoader) {
+      const instructions = this.configLoader.getCachedInstructions()
+      if (instructions && instructions.trim()) {
+        // Append instructions to system prompt
+        // Instructions are already formatted with separators in loadInstructions()
+        systemPrompt = systemPrompt 
+          ? `${systemPrompt}\n\n${instructions}`
+          : instructions
       }
     }
     

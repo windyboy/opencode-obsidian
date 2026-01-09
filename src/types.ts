@@ -7,6 +7,13 @@ export interface CompatibleProvider {
   defaultModel?: string
 }
 
+export interface Skill {
+  id: string // Directory name (e.g., "test-skill")
+  name: string // Display name (from frontmatter or derived from id)
+  description?: string // From frontmatter
+  content: string // Markdown content after frontmatter
+}
+
 export interface Agent {
   id: string // Filename without .md extension (e.g., "docs", "triage")
   name: string // Display name (from frontmatter or derived from id)
@@ -18,6 +25,7 @@ export interface Agent {
     modelID: string
   }
   tools?: { [key: string]: boolean } // Tool enablement config (e.g., {"*": false, "github-triage": true})
+  skills?: string[] // Array of skill IDs referenced by this agent
   color?: string // UI color (e.g., "#38A3EE")
   hidden?: boolean // Hide from UI if true
   mode?: string // e.g., "primary"
@@ -50,6 +58,8 @@ export interface OpenCodeObsidianSettings {
     modelID: string
   }
   agents?: Agent[] // Loaded agents from .opencode/agent/*.md
+  skills?: Skill[] // Loaded skills from .opencode/skill/{skill-name}/SKILL.md
+  instructions?: string[] // Instruction file paths or glob patterns (can be set via UI or loaded from config.json)
 }
 
 export interface Message {

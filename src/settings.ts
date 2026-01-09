@@ -166,6 +166,63 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
       })
     }
 
+    // Instructions/Rules section
+    containerEl.createEl('h3', { text: 'Instructions / Rules' })
+    containerEl.createEl('p', {
+      text: 'Configure instruction files or glob patterns to be merged into system prompts. Instructions from .opencode/config.json are automatically included.',
+      cls: 'setting-item-description'
+    })
+
+    // Instructions list container
+    const instructionsContainer = containerEl.createDiv('opencode-obsidian-instructions-container')
+    
+    // Display current instructions
+    this.displayInstructionsList(instructionsContainer)
+
+    // Add new instruction input
+    const addInstructionSetting = new Setting(instructionsContainer)
+      .setName('Add Instruction')
+      .setDesc('Enter a file path or glob pattern (e.g., ".opencode/rules.md" or "docs/**/*.md")')
+      .addText(text => {
+        text.setPlaceholder('.opencode/rules.md or **/*.md')
+        text.inputEl.style.width = '100%'
+      })
+      .addButton(button => {
+        button.setButtonText('Add')
+        button.setCta()
+        button.onClick(async () => {
+          const input = addInstructionSetting.controlEl.querySelector('input') as HTMLInputElement
+          const value = input?.value.trim()
+          if (value) {
+            // Initialize instructions array if needed
+            if (!this.plugin.settings.instructions) {
+              this.plugin.settings.instructions = []
+            }
+            
+            // Add if not already present
+            if (!this.plugin.settings.instructions.includes(value)) {
+              this.plugin.settings.instructions.push(value)
+              await this.plugin.saveSettings()
+              
+              // Reload instructions
+              if (this.plugin.configLoader) {
+                await this.plugin.configLoader.loadInstructions(this.plugin.settings.instructions)
+                // Clear cache to force reload
+                this.plugin.configLoader.clearInstructionCache()
+                await this.plugin.configLoader.loadInstructions(this.plugin.settings.instructions)
+              }
+              
+              // Refresh UI
+              this.displayInstructionsList(instructionsContainer)
+              input.value = ''
+              new Notice('Instruction added')
+            } else {
+              new Notice('Instruction already exists')
+            }
+          }
+        })
+      })
+
     // Agent setting
     const agentSetting = new Setting(containerEl)
       .setName('Default Agent')
@@ -512,5 +569,70 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
     // Update provider manager
     const currentModelID = this.plugin.settings.model.modelID || this.getDefaultModelForProvider(this.plugin.settings.providerID)
     await this.updateProviderManagerModel(this.plugin.settings.providerID, currentModelID)
+  }
+
+  /**
+   * Display the list of instructions with remove buttons
+   */
+  private displayInstructionsList(container: HTMLElement) {
+    // Remove existing list if any
+    const existingList = container.querySelector('.opencode-obsidian-instructions-list')
+    if (existingList) {
+      existingList.remove()
+    }
+
+    const instructions = this.plugin.settings.instructions || []
+    
+    if (instructions.length === 0) {
+      const emptyMsg = container.createDiv('opencode-obsidian-instructions-list')
+      emptyMsg.createEl('p', {
+        text: 'No custom instructions configured. Instructions from .opencode/config.json will be used if available.',
+        cls: 'setting-item-description'
+      })
+      return
+    }
+
+    const listContainer = container.createDiv('opencode-obsidian-instructions-list')
+    
+    instructions.forEach((instruction, index) => {
+      const instructionItem = new Setting(listContainer)
+        .setName(instruction)
+        .setDesc('File path or glob pattern')
+        .addButton(button => {
+          button.setButtonText('Remove')
+          button.setWarning()
+          button.onClick(async () => {
+            // Remove from array
+            this.plugin.settings.instructions = this.plugin.settings.instructions?.filter((_, i) => i !== index) || []
+            await this.plugin.saveSettings()
+            
+            // Reload instructions
+            if (this.plugin.configLoader) {
+              this.plugin.configLoader.clearInstructionCache()
+              await this.plugin.configLoader.loadInstructions(this.plugin.settings.instructions)
+            }
+            
+            // Refresh UI
+            this.displayInstructionsList(container)
+            new Notice('Instruction removed')
+          })
+        })
+    })
+
+    // Add reload button
+    const reloadSetting = new Setting(listContainer)
+      .setName('Reload Instructions')
+      .setDesc('Reload all instruction files from disk (clears cache)')
+      .addButton(button => {
+        button.setButtonText('Reload')
+        button.setCta()
+        button.onClick(async () => {
+          if (this.plugin.configLoader) {
+            this.plugin.configLoader.clearInstructionCache()
+            await this.plugin.configLoader.loadInstructions(this.plugin.settings.instructions)
+            new Notice('Instructions reloaded')
+          }
+        })
+      })
   }
 }
