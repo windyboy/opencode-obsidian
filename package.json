@@ -1,0 +1,41 @@
+{
+  "name": "opencode-obsidian",
+  "version": "0.13.1",
+  "description": "OpenCode integration for Obsidian - AI-powered chat interface",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "version": "node version-bump.mjs && git add manifest.json versions.json",
+    "lint": "eslint .",
+    "debug": "node scripts/debug.js",
+    "check": "tsc -noEmit -skipLibCheck"
+  },
+  "keywords": [
+    "obsidian",
+    "opencode",
+    "ai",
+    "chat",
+    "plugin"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
+    "openai": "^4.70.0",
+    "@google/generative-ai": "^0.21.0",
+    "obsidian": "latest"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.30.1",
+    "@types/node": "^16.11.6",
+    "esbuild": "^0.24.0",
+    "eslint-plugin-obsidianmd": "^0.1.9",
+    "globals": "^14.0.0",
+    "jiti": "^2.6.1",
+    "tslib": "^2.4.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.35.1"
+  },
+  "packageManager": "pnpm@9.15.4"
+}

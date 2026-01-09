@@ -1,0 +1,11 @@
+{
+	"id": "opencode-obsidian",
+	"name": "OpenCode Obsidian",
+	"version": "0.13.1",
+	"minAppVersion": "1.0.0",
+	"description": "OpenCode integration for Obsidian - AI-powered chat interface",
+	"author": "OpenCode Obsidian Team",
+	"authorUrl": "",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}
