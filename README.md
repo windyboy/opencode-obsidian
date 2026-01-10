@@ -1,33 +1,29 @@
 # OpenCode Obsidian
 
-AI-powered chat interface for Obsidian with support for multiple AI providers (Anthropic Claude, OpenAI GPT, Google Gemini).
+AI-powered chat interface for Obsidian that connects to OpenCode Server for AI interactions.
 
 ## What is this?
 
-OpenCode Obsidian is an Obsidian plugin that provides a chat interface to interact with AI models, enabling you to:
+OpenCode Obsidian is an Obsidian plugin that provides a chat interface to interact with AI models via OpenCode Server, enabling you to:
 
 -   Chat with AI directly from Obsidian
--   Support for multiple AI providers (Anthropic, OpenAI, Google)
+-   Connect to OpenCode Server for AI interactions
 -   Send prompts and receive streaming responses
 -   Attach images to conversations
 -   Manage multiple conversation sessions
--   Configure different AI models and agents
+-   Execute tools for Obsidian operations (read/write notes, search vault, etc.)
 
 ## Features
 
 -   **Chat Interface**: Clean, intuitive chat UI integrated into Obsidian
 -   **Real-time Streaming**: See AI responses stream in real-time
 -   **Image Support**: Attach images to your conversations
--   **Multiple Sessions**: Manage multiple conversation sessions with LRU cache management
--   **Multi-Provider Support**: Choose from Anthropic Claude, OpenAI GPT, Google Gemini, or ZenMux
--   **Compatible Providers**: Add custom providers via `.opencode/config.json`
--   **Model Selection**: Choose from different AI models for each provider
--   **Agent Configuration**: Switch between different agent profiles
--   **Skill System**: Create reusable prompt components (skills) that can be referenced by agents
--   **Instructions**: Merge global instructions from config files into system prompts
--   **Settings Panel**: Configure API keys, providers, and default settings
+-   **Multiple Sessions**: Manage multiple conversation sessions
+-   **OpenCode Server Integration**: Connect to OpenCode Server for AI provider and model management
+-   **Tool Execution**: Execute Obsidian tools (read/write notes, search vault, etc.) with permission management
+-   **Settings Panel**: Configure server connection and tool permissions
 -   **Error Handling**: Unified error handling system with user-friendly notifications
--   **Performance Optimized**: Incremental DOM updates, debounced settings, throttled API calls
+-   **Performance Optimized**: Incremental DOM updates, debounced settings
 
 ## Installation
 
@@ -80,10 +76,7 @@ OpenCode Obsidian is an Obsidian plugin that provides a chat interface to intera
 
 -   **Node.js**: Version 16 or higher (for development)
 -   **Obsidian**: Version 1.0.0 or higher
--   **API Key**: An API key from one of the supported providers:
-    -   Anthropic: Get your API key from [console.anthropic.com](https://console.anthropic.com)
-    -   OpenAI: Get your API key from [platform.openai.com](https://platform.openai.com)
-    -   Google: Get your API key from [makersuite.google.com](https://makersuite.google.com)
+-   **OpenCode Server**: A running OpenCode Server instance (providers and API keys are managed server-side)
 
 ## Configuration
 
@@ -93,9 +86,9 @@ OpenCode Obsidian is an Obsidian plugin that provides a chat interface to intera
 2. Go to Community Plugins
 3. Enable "OpenCode Obsidian"
 4. Open the plugin settings
-5. Enter your API Key(s) for one or more providers
-6. Select your preferred AI Provider
-7. Choose a model
+5. Configure OpenCode Server URL (default: `ws://localhost:4096`)
+6. Set tool permission level (read-only, scoped-write, or full-write)
+7. Start using the chat interface
 
 ### Settings
 

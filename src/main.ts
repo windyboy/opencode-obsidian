@@ -2,10 +2,7 @@ import { Plugin, Notice } from 'obsidian'
 import { OpenCodeObsidianView, VIEW_TYPE_OPENCODE_OBSIDIAN } from './opencode-obsidian-view'
 import { OpenCodeObsidianSettingTab } from './settings'
 import type { OpenCodeObsidianSettings } from './types'
-import { ConfigLoader } from './config-loader'
-import { HookRegistry } from './hooks/hook-registry'
-import { CONTEXT_CONFIG, UI_CONFIG } from './utils/constants'
-import { AgentResolver } from './agent/agent-resolver'
+import { UI_CONFIG } from './utils/constants'
 import { ErrorHandler, ErrorSeverity } from './utils/error-handler'
 import { debounceAsync } from './utils/debounce-throttle'
 import { OpenCodeServerClient } from './opencode-server/client'
@@ -15,25 +12,10 @@ import { PermissionManager } from './tools/obsidian/permission-manager'
 import { AuditLogger } from './tools/obsidian/audit-logger'
 import { ToolPermission } from './tools/obsidian/types'
 import type { PermissionScope } from './tools/obsidian/permission-types'
-import { AgentOrchestrator } from './orchestrator/agent-orchestrator'
-import { ContextManager } from './context/context-manager'
-import { TodoManager } from './todo/todo-manager'
 
 const DEFAULT_SETTINGS: OpenCodeObsidianSettings = {
   agent: 'assistant',
   instructions: [],
-  disabledHooks: [],
-  contextManagement: {
-    preemptiveCompactionThreshold: CONTEXT_CONFIG.PREEMPTIVE_THRESHOLD,
-    maxContextTokens: CONTEXT_CONFIG.MAX_TOKENS,
-    enableTokenEstimation: true,
-  },
-  todoManagement: {
-    enabled: true,
-    autoContinue: true,
-    respectUserInterrupt: true,
-  },
-  mcpServers: {},
   // OpenCode Server configuration (required)
   opencodeServer: {
     url: 'ws://localhost:4096',
@@ -49,16 +31,10 @@ const DEFAULT_SETTINGS: OpenCodeObsidianSettings = {
 
 export default class OpenCodeObsidianPlugin extends Plugin {
   settings: OpenCodeObsidianSettings
-  configLoader: ConfigLoader | null = null
-  hookRegistry: HookRegistry
-  agentResolver: AgentResolver
   errorHandler: ErrorHandler
   opencodeClient: OpenCodeServerClient | null = null
   toolRegistry: ObsidianToolRegistry | null = null
   permissionManager: PermissionManager | null = null
-  agentOrchestrator: AgentOrchestrator | null = null
-  contextManager: ContextManager | null = null
-  todoManager: TodoManager | null = null
 
   async onload() {
     console.debug('[OpenCode Obsidian] Plugin loading...')
@@ -75,60 +51,10 @@ export default class OpenCodeObsidianPlugin extends Plugin {
       })
       console.debug('[OpenCode Obsidian] Error handler initialized')
       
-      // Initialize hook registry first
-      this.hookRegistry = new HookRegistry(this.errorHandler)
-      console.debug('[OpenCode Obsidian] Hook registry initialized')
-      
-      // Initialize agent resolver
-      this.agentResolver = new AgentResolver()
-      console.debug('[OpenCode Obsidian] Agent resolver initialized')
-      
       await this.loadSettings()
-      
-      // Disable hooks as specified in settings
-      if (this.settings.disabledHooks) {
-        for (const hookId of this.settings.disabledHooks) {
-          this.hookRegistry.disableHook(hookId)
-        }
-        console.debug(`[OpenCode Obsidian] Disabled hooks: ${this.settings.disabledHooks.join(', ')}`)
-      }
       
       // Migrate old settings format if needed
       this.migrateSettings()
-      
-      // Initialize config loader (only if vault is available)
-      try {
-        if (this.app && this.app.vault) {
-          this.configLoader = new ConfigLoader(this.app.vault)
-          
-          // Load TUI features (compatible providers from .opencode/config.json)
-          // Wrap in try-catch to prevent plugin load failure
-          try {
-            await this.loadTUIFeatures()
-          } catch (error) {
-            this.errorHandler.handleError(error, {
-              module: 'OpenCodeObsidianPlugin',
-              function: 'onload.loadTUIFeatures',
-              operation: 'Loading TUI features'
-            }, ErrorSeverity.Warning)
-            // Continue loading plugin even if TUI features fail to load
-          }
-        } else {
-          this.errorHandler.handleError(
-            new Error('Vault not available'),
-            { module: 'OpenCodeObsidianPlugin', function: 'onload', operation: 'Config loader initialization' },
-            ErrorSeverity.Warning
-          )
-        }
-      } catch (error) {
-        this.errorHandler.handleError(error, {
-          module: 'OpenCodeObsidianPlugin',
-          function: 'onload',
-          operation: 'Initializing config loader'
-        }, ErrorSeverity.Warning)
-        // Continue loading plugin even if config loader fails
-        this.configLoader = null
-      }
       
       console.debug('[OpenCode Obsidian] Settings loaded:', {
         agent: this.settings.agent,
@@ -172,47 +98,13 @@ export default class OpenCodeObsidianPlugin extends Plugin {
               this.toolRegistry,
               this.app,
               this.errorHandler,
-              this.settings.opencodeServer
+              this.settings.opencodeServer,
+              this.permissionManager || undefined
             )
             
             console.debug('[OpenCode Obsidian] OpenCode Server client initialized')
           } else {
             console.warn('[OpenCode Obsidian] OpenCode Server URL not configured')
-          }
-
-          // Initialize Context Manager
-          if (this.app && this.app.vault) {
-            this.contextManager = new ContextManager(
-              {
-                maxContextTokens: this.settings.contextManagement?.maxContextTokens ?? CONTEXT_CONFIG.MAX_TOKENS,
-                preemptiveCompactionThreshold: this.settings.contextManagement?.preemptiveCompactionThreshold ?? CONTEXT_CONFIG.PREEMPTIVE_THRESHOLD,
-                enableTokenEstimation: this.settings.contextManagement?.enableTokenEstimation ?? true,
-              },
-              this.app,
-              this.app.vault
-            )
-            console.debug('[OpenCode Obsidian] Context Manager initialized')
-          }
-
-          // Initialize Todo Manager
-          if (this.app && this.app.vault) {
-            this.todoManager = new TodoManager(this.app.vault, {
-              autoSave: this.settings.todoManagement?.enabled ?? true,
-              storagePath: '.opencode/todos',
-            })
-            console.debug('[OpenCode Obsidian] Todo Manager initialized')
-          }
-
-          // Initialize Agent Orchestrator
-          if (this.app && this.app.vault) {
-            this.agentOrchestrator = new AgentOrchestrator(
-              this.app.vault,
-              this.app,
-              this.opencodeClient,
-              this.errorHandler,
-              this.contextManager ?? undefined
-            )
-            console.debug('[OpenCode Obsidian] Agent Orchestrator initialized')
           }
         }
       } catch (error) {
@@ -277,15 +169,6 @@ export default class OpenCodeObsidianPlugin extends Plugin {
         this.opencodeClient = null
       })
     }
-
-    // Clear orchestrator contexts
-    if (this.agentOrchestrator) {
-      const contexts = this.agentOrchestrator.listContexts()
-      for (const context of contexts) {
-        this.agentOrchestrator.clearContext(context.sessionId)
-      }
-      this.agentOrchestrator = null
-    }
     
     console.debug('[OpenCode Obsidian] Plugin unloaded')
   }
@@ -294,43 +177,6 @@ export default class OpenCodeObsidianPlugin extends Plugin {
     const loadedData = await this.loadData() as Partial<OpenCodeObsidianSettings> | null
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData ?? {})
     
-    // Ensure instructions array exists
-    if (!this.settings.instructions) {
-      this.settings.instructions = []
-    }
-    
-    // Ensure skills array exists
-    if (!this.settings.skills) {
-      this.settings.skills = []
-    }
-
-    // Ensure hook configuration exists
-    if (!this.settings.disabledHooks) {
-      this.settings.disabledHooks = []
-    }
-
-    // Ensure context management configuration exists
-    if (!this.settings.contextManagement) {
-      this.settings.contextManagement = {
-        preemptiveCompactionThreshold: CONTEXT_CONFIG.PREEMPTIVE_THRESHOLD,
-        maxContextTokens: CONTEXT_CONFIG.MAX_TOKENS,
-        enableTokenEstimation: true,
-      }
-    }
-
-    // Ensure TODO management configuration exists
-    if (!this.settings.todoManagement) {
-      this.settings.todoManagement = {
-        enabled: true,
-        autoContinue: true,
-        respectUserInterrupt: true,
-      }
-    }
-
-    // Ensure MCP servers configuration exists
-    if (!this.settings.mcpServers) {
-      this.settings.mcpServers = {}
-    }
 
     // Ensure OpenCode Server configuration exists
     if (!this.settings.opencodeServer) {
@@ -419,82 +265,6 @@ export default class OpenCodeObsidianPlugin extends Plugin {
     await this.saveSettings()
   }, UI_CONFIG.DEBOUNCE_DELAY)
 
-  /**
-   * Load TUI features from .opencode/config.json
-   * Loads compatible providers and agents
-   */
-  private async loadTUIFeatures() {
-    if (!this.configLoader) {
-      console.warn('[OpenCode Obsidian] Config loader not initialized, skipping TUI features')
-      return
-    }
-    
-    try {
-      // TODO: Compatible providers are now managed by OpenCode Server
-      // No need to load providers from config in the plugin
-
-      // Load agents from .opencode/agent/*.md files
-      const loadedAgents = await this.configLoader.loadAgents()
-      
-      if (loadedAgents.length > 0) {
-        // Store loaded agents in settings
-        this.settings.agents = loadedAgents
-        // Update agent resolver
-        this.agentResolver.setAgents(loadedAgents)
-        console.debug(`[OpenCode Obsidian] Loaded ${loadedAgents.length} agent(s) from .opencode/agent/`)
-        
-        // Save updated settings
-        await this.saveSettings()
-      } else {
-        console.debug('[OpenCode Obsidian] No agents found in .opencode/agent/')
-        // Keep existing agents if any, or set to empty array
-        if (!this.settings.agents) {
-          this.settings.agents = []
-        }
-        // Update agent resolver with existing agents
-        this.agentResolver.setAgents(this.settings.agents)
-      }
-
-      // Load skills from .opencode/skill/{skill-name}/SKILL.md files
-      const loadedSkills = await this.configLoader.loadSkills()
-      
-      if (loadedSkills.length > 0) {
-        // Store loaded skills in settings
-        this.settings.skills = loadedSkills
-        // Update agent resolver
-        this.agentResolver.setSkills(loadedSkills)
-        console.debug(`[OpenCode Obsidian] Loaded ${loadedSkills.length} skill(s) from .opencode/skill/`)
-        
-        // Save updated settings
-        await this.saveSettings()
-      } else {
-        console.debug('[OpenCode Obsidian] No skills found in .opencode/skill/')
-        // Keep existing skills if any, or set to empty array
-        if (!this.settings.skills) {
-          this.settings.skills = []
-        }
-        // Update agent resolver with existing skills
-        this.agentResolver.setSkills(this.settings.skills)
-      }
-
-      // Update agent resolver with config loader
-      this.agentResolver.setConfigLoader(this.configLoader)
-
-      // Load instructions from config.json and settings
-      const instructions = await this.configLoader.loadInstructions(this.settings.instructions)
-      if (instructions) {
-        console.debug(`[OpenCode Obsidian] Loaded instructions (${instructions.length} chars)`)
-      } else {
-        console.debug('[OpenCode Obsidian] No instructions found in config or settings')
-      }
-    } catch (error) {
-      this.errorHandler.handleError(error, {
-        module: 'OpenCodeObsidianPlugin',
-        function: 'loadTUIFeatures',
-        operation: 'Loading TUI features'
-      }, ErrorSeverity.Error)
-    }
-  }
 
   async activateView() {
     const { workspace } = this.app

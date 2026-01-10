@@ -32,6 +32,7 @@ import type {
   ObsidianGetNoteMetadataOutput,
   AuditLogEntry
 } from './types'
+import type { PermissionRequest } from './permission-modal'
 
 /**
  * Error thrown when permission is pending (needs user approval)
@@ -891,5 +892,156 @@ export class ObsidianToolExecutor {
       )
       throw error
     }
+  }
+
+  /**
+   * Generate preview for tool operation (for permission modal)
+   * This method should be called before requesting permission to show user what will happen
+   * It checks permissions and generates a preview with unified audit logging
+   */
+  async generatePreview(
+    toolName: string,
+    args: unknown,
+    sessionId?: string,
+    callId?: string
+  ): Promise<PermissionRequest['preview'] | undefined> {
+    const startTime = Date.now()
+    const effectiveCallId = callId || `preview_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+    
+    // For update_note, generate preview by reading file and calculating changes
+    if (toolName === 'obsidian.update_note') {
+      const updateArgs = args as { path: string; content: string; mode: string }
+      
+      // Check read permission first (required for preview)
+      try {
+        const permissionResult = await this.permissionManager.canRead(updateArgs.path)
+        
+        if (!permissionResult.allowed) {
+          // Permission denied - log audit and return restricted preview
+          await this.createAuditLog(
+            toolName,
+            sessionId,
+            effectiveCallId,
+            args,
+            startTime,
+            'read',
+            undefined,
+            new Error(`Permission denied for preview: ${permissionResult.reason}`),
+            updateArgs.path,
+            false,
+            true // Preview is always a dry run
+          )
+          
+          console.debug('[ObsidianToolExecutor] Permission denied for preview generation:', permissionResult.reason)
+          return {
+            originalContent: undefined,
+            newContent: updateArgs.content,
+            mode: updateArgs.mode
+            // Note: restricted/reason are intentionally omitted as they're not in PermissionRequest['preview'] type
+            // The absence of originalContent indicates a restricted preview
+          }
+        }
+      } catch (error) {
+        // Permission check failed - log and return restricted preview
+        await this.createAuditLog(
+          toolName,
+          sessionId,
+          effectiveCallId,
+          args,
+          startTime,
+          'read',
+          undefined,
+          error instanceof Error ? error : new Error(String(error)),
+          updateArgs.path,
+          false,
+          true
+        )
+        console.warn('[ObsidianToolExecutor] Permission check failed for preview:', error)
+        return {
+          originalContent: undefined,
+          newContent: updateArgs.content,
+          mode: updateArgs.mode
+        }
+      }
+      
+      // Permission allowed - read file and generate preview
+      try {
+        let originalContent: string | undefined
+        const file = this.vault.getAbstractFileByPath(updateArgs.path)
+        
+        if (isTFile(file)) {
+          originalContent = await this.vault.read(file)
+        }
+        
+        // Calculate new content based on mode
+        let newContent = updateArgs.content
+        if (originalContent !== undefined) {
+          if (updateArgs.mode === 'append') {
+            newContent = originalContent + (originalContent && !originalContent.endsWith('\n') ? '\n' : '') + updateArgs.content
+          } else if (updateArgs.mode === 'prepend') {
+            newContent = updateArgs.content + (updateArgs.content && !updateArgs.content.endsWith('\n') ? '\n' : '') + originalContent
+          } else if (updateArgs.mode === 'replace') {
+            newContent = updateArgs.content
+          } else if (updateArgs.mode === 'insert') {
+            // For insert mode, we'd need the insertAt/insertMarker, which is complex
+            // For now, just use the new content
+            newContent = updateArgs.content
+          }
+        }
+
+        // Calculate line differences
+        const originalLines = originalContent ? originalContent.split('\n').length : 0
+        const newLines = newContent.split('\n').length
+        const addedLines = newLines > originalLines ? newLines - originalLines : 0
+        const removedLines = newLines < originalLines ? originalLines - newLines : 0
+
+        // Log successful preview generation
+        await this.createAuditLog(
+          toolName,
+          sessionId,
+          effectiveCallId,
+          args,
+          startTime,
+          'read',
+          { preview: { originalContent, newContent, mode: updateArgs.mode, addedLines, removedLines } },
+          undefined,
+          updateArgs.path,
+          undefined,
+          true // Preview is always a dry run
+        )
+
+        return {
+          originalContent,
+          newContent,
+          mode: updateArgs.mode,
+          addedLines,
+          removedLines
+        }
+      } catch (error) {
+        // File read failed - log and return restricted preview
+        await this.createAuditLog(
+          toolName,
+          sessionId,
+          effectiveCallId,
+          args,
+          startTime,
+          'read',
+          undefined,
+          error instanceof Error ? error : new Error(String(error)),
+          updateArgs.path,
+          false,
+          true
+        )
+        console.warn('[ObsidianToolExecutor] Failed to generate preview:', error)
+        return {
+          originalContent: undefined,
+          newContent: updateArgs.content,
+          mode: updateArgs.mode
+        }
+      }
+    }
+
+    // For other tools, return undefined (no preview available)
+    return undefined
   }
 }

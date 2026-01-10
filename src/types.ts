@@ -1,6 +1,6 @@
 /**
- * Compatible provider configuration
- * Represents a custom AI provider that is compatible with OpenAI or Anthropic APIs
+ * Compatible provider configuration (managed by OpenCode Server)
+ * Kept for type compatibility, but providers are configured server-side
  * 
  * @interface CompatibleProvider
  */
@@ -80,46 +80,12 @@ export interface Agent {
 export interface OpenCodeObsidianSettings {
   /** Default agent identifier */
   agent: string
-  /** Loaded agents from .opencode/agent/*.md files */
+  /** Loaded agents from .opencode/agent/*.md files (for display/selection) */
   agents?: Agent[]
-  /** Loaded skills from .opencode/skill/{skill-name}/SKILL.md files */
+  /** Loaded skills from .opencode/skill/{skill-name}/SKILL.md files (for reference) */
   skills?: Skill[]
-  /** Instruction file paths or glob patterns - can be set via UI or loaded from config.json */
+  /** Instruction file paths or glob patterns (managed by OpenCode Server) */
   instructions?: string[]
-  
-  /** Hook configuration - list of disabled hook IDs */
-  disabledHooks?: string[]
-  
-  /** Context management configuration */
-  contextManagement?: {
-    /** Threshold for preemptive compaction (default: 0.85 = 85%) */
-    preemptiveCompactionThreshold?: number
-    /** Maximum context tokens allowed (default: 50000) */
-    maxContextTokens?: number
-    /** Enable token estimation (default: true) */
-    enableTokenEstimation?: boolean
-  }
-  
-  /** TODO management configuration */
-  todoManagement?: {
-    /** Enable TODO management (default: true) */
-    enabled?: boolean
-    /** Automatically continue after TODO completion (default: true) */
-    autoContinue?: boolean
-    /** Respect user interrupt requests (default: true) */
-    respectUserInterrupt?: boolean
-  }
-  
-  /** MCP (Model Context Protocol) server configuration */
-  mcpServers?: {
-    /** MCP server name to configuration mapping */
-    [serverName: string]: {
-      /** Whether the server is enabled */
-      enabled: boolean
-      /** Server-specific configuration */
-      config: Record<string, unknown>
-    }
-  }
 
   /** OpenCode Server configuration (for client/server architecture) */
   opencodeServer?: {
@@ -249,7 +215,3 @@ export interface ModelInfo {
   /** Provider identifier - supports built-in and custom provider IDs */
   providerID: string
 }
-
-// Hook system types
-export type { Hook, HookContext, HookResult } from './hooks/types'
-export { HookEvent } from './hooks/types'

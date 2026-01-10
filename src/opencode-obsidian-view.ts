@@ -1,8 +1,6 @@
 import { ItemView, WorkspaceLeaf, Notice, Modal, Setting, MarkdownRenderer, TFile, App } from 'obsidian'
 import type OpenCodeObsidianPlugin from './main'
 import type { Conversation, Message, ToolUse, ToolResult, ImageAttachment } from './types'
-import type { TaskPlan } from './todo/types'
-import { TaskStatus } from './todo/types'
 
 export const VIEW_TYPE_OPENCODE_OBSIDIAN = 'opencode-obsidian-view'
 
@@ -49,7 +47,7 @@ export class OpenCodeObsidianView extends ItemView {
     if (this.plugin.opencodeClient) {
       this.registerClientCallbacks()
       
-      // Connect to server if not already connected
+      // Connect to server directly
       if (!this.plugin.opencodeClient.isConnected()) {
         try {
           await this.plugin.opencodeClient.connect()
@@ -63,6 +61,13 @@ export class OpenCodeObsidianView extends ItemView {
   }
   
   /**
+   * Find conversation by sessionId
+   */
+  private findConversationBySessionId(sessionId: string): Conversation | null {
+    return this.conversations.find(c => c.sessionId === sessionId) || null
+  }
+
+  /**
    * Register callbacks for OpenCode Server client events
    */
   private registerClientCallbacks(): void {
@@ -70,11 +75,19 @@ export class OpenCodeObsidianView extends ItemView {
     
     // Stream token callback - append tokens to the current assistant message
     this.plugin.opencodeClient.onStreamToken((sessionId, token, done) => {
-      const activeConv = this.getActiveConversation()
-      if (!activeConv) return
+      // Route by sessionId, not just active conversation
+      const targetConv = this.findConversationBySessionId(sessionId) || this.getActiveConversation()
+      if (!targetConv || targetConv.sessionId !== sessionId) {
+        // Only process if sessionId matches or if it's the active conversation (for backward compatibility)
+        if (targetConv && targetConv.sessionId !== sessionId) {
+          console.debug('[OpenCodeObsidianView] Ignoring stream token for mismatched sessionId:', sessionId)
+          return
+        }
+        if (!targetConv) return
+      }
       
       // Find the last assistant message and append token
-      const lastMessage = activeConv.messages[activeConv.messages.length - 1]
+      const lastMessage = targetConv.messages[targetConv.messages.length - 1]
       if (lastMessage && lastMessage.role === 'assistant') {
         lastMessage.content += token
         // Incremental update - only update the message content, not entire view
@@ -82,46 +95,80 @@ export class OpenCodeObsidianView extends ItemView {
       }
       
       if (done) {
-        this.isStreaming = false
-        this.updateStreamingStatus(false)
-        activeConv.updatedAt = Date.now()
+        // Only update streaming status if this is the active conversation
+        const activeConv = this.getActiveConversation()
+        if (activeConv && activeConv.sessionId === sessionId) {
+          this.isStreaming = false
+          this.updateStreamingStatus(false)
+        }
+        targetConv.updatedAt = Date.now()
         void this.saveConversations()
       }
     })
     
     // Stream thinking callback
     this.plugin.opencodeClient.onStreamThinking((sessionId, content) => {
-      const activeConv = this.getActiveConversation()
-      if (!activeConv) return
+      // Route by sessionId
+      const targetConv = this.findConversationBySessionId(sessionId) || this.getActiveConversation()
+      if (!targetConv || targetConv.sessionId !== sessionId) {
+        if (targetConv && targetConv.sessionId !== sessionId) {
+          console.debug('[OpenCodeObsidianView] Ignoring stream thinking for mismatched sessionId:', sessionId)
+          return
+        }
+        if (!targetConv) return
+      }
       
-      const lastMessage = activeConv.messages[activeConv.messages.length - 1]
+      const lastMessage = targetConv.messages[targetConv.messages.length - 1]
       if (lastMessage && lastMessage.role === 'assistant') {
         void this.handleResponseChunk({ type: 'thinking', content }, lastMessage)
       }
     })
     
-    // Error callback
+    // Error callback - check if error has sessionId, otherwise fallback to activeConv
     this.plugin.opencodeClient.onError((error) => {
-      const activeConv = this.getActiveConversation()
-      if (!activeConv) return
+      // Try to extract sessionId from error if available
+      let targetConv: Conversation | null = null
+      const errorWithSessionId = error as { sessionId?: string }
+      if (errorWithSessionId.sessionId) {
+        const sessionId = errorWithSessionId.sessionId
+        targetConv = this.findConversationBySessionId(sessionId)
+      }
       
-      const lastMessage = activeConv.messages[activeConv.messages.length - 1]
+      // Fallback to active conversation if no sessionId or not found
+      if (!targetConv) {
+        targetConv = this.getActiveConversation()
+      }
+      
+      if (!targetConv) return
+      
+      const lastMessage = targetConv.messages[targetConv.messages.length - 1]
       if (lastMessage && lastMessage.role === 'assistant') {
         lastMessage.content = `Error: ${error.message}`
         this.updateMessages()
       }
       
       new Notice(error.message)
-      this.isStreaming = false
-      this.updateStreamingStatus(false)
+      // Only update streaming status if this is the active conversation
+      const activeConv = this.getActiveConversation()
+      if (activeConv === targetConv) {
+        this.isStreaming = false
+        this.updateStreamingStatus(false)
+      }
     })
     
     // Progress update callback
     this.plugin.opencodeClient.onProgressUpdate((sessionId, progress) => {
-      const activeConv = this.getActiveConversation()
-      if (!activeConv) return
+      // Route by sessionId
+      const targetConv = this.findConversationBySessionId(sessionId) || this.getActiveConversation()
+      if (!targetConv || targetConv.sessionId !== sessionId) {
+        if (targetConv && targetConv.sessionId !== sessionId) {
+          console.debug('[OpenCodeObsidianView] Ignoring progress update for mismatched sessionId:', sessionId)
+          return
+        }
+        if (!targetConv) return
+      }
       
-      const lastMessage = activeConv.messages[activeConv.messages.length - 1]
+      const lastMessage = targetConv.messages[targetConv.messages.length - 1]
       if (lastMessage && lastMessage.role === 'assistant') {
         void this.handleResponseChunk({
           type: 'progress',
@@ -134,13 +181,18 @@ export class OpenCodeObsidianView extends ItemView {
     
     // Session end callback
     this.plugin.opencodeClient.onSessionEnd((sessionId, reason) => {
-      const activeConv = this.getActiveConversation()
-      if (activeConv && activeConv.sessionId === sessionId) {
-        activeConv.sessionId = null
+      // Route by sessionId
+      const targetConv = this.findConversationBySessionId(sessionId)
+      if (targetConv && targetConv.sessionId === sessionId) {
+        targetConv.sessionId = null
       }
       
-      this.isStreaming = false
-      this.updateStreamingStatus(false)
+      // Only update streaming status if this is the active conversation
+      const activeConv = this.getActiveConversation()
+      if (activeConv && activeConv.sessionId === sessionId) {
+        this.isStreaming = false
+        this.updateStreamingStatus(false)
+      }
       
       if (reason === 'error') {
         new Notice('Session ended due to error')
@@ -277,9 +329,6 @@ export class OpenCodeObsidianView extends ItemView {
       statusEl.textContent = '● connected to OpenCode server.'
     }
 
-    // Render task progress if there's an active task
-    this.renderTaskProgress(container)
-
     const controls = container.createDiv('opencode-obsidian-controls')
     
     // New conversation button
@@ -292,184 +341,6 @@ export class OpenCodeObsidianView extends ItemView {
     }
   }
 
-  /**
-   * Render task progress display in header
-   */
-  private renderTaskProgress(container: HTMLElement): void {
-    if (!this.plugin.todoManager) {
-      return
-    }
-
-    // Get active conversation to find associated task plan
-    const activeConv = this.getActiveConversation()
-    if (!activeConv || !activeConv.id) {
-      return
-    }
-
-    // Find task plans for this session
-    const taskPlans = this.plugin.todoManager.getTaskPlansForSession(activeConv.id)
-    if (taskPlans.length === 0) {
-      return
-    }
-
-    // Find active (in-progress) task plan
-    const activePlan = taskPlans.find(plan => 
-      plan.status === TaskStatus.InProgress || plan.status === TaskStatus.Pending
-    )
-
-    if (!activePlan) {
-      return
-    }
-
-    // Get task progress
-    const progress = this.plugin.todoManager.getTaskProgress(activePlan.id)
-    if (!progress) {
-      return
-    }
-
-    // Create task progress container
-    const taskProgressContainer = container.createDiv('opencode-obsidian-task-progress')
-    
-    // Task goal
-    const goalEl = taskProgressContainer.createDiv('opencode-obsidian-task-goal')
-    goalEl.textContent = `Task: ${activePlan.goal.substring(0, 50)}${activePlan.goal.length > 50 ? '...' : ''}`
-
-    // Progress bar
-    const progressBarContainer = taskProgressContainer.createDiv('opencode-obsidian-progress-bar-container')
-    const progressBar = progressBarContainer.createDiv('opencode-obsidian-progress-bar')
-    progressBar.style.width = `${progress.progress * 100}%`
-    progressBar.setAttribute('role', 'progressbar')
-    progressBar.setAttribute('aria-valuenow', String(progress.progress * 100))
-    progressBar.setAttribute('aria-valuemin', '0')
-    progressBar.setAttribute('aria-valuemax', '100')
-
-    // Progress text
-    const progressText = taskProgressContainer.createDiv('opencode-obsidian-progress-text')
-    progressText.textContent = `${progress.completedSteps}/${progress.totalSteps} steps completed (${Math.round(progress.progress * 100)}%)`
-
-    // Current step info
-    if (progress.currentStepIndex !== undefined && activePlan.steps[progress.currentStepIndex]) {
-      const currentStep = activePlan.steps[progress.currentStepIndex]
-      if (currentStep) {
-        const currentStepEl = taskProgressContainer.createDiv('opencode-obsidian-current-step')
-        currentStepEl.textContent = `Current: ${currentStep.description.substring(0, 60)}${currentStep.description.length > 60 ? '...' : ''}`
-      }
-    }
-
-    // Controls (interrupt button)
-    const taskControls = taskProgressContainer.createDiv('opencode-obsidian-task-controls')
-    const interruptBtn = taskControls.createEl('button', {
-      text: 'Interrupt',
-      cls: 'mod-warning'
-    })
-    interruptBtn.onclick = () => {
-      if (this.plugin.todoManager) {
-        const interrupted = this.plugin.todoManager.interruptTask(activePlan.id, 'User requested interruption')
-        if (interrupted) {
-          new Notice('Task interrupted')
-          this.updateHeader()
-        }
-      }
-    }
-
-    // Task log button (view details)
-    const viewLogBtn = taskControls.createEl('button', {
-      text: 'View log',
-      cls: 'mod-secondary'
-    })
-    viewLogBtn.onclick = () => {
-      this.showTaskLogModal(activePlan)
-    }
-  }
-
-  /**
-   * Show task log modal with detailed execution information
-   */
-  private showTaskLogModal(plan: TaskPlan): void {
-    // Create modal
-    const modal = new Modal(this.app)
-    modal.titleEl.textContent = `Task Log: ${plan.goal}`
-
-    const content = modal.contentEl
-    content.empty()
-
-    // Task status
-    const statusEl = content.createDiv('opencode-obsidian-task-status')
-    statusEl.createEl('strong', { text: 'Status: ' })
-    statusEl.createSpan({ text: plan.status })
-    statusEl.createEl('br')
-
-    // Progress info
-    const progress = this.plugin.todoManager?.getTaskProgress(plan.id)
-    if (progress) {
-      statusEl.createEl('strong', { text: 'Progress: ' })
-      statusEl.createSpan({ text: `${progress.completedSteps}/${progress.totalSteps} steps (${Math.round(progress.progress * 100)}%)` })
-      statusEl.createEl('br')
-    }
-
-    // Steps list
-    const stepsContainer = content.createDiv('opencode-obsidian-task-steps')
-    stepsContainer.createEl('h3', { text: 'Steps' })
-
-    plan.steps.forEach((step, index) => {
-      const stepEl = stepsContainer.createDiv('opencode-obsidian-task-step')
-      stepEl.createEl('strong', { text: `Step ${index + 1}: ` })
-      stepEl.createSpan({ text: step.description })
-      stepEl.createEl('br')
-      const stepInfo = stepEl.createEl('small')
-      stepInfo.createSpan({ text: `Status: ${step.status} | Success Criteria: ${step.successCriteria}` })
-
-      // Show step results if available
-      if (this.plugin.todoManager) {
-        const stepResults = this.plugin.todoManager.getStepResults(step.id)
-        if (stepResults && stepResults.length > 0) {
-          const resultsEl = stepEl.createDiv('opencode-obsidian-step-results')
-          stepResults.forEach((result, idx) => {
-            const resultDiv = resultsEl.createDiv()
-            resultDiv.createSpan({ text: `Attempt ${idx + 1}: ${result.success ? '✓' : '✗'}` })
-            if (result.error) {
-              resultDiv.createSpan({ text: ` - ${result.error}` })
-            }
-          })
-        }
-      }
-
-      if (step.error) {
-        stepEl.createEl('br')
-        stepEl.createEl('small', { attr: { style: 'color: red;' }, text: `Error: ${step.error}` })
-      }
-    })
-
-    // Checkpoints
-    if (this.plugin.todoManager) {
-      const checkpoints = this.plugin.todoManager.getCheckpoints(plan.id)
-      if (checkpoints.length > 0) {
-        const checkpointsContainer = content.createDiv('opencode-obsidian-task-checkpoints')
-        checkpointsContainer.createEl('h3', { text: 'Checkpoints' })
-
-        checkpoints.forEach((checkpoint) => {
-          const cpEl = checkpointsContainer.createDiv('opencode-obsidian-checkpoint')
-          cpEl.createEl('strong', { text: new Date(checkpoint.createdAt).toLocaleString() })
-          cpEl.createEl('br')
-          cpEl.createSpan({ text: checkpoint.description || 'No description' })
-          cpEl.createEl('br')
-          const rollbackBtn = cpEl.createEl('button', { text: 'Rollback to this point', cls: 'mod-cta' })
-          rollbackBtn.onclick = () => {
-            if (this.plugin.todoManager) {
-              const rolledBack = this.plugin.todoManager.rollbackToCheckpoint(plan.id, checkpoint.id)
-              if (rolledBack) {
-                new Notice('Task rolled back to checkpoint')
-                modal.close()
-                this.updateHeader()
-              }
-            }
-          }
-        })
-      }
-    }
-
-    modal.open()
-  }
 
   private renderConversationSelector(container: HTMLElement) {
     container.empty()
