@@ -679,3 +679,51 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Settings Page Styles */
+.opencode-setting-url.mod-invalid {
+  border-color: var(--text-error) !important;
+}
+
+.opencode-setting-textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  resize: vertical;
+}
+
+.opencode-setting-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.opencode-settings-advanced {
+  margin-top: 2em;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 1em;
+}
+
+.opencode-settings-advanced-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5em;
+}
+
+.opencode-settings-advanced-header h3 {
+  margin: 0;
+}
+
+.opencode-settings-advanced-header button {
+  font-size: 12px;
+  padding: 4px 12px;
+}
+
+.opencode-settings-advanced-content {
+  margin-top: 1em;
+}
