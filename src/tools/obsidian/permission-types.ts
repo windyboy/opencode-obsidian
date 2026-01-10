@@ -15,7 +15,6 @@ export interface PermissionScope {
   /** 
    * Denied path patterns (glob patterns)
    * Paths matching these patterns are always denied, even if they match allowedPaths
-   * Example: ['**/private/**', 'secrets/*']
    */
   deniedPaths?: string[]
   
@@ -45,9 +44,14 @@ export interface PermissionValidationResult {
   
   /** 
    * Reason why the operation was denied (if allowed is false)
-   * Example: "Path 'secrets/api-key.md' matches denied pattern '**/secrets/**'"
+   * Example: "Path matches denied pattern"
    */
   reason?: string
+  
+  /** 
+   * Whether secrets are involved (optional, for auditing purposes)
+   */
+  secrets?: boolean
 }
 
 /**
@@ -72,31 +76,24 @@ export interface PermissionLevelConfig {
  */
 export const DEFAULT_PERMISSION_CONFIGS: Record<ToolPermission, PermissionScope> = {
   [ToolPermission.ReadOnly]: {
-    // Read-only: no restrictions on reading
     allowedPaths: undefined,
     deniedPaths: undefined,
     maxFileSize: undefined,
     allowedExtensions: undefined
-  },
+  } as PermissionScope,
   [ToolPermission.ScopedWrite]: {
-    // Scoped-write: default to allowing most paths but deny common system paths
-    // Note: '.obsidian' is Obsidian's default config directory name. Users can configure a different name,
-    // but this glob pattern is a reasonable default for denying access to the config directory.
     allowedPaths: undefined,
     deniedPaths: [
       // eslint-disable-next-line obsidianmd/hardcoded-config-path
       '**/.obsidian/**',
       '**/.git/**',
       '**/node_modules/**',
-      '**/.opencode/**' // Deny writing to OpenCode config directory
+      '**/.opencode/**'
     ],
-    maxFileSize: 10485760, // 10MB default limit
+    maxFileSize: 10485760,
     allowedExtensions: ['.md', '.txt', '.json', '.yaml', '.yml', '.toml']
-  },
+  } as PermissionScope,
   [ToolPermission.FullWrite]: {
-    // Full-write: minimal restrictions, only deny critical system paths
-    // Note: '.obsidian' is Obsidian's default config directory name. These are critical config files
-    // that should be protected even in full-write mode.
     allowedPaths: undefined,
     deniedPaths: [
       // eslint-disable-next-line obsidianmd/hardcoded-config-path
@@ -106,7 +103,7 @@ export const DEFAULT_PERMISSION_CONFIGS: Record<ToolPermission, PermissionScope>
       // eslint-disable-next-line obsidianmd/hardcoded-config-path
       '**/.obsidian/appearance.json'
     ],
-    maxFileSize: undefined, // No size limit
-    allowedExtensions: undefined // All extensions allowed
-  }
+    maxFileSize: undefined,
+    allowedExtensions: undefined
+  } as PermissionScope
 }

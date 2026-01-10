@@ -21,7 +21,7 @@ export class PermissionManager {
     this.vault = vault
     this.permissionLevel = permissionLevel
     // Merge with default scope for this permission level
-    this.scope = this.mergeScopeWithDefaults(scope || {}, permissionLevel)
+    this.scope = this.mergeScopeWithDefaults(scope || {} as PermissionScope, permissionLevel)
   }
 
   /**
@@ -30,12 +30,13 @@ export class PermissionManager {
   private mergeScopeWithDefaults(userScope: PermissionScope, level: ToolPermission): PermissionScope {
     const defaultScope = DEFAULT_PERMISSION_CONFIGS[level]
     
-    return {
-      allowedPaths: userScope.allowedPaths ?? defaultScope.allowedPaths,
+    const merged: PermissionScope = {
+      allowedPaths: userScope.allowedPaths ?? defaultScope.allowedPaths ?? undefined,
       deniedPaths: [...(defaultScope.deniedPaths || []), ...(userScope.deniedPaths || [])],
-      maxFileSize: userScope.maxFileSize ?? defaultScope.maxFileSize,
-      allowedExtensions: userScope.allowedExtensions ?? defaultScope.allowedExtensions
+      maxFileSize: userScope.maxFileSize ?? defaultScope.maxFileSize ?? undefined,
+      allowedExtensions: userScope.allowedExtensions ?? defaultScope.allowedExtensions ?? undefined
     }
+    return merged
   }
 
   /**
@@ -68,7 +69,8 @@ export class PermissionManager {
     if (this.permissionLevel === ToolPermission.ReadOnly) {
       return {
         allowed: false,
-        reason: 'Permission level is read-only. Write operations are not allowed.'
+        reason: 'Permission level is read-only. Write operations are not allowed.',
+        secrets: false
       }
     }
     return this.validatePath(path, 'write')
@@ -81,7 +83,8 @@ export class PermissionManager {
     if (this.permissionLevel === ToolPermission.ReadOnly) {
       return {
         allowed: false,
-        reason: 'Permission level is read-only. Create operations are not allowed.'
+        reason: 'Permission level is read-only. Create operations are not allowed.',
+        secrets: false
       }
     }
     return this.validatePath(path, 'create')
@@ -94,7 +97,8 @@ export class PermissionManager {
     if (this.permissionLevel === ToolPermission.ReadOnly) {
       return {
         allowed: false,
-        reason: 'Permission level is read-only. Modify operations are not allowed.'
+        reason: 'Permission level is read-only. Modify operations are not allowed.',
+        secrets: false
       }
     }
     return this.validatePath(path, 'modify')
@@ -107,14 +111,16 @@ export class PermissionManager {
     if (this.permissionLevel === ToolPermission.ReadOnly) {
       return {
         allowed: false,
-        reason: 'Permission level is read-only. Delete operations are not allowed.'
+        reason: 'Permission level is read-only. Delete operations are not allowed.',
+        secrets: false
       }
     }
     // Delete operations are only allowed with full-write permission
     if (this.permissionLevel !== ToolPermission.FullWrite) {
       return {
         allowed: false,
-        reason: 'Delete operations require full-write permission level.'
+        reason: 'Delete operations require full-write permission level.',
+        secrets: false
       }
     }
     return this.validatePath(path, 'delete')
@@ -133,7 +139,8 @@ export class PermissionManager {
         if (minimatch(normalizedPath, deniedPattern)) {
           return {
             allowed: false,
-            reason: `Path '${normalizedPath}' matches denied pattern '${deniedPattern}'`
+            reason: `Path '${normalizedPath}' matches denied pattern '${deniedPattern}'`,
+            secrets: false
           }
         }
       }
@@ -147,7 +154,8 @@ export class PermissionManager {
       if (!matchesAnyAllowed) {
         return {
           allowed: false,
-          reason: `Path '${normalizedPath}' does not match any allowed pattern`
+          reason: `Path '${normalizedPath}' does not match any allowed pattern`,
+          secrets: false
         }
       }
     }
@@ -162,7 +170,8 @@ export class PermissionManager {
       if (!matchesExtension) {
         return {
           allowed: false,
-          reason: `File extension is not in allowed list: ${this.scope.allowedExtensions.join(', ')}`
+          reason: `File extension is not in allowed list: ${this.scope.allowedExtensions.join(', ')}`,
+          secrets: false
         }
       }
     }
@@ -173,32 +182,27 @@ export class PermissionManager {
         // Check if file exists
         const file = this.vault.getAbstractFileByPath(normalizedPath)
         if (file && 'stat' in file) {
-          const stat = file.stat
+          const stat = (file as { stat: { size: number } }).stat
           if (stat.size > this.scope.maxFileSize) {
             return {
               allowed: false,
-              reason: `File size (${stat.size} bytes) exceeds maximum allowed size (${this.scope.maxFileSize} bytes)`
+              reason: `File size (${stat.size} bytes) exceeds maximum allowed size (${this.scope.maxFileSize} bytes)`,
+              secrets: false
             }
           }
         }
       } catch (error) {
-        // If we can't check file size, allow it (file might not exist yet)
-        // This is acceptable for create operations
-        if (operation === 'create') {
-          // Allow create operation if file doesn't exist yet (can't check size)
-          // But we'll check size on first read/modify
-        } else {
-          // For read/modify, if we can't access the file, return error
-          return {
-            allowed: false,
-            reason: `Cannot access file '${normalizedPath}': ${error instanceof Error ? error.message : 'Unknown error'}`
-          }
+        // For read/modify, if we can't access the file, return error
+        return {
+          allowed: false,
+          reason: `Cannot access file '${normalizedPath}': ${error instanceof Error ? error.message : 'Unknown error'}`,
+          secrets: false
         }
       }
     }
 
     // All checks passed
-    return { allowed: true }
+    return { allowed: true, secrets: false }
   }
 
   /**

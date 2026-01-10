@@ -83,6 +83,76 @@ function validateURL(value: string | undefined, fieldName: string): string[] {
 }
 
 /**
+ * Validate provider baseURL for SSRF protection
+ * Only allows https:// and blocks localhost/private IP ranges
+ * 
+ * @param baseURL - Base URL to validate
+ * @param allowLocalhost - Allow localhost/127.0.0.1 (default: false, for advanced users)
+ * @returns Array of validation errors (empty if valid)
+ */
+export function validateProviderBaseURL(baseURL: string, allowLocalhost: boolean = false): string[] {
+  const errors: string[] = []
+
+  if (!baseURL || typeof baseURL !== 'string') {
+    errors.push('Provider baseURL is required and must be a string')
+    return errors
+  }
+
+  try {
+    const url = new URL(baseURL)
+
+    // Only allow https:// protocol (SSRF protection)
+    if (url.protocol !== 'https:') {
+      if (!allowLocalhost && url.protocol === 'http:') {
+        errors.push('Provider baseURL must use https:// protocol for security (SSRF protection)')
+      } else if (url.protocol !== 'http:') {
+        errors.push(`Provider baseURL must use https:// protocol, got: ${url.protocol}`)
+      }
+    }
+
+    // Block localhost and private IP ranges (unless explicitly allowed)
+    if (!allowLocalhost) {
+      const hostname = url.hostname.toLowerCase()
+      
+      // Block localhost variants
+      if (hostname === 'localhost' || 
+          hostname === '127.0.0.1' || 
+          hostname === '::1' ||
+          hostname.startsWith('localhost.') ||
+          hostname === '0.0.0.0') {
+        errors.push('Provider baseURL cannot point to localhost/127.0.0.1 (SSRF protection). Use advanced settings to override if needed.')
+      }
+
+      // Block private IP ranges (RFC 1918)
+      // 10.0.0.0/8
+      if (/^10\./.test(hostname)) {
+        errors.push('Provider baseURL cannot point to private IP range 10.0.0.0/8 (SSRF protection)')
+      }
+
+      // 172.16.0.0/12
+      const match172 = /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
+      if (match172) {
+        errors.push('Provider baseURL cannot point to private IP range 172.16.0.0/12 (SSRF protection)')
+      }
+
+      // 192.168.0.0/16
+      if (/^192\.168\./.test(hostname)) {
+        errors.push('Provider baseURL cannot point to private IP range 192.168.0.0/16 (SSRF protection)')
+      }
+    }
+
+    // Additional security: block file:// and other dangerous protocols
+    if (['file:', 'ftp:', 'gopher:', 'data:'].includes(url.protocol)) {
+      errors.push(`Provider baseURL cannot use ${url.protocol} protocol (security risk)`)
+    }
+  } catch (error) {
+    errors.push(`Provider baseURL is not a valid URL: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  return errors
+}
+
+/**
  * Validate color hex format (#RRGGBB or #RRGGBBAA)
  */
 function validateColorHex(value: string | undefined): string[] {

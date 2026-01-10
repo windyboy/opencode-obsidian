@@ -10,14 +10,17 @@ export default tseslint.config(
 			},
 			parserOptions: {
 				projectService: {
-					allowDefaultProject: [
-						'eslint.config.mts',
-						'manifest.json',
-						'__mocks__/obsidian.ts',
-						'scripts/debug.js',
-						'tests/integration/opencode-server.test.ts',
-						'vitest.config.ts'
-					]
+				allowDefaultProject: [
+					'eslint.config.mts',
+					'manifest.json',
+					'__mocks__/obsidian.ts',
+					'scripts/debug.js',
+					'tests/integration/opencode-server.test.ts',
+					'tests/integration/agent-loop.test.ts',
+					'tests/security/config-loader.test.ts',
+					'tests/unit/retrieval-strategy.test.ts',
+					'vitest.config.ts'
+				]
 				},
 				tsconfigRootDir: import.meta.dirname,
 				extraFileExtensions: ['.json']

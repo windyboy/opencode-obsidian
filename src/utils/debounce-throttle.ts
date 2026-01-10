@@ -47,13 +47,13 @@ export function debounce<T extends (...args: unknown[]) => unknown>(
 export function debounceAsync<T extends (...args: unknown[]) => Promise<unknown>>(
   fn: T,
   delay: number
-): (...args: Parameters<T>) => Promise<ReturnType<T>> {
+): (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
-  let pendingPromise: Promise<ReturnType<T>> | null = null
-  let resolveCallback: ((value: ReturnType<T>) => void) | null = null
+  let pendingPromise: Promise<Awaited<ReturnType<T>>> | null = null
+  let resolveCallback: ((value: Awaited<ReturnType<T>>) => void) | null = null
   let rejectCallback: ((reason?: unknown) => void) | null = null
 
-  return function debounced(...args: Parameters<T>): Promise<ReturnType<T>> {
+  return function debounced(...args: Parameters<T>): Promise<Awaited<ReturnType<T>>> {
     // Cancel previous timeout
     if (timeoutId !== null) {
       clearTimeout(timeoutId)
@@ -62,7 +62,7 @@ export function debounceAsync<T extends (...args: unknown[]) => Promise<unknown>
 
     // Create new promise if no pending promise exists
     if (!pendingPromise) {
-      pendingPromise = new Promise<ReturnType<T>>((resolve, reject) => {
+      pendingPromise = new Promise<Awaited<ReturnType<T>>>((resolve, reject) => {
         resolveCallback = resolve
         rejectCallback = reject
       })
@@ -72,7 +72,7 @@ export function debounceAsync<T extends (...args: unknown[]) => Promise<unknown>
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     timeoutId = setTimeout(async () => {
       try {
-        const result = await fn(...args)
+        const result = await fn(...args) as Awaited<ReturnType<T>>
         if (resolveCallback) {
           resolveCallback(result)
         }
@@ -149,14 +149,14 @@ export function throttle<T extends (...args: unknown[]) => unknown>(
 export function throttleAsync<T extends (...args: unknown[]) => Promise<unknown>>(
   fn: T,
   delay: number
-): (...args: Parameters<T>) => Promise<ReturnType<T>> {
+): (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>> {
   let lastInvokeTime = 0
   let timeoutId: ReturnType<typeof setTimeout> | null = null
-  let pendingPromise: Promise<ReturnType<T>> | null = null
-  let resolveCallback: ((value: ReturnType<T>) => void) | null = null
+  let pendingPromise: Promise<Awaited<ReturnType<T>>> | null = null
+  let resolveCallback: ((value: Awaited<ReturnType<T>>) => void) | null = null
   let rejectCallback: ((reason?: unknown) => void) | null = null
 
-  return function throttled(...args: Parameters<T>): Promise<ReturnType<T>> {
+  return function throttled(...args: Parameters<T>): Promise<Awaited<ReturnType<T>>> {
     const now = Date.now()
     const timeSinceLastInvoke = now - lastInvokeTime
 
@@ -175,7 +175,7 @@ export function throttleAsync<T extends (...args: unknown[]) => Promise<unknown>
       rejectCallback = null
 
       lastInvokeTime = now
-      const promise = fn(...args)
+      const promise = fn(...args) as Promise<Awaited<ReturnType<T>>>
       
       // If there was a pending promise, resolve it with this new result
       promise
@@ -196,7 +196,7 @@ export function throttleAsync<T extends (...args: unknown[]) => Promise<unknown>
     } else {
       // Schedule invocation for the remaining time
       if (!pendingPromise) {
-        pendingPromise = new Promise<ReturnType<T>>((resolve, reject) => {
+        pendingPromise = new Promise<Awaited<ReturnType<T>>>((resolve, reject) => {
           resolveCallback = resolve
           rejectCallback = reject
         })
@@ -210,7 +210,7 @@ export function throttleAsync<T extends (...args: unknown[]) => Promise<unknown>
     timeoutId = setTimeout(async () => {
         lastInvokeTime = Date.now()
         try {
-          const result = await fn(...args)
+          const result = await fn(...args) as Awaited<ReturnType<T>>
           if (resolveCallback) {
             resolveCallback(result)
           }

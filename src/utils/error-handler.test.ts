@@ -338,7 +338,7 @@ describe('ErrorHandler', () => {
 
 describe('getDefaultErrorHandler', () => {
   afterEach(() => {
-    setDefaultErrorHandler(null as unknown)
+    setDefaultErrorHandler(null as unknown as ErrorHandler)
   })
 
   it('should create and return default error handler', () => {
@@ -360,7 +360,7 @@ describe('getDefaultErrorHandler', () => {
 
 describe('setDefaultErrorHandler', () => {
   afterEach(() => {
-    setDefaultErrorHandler(null as unknown)
+    setDefaultErrorHandler(null as unknown as ErrorHandler)
   })
 
   it('should set custom default error handler', () => {

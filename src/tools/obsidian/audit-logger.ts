@@ -1,4 +1,5 @@
-import type { Vault, TFile } from 'obsidian'
+import type { Vault } from 'obsidian'
+import { TFile } from 'obsidian'
 import type { AuditLogEntry, AuditLogFilter } from './types'
 import { minimatch } from 'minimatch'
 

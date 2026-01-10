@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { PermissionManager } from './permission-manager'
 import { ToolPermission } from './types'
+import type { PermissionScope } from './permission-types'
 import type { Vault, TAbstractFile, TFile } from 'obsidian'
 
 // Mock Obsidian Vault
@@ -54,7 +55,7 @@ describe('PermissionManager', () => {
     })
 
     it('should merge custom scope with defaults', () => {
-      const customScope = {
+      const customScope: PermissionScope = {
         allowedPaths: ['notes/**']
       }
       const manager = new PermissionManager(mockVault, ToolPermission.ScopedWrite, customScope)
@@ -72,36 +73,40 @@ describe('PermissionManager', () => {
     })
 
     it('should deny reading if path matches denied pattern', async () => {
-      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, {
+      const scope: PermissionScope = {
         deniedPaths: ['secrets/**']
-      })
+      }
+      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, scope)
       const result = await manager.canRead('secrets/api-key.md')
       expect(result.allowed).toBe(false)
       expect(result.reason).toContain('matches denied pattern')
     })
 
     it('should deny reading if path does not match allowed pattern', async () => {
-      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, {
+      const scope: PermissionScope = {
         allowedPaths: ['notes/**']
-      })
+      }
+      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, scope)
       const result = await manager.canRead('test/note.md')
       expect(result.allowed).toBe(false)
       expect(result.reason).toContain('does not match any allowed pattern')
     })
 
     it('should deny reading if file size exceeds limit', async () => {
-      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, {
+      const scope: PermissionScope = {
         maxFileSize: 10485760 // 10MB
-      })
+      }
+      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, scope)
       const result = await manager.canRead('test/large.md')
       expect(result.allowed).toBe(false)
       expect(result.reason).toContain('exceeds maximum allowed size')
     })
 
     it('should deny reading if extension is not allowed', async () => {
-      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, {
+      const scope: PermissionScope = {
         allowedExtensions: ['.txt']
-      })
+      }
+      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, scope)
       const result = await manager.canRead('test/note.md')
       expect(result.allowed).toBe(false)
       expect(result.reason).toContain('extension is not in allowed list')
@@ -123,10 +128,11 @@ describe('PermissionManager', () => {
     })
 
     it('should deny writing to denied paths even with write permission', async () => {
-      const manager = new PermissionManager(mockVault, ToolPermission.ScopedWrite, {
+      const scope: PermissionScope = {
         // eslint-disable-next-line obsidianmd/hardcoded-config-path
         deniedPaths: ['**/.obsidian/**']
-      })
+      }
+      const manager = new PermissionManager(mockVault, ToolPermission.ScopedWrite, scope)
       // eslint-disable-next-line obsidianmd/hardcoded-config-path
       const result = await manager.canWrite('.obsidian/config.json')
       expect(result.allowed).toBe(false)
@@ -149,9 +155,10 @@ describe('PermissionManager', () => {
     })
 
     it('should deny creating if path matches denied pattern', async () => {
-      const manager = new PermissionManager(mockVault, ToolPermission.ScopedWrite, {
+      const scope: PermissionScope = {
         deniedPaths: ['secrets/**']
-      })
+      }
+      const manager = new PermissionManager(mockVault, ToolPermission.ScopedWrite, scope)
       const result = await manager.canCreate('secrets/new-key.md')
       expect(result.allowed).toBe(false)
     })
@@ -181,9 +188,10 @@ describe('PermissionManager', () => {
 
   describe('validatePath', () => {
     it('should handle path normalization (backslashes, leading/trailing slashes)', async () => {
-      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, {
+      const scope: PermissionScope = {
         allowedPaths: ['test/**']
-      })
+      }
+      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, scope)
       
       // Test various path formats
       expect((await manager.canRead('test/note.md')).allowed).toBe(true)
@@ -193,10 +201,11 @@ describe('PermissionManager', () => {
     })
 
     it('should check denied paths before allowed paths', async () => {
-      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, {
+      const scope: PermissionScope = {
         allowedPaths: ['**/*.md'],
         deniedPaths: ['secrets/**']
-      })
+      }
+      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, scope)
       
       const result = await manager.canRead('secrets/api-key.md')
       expect(result.allowed).toBe(false)
@@ -204,9 +213,10 @@ describe('PermissionManager', () => {
     })
 
     it('should check allowed extensions case-insensitively', async () => {
-      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, {
+      const scope: PermissionScope = {
         allowedExtensions: ['.MD', '.TXT']
-      })
+      }
+      const manager = new PermissionManager(mockVault, ToolPermission.ReadOnly, scope)
       
       const result = await manager.canRead('test/note.md')
       expect(result.allowed).toBe(true)
@@ -235,9 +245,10 @@ describe('PermissionManager', () => {
   describe('setScope', () => {
     it('should update scope and merge with defaults', () => {
       const manager = new PermissionManager(mockVault, ToolPermission.ScopedWrite)
-      manager.setScope({
+      const customScope: PermissionScope = {
         allowedPaths: ['custom/**']
-      })
+      }
+      manager.setScope(customScope)
       
       const scope = manager.getScope()
       expect(scope.allowedPaths).toEqual(['custom/**'])

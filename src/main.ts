@@ -8,6 +8,16 @@ import { CONTEXT_CONFIG, UI_CONFIG } from './utils/constants'
 import { AgentResolver } from './agent/agent-resolver'
 import { ErrorHandler, ErrorSeverity } from './utils/error-handler'
 import { debounceAsync } from './utils/debounce-throttle'
+import { OpenCodeServerClient } from './opencode-server/client'
+import { ObsidianToolRegistry } from './tools/obsidian/tool-registry'
+import { ObsidianToolExecutor } from './tools/obsidian/tool-executor'
+import { PermissionManager } from './tools/obsidian/permission-manager'
+import { AuditLogger } from './tools/obsidian/audit-logger'
+import { ToolPermission } from './tools/obsidian/types'
+import type { PermissionScope } from './tools/obsidian/permission-types'
+import { AgentOrchestrator } from './orchestrator/agent-orchestrator'
+import { ContextManager } from './context/context-manager'
+import { TodoManager } from './todo/todo-manager'
 
 const DEFAULT_SETTINGS: OpenCodeObsidianSettings = {
   agent: 'assistant',
@@ -43,6 +53,12 @@ export default class OpenCodeObsidianPlugin extends Plugin {
   hookRegistry: HookRegistry
   agentResolver: AgentResolver
   errorHandler: ErrorHandler
+  opencodeClient: OpenCodeServerClient | null = null
+  toolRegistry: ObsidianToolRegistry | null = null
+  permissionManager: PermissionManager | null = null
+  agentOrchestrator: AgentOrchestrator | null = null
+  contextManager: ContextManager | null = null
+  todoManager: TodoManager | null = null
 
   async onload() {
     console.debug('[OpenCode Obsidian] Plugin loading...')
@@ -119,6 +135,95 @@ export default class OpenCodeObsidianPlugin extends Plugin {
         opencodeServer: this.settings.opencodeServer?.url || 'not configured'
       })
 
+      // Initialize tool execution layer
+      try {
+        if (this.app && this.app.vault) {
+          // Convert settings.permissionScope to PermissionScope type
+          const permissionScope: PermissionScope | undefined = this.settings.permissionScope ? {
+            allowedPaths: this.settings.permissionScope.allowedPaths,
+            deniedPaths: this.settings.permissionScope.deniedPaths,
+            maxFileSize: this.settings.permissionScope.maxFileSize,
+            allowedExtensions: this.settings.permissionScope.allowedExtensions
+          } as PermissionScope : undefined
+          
+          this.permissionManager = new PermissionManager(
+            this.app.vault,
+            this.settings.toolPermission === 'read-only' ? ToolPermission.ReadOnly :
+            this.settings.toolPermission === 'scoped-write' ? ToolPermission.ScopedWrite :
+            ToolPermission.FullWrite,
+            permissionScope
+          )
+          
+          const auditLogger = new AuditLogger(this.app.vault)
+          
+          const toolExecutor = new ObsidianToolExecutor(
+            this.app.vault,
+            this.app,
+            this.app.metadataCache,
+            this.permissionManager,
+            auditLogger
+          )
+          
+          this.toolRegistry = new ObsidianToolRegistry(toolExecutor, this.app)
+          
+          // Initialize OpenCode Server client
+          if (this.settings.opencodeServer?.url) {
+            this.opencodeClient = new OpenCodeServerClient(
+              this.toolRegistry,
+              this.app,
+              this.errorHandler,
+              this.settings.opencodeServer
+            )
+            
+            console.debug('[OpenCode Obsidian] OpenCode Server client initialized')
+          } else {
+            console.warn('[OpenCode Obsidian] OpenCode Server URL not configured')
+          }
+
+          // Initialize Context Manager
+          if (this.app && this.app.vault) {
+            this.contextManager = new ContextManager(
+              {
+                maxContextTokens: this.settings.contextManagement?.maxContextTokens ?? CONTEXT_CONFIG.MAX_TOKENS,
+                preemptiveCompactionThreshold: this.settings.contextManagement?.preemptiveCompactionThreshold ?? CONTEXT_CONFIG.PREEMPTIVE_THRESHOLD,
+                enableTokenEstimation: this.settings.contextManagement?.enableTokenEstimation ?? true,
+              },
+              this.app,
+              this.app.vault
+            )
+            console.debug('[OpenCode Obsidian] Context Manager initialized')
+          }
+
+          // Initialize Todo Manager
+          if (this.app && this.app.vault) {
+            this.todoManager = new TodoManager(this.app.vault, {
+              autoSave: this.settings.todoManagement?.enabled ?? true,
+              storagePath: '.opencode/todos',
+            })
+            console.debug('[OpenCode Obsidian] Todo Manager initialized')
+          }
+
+          // Initialize Agent Orchestrator
+          if (this.app && this.app.vault) {
+            this.agentOrchestrator = new AgentOrchestrator(
+              this.app.vault,
+              this.app,
+              this.opencodeClient,
+              this.errorHandler,
+              this.contextManager ?? undefined
+            )
+            console.debug('[OpenCode Obsidian] Agent Orchestrator initialized')
+          }
+        }
+      } catch (error) {
+        this.errorHandler.handleError(error, {
+          module: 'OpenCodeObsidianPlugin',
+          function: 'onload',
+          operation: 'Initializing tool execution layer'
+        }, ErrorSeverity.Warning)
+        // Continue loading plugin even if tool execution layer fails
+      }
+
     // Register the main view
     this.registerView(
       VIEW_TYPE_OPENCODE_OBSIDIAN,
@@ -163,8 +268,25 @@ export default class OpenCodeObsidianPlugin extends Plugin {
     }
   }
 
-  onunload() {
+  onunload(): void {
     console.debug('[OpenCode Obsidian] Plugin unloading...')
+    
+    // Disconnect from OpenCode Server
+    if (this.opencodeClient) {
+      void this.opencodeClient.disconnect().then(() => {
+        this.opencodeClient = null
+      })
+    }
+
+    // Clear orchestrator contexts
+    if (this.agentOrchestrator) {
+      const contexts = this.agentOrchestrator.listContexts()
+      for (const context of contexts) {
+        this.agentOrchestrator.clearContext(context.sessionId)
+      }
+      this.agentOrchestrator = null
+    }
+    
     console.debug('[OpenCode Obsidian] Plugin unloaded')
   }
 
@@ -263,6 +385,29 @@ export default class OpenCodeObsidianPlugin extends Plugin {
   }
 
   async saveSettings() {
+    // 更新 PermissionManager 配置（如果已初始化）
+    if (this.permissionManager) {
+      const permissionLevel = this.settings.toolPermission === 'read-only' ? ToolPermission.ReadOnly :
+                              this.settings.toolPermission === 'scoped-write' ? ToolPermission.ScopedWrite :
+                              ToolPermission.FullWrite
+      
+      this.permissionManager.setPermissionLevel(permissionLevel)
+      
+      if (this.settings.permissionScope) {
+        const permissionScope: PermissionScope = {
+          allowedPaths: this.settings.permissionScope.allowedPaths,
+          deniedPaths: this.settings.permissionScope.deniedPaths,
+          maxFileSize: this.settings.permissionScope.maxFileSize,
+          allowedExtensions: this.settings.permissionScope.allowedExtensions
+        } as PermissionScope
+        
+        this.permissionManager.setScope(permissionScope)
+      } else {
+        // 如果 permissionScope 为 undefined，重置为默认值
+        this.permissionManager.setScope({} as PermissionScope)
+      }
+    }
+    
     await this.saveData(this.settings)
   }
 
@@ -382,7 +527,4 @@ export default class OpenCodeObsidianPlugin extends Plugin {
     return null
   }
 
-  // TODO: Implement OpenCode Server client for sendPrompt
-  // This method should connect to OpenCode Server via WebSocket and send prompts
-  // For now, this is a placeholder that will be implemented with OpenCode Server client
 }

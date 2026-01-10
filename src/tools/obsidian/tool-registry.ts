@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { ObsidianToolExecutor, PermissionPendingError } from './tool-executor'
-import { OBSIDIAN_TOOLS, type ObsidianToolDefinition } from './types'
+import { OBSIDIAN_TOOLS, type ObsidianToolDefinition, ToolPermission } from './types'
 import { PermissionModal, type PermissionRequest } from './permission-modal'
 import type { App } from 'obsidian'
 import type {
@@ -11,6 +11,8 @@ import type {
   ObsidianUpdateNoteInput,
   ObsidianGetNoteMetadataInput
 } from './types'
+import type { MCPManager } from '../../mcp/mcp-manager'
+import type { MCPTool } from '../../mcp/types'
 
 /**
  * Tool registry for Obsidian tools
@@ -18,8 +20,10 @@ import type {
  */
 export class ObsidianToolRegistry {
   private tools: Map<string, ObsidianToolDefinition> = new Map()
+  private mcpTools: Map<string, string> = new Map() // toolName -> mcpToolName mapping
   private executor: ObsidianToolExecutor
   private app: App | null = null
+  private mcpManager: MCPManager | null = null
 
   constructor(executor: ObsidianToolExecutor, app?: App) {
     this.executor = executor
@@ -36,6 +40,13 @@ export class ObsidianToolRegistry {
   }
 
   /**
+   * Set the MCP Manager instance (needed for MCP tool execution)
+   */
+  setMCPManager(mcpManager: MCPManager): void {
+    this.mcpManager = mcpManager
+  }
+
+  /**
    * Register all built-in Obsidian tools
    */
   private registerBuiltInTools(): void {
@@ -49,6 +60,65 @@ export class ObsidianToolRegistry {
    */
   registerTool(toolDef: ObsidianToolDefinition): void {
     this.tools.set(toolDef.name, toolDef)
+  }
+
+  /**
+   * Register MCP tools from MCP Manager
+   * Converts MCP tools to ObsidianToolDefinition format with read-only permission by default
+   */
+  registerMCPTools(mcpTools: MCPTool[]): void {
+    if (!this.mcpManager) {
+      console.warn('[ObsidianToolRegistry] MCP Manager not set, cannot register MCP tools')
+      return
+    }
+
+    for (const mcpTool of mcpTools) {
+      // Convert MCP tool schema to Zod schema (simplified - using z.any() for now)
+      // In production, you'd convert JSON Schema to Zod schema
+      const zodInputSchema = this.jsonSchemaToZod(mcpTool.inputSchema)
+      const zodOutputSchema = z.unknown() // MCP tools output is unknown by default
+
+      const toolDef: ObsidianToolDefinition = {
+        name: `mcp.${mcpTool.serverName || 'unknown'}.${mcpTool.name}`,
+        description: mcpTool.description,
+        permission: ToolPermission.ReadOnly, // MCP tools default to read-only for safety
+        inputSchema: zodInputSchema,
+        outputSchema: zodOutputSchema,
+      }
+
+      this.tools.set(toolDef.name, toolDef)
+      this.mcpTools.set(toolDef.name, mcpTool.name) // Map registered name to MCP tool name
+      
+      console.debug(`[ObsidianToolRegistry] Registered MCP tool: ${toolDef.name}`)
+    }
+  }
+
+  /**
+   * Convert JSON Schema to Zod schema (simplified implementation)
+   * Note: A full implementation would properly traverse the JSON Schema
+   */
+  private jsonSchemaToZod(schema: { type?: string; properties?: Record<string, unknown>; required?: string[]; [key: string]: unknown }): z.ZodType {
+    // Simplified conversion - in production, use a library like json-schema-to-zod
+    // For now, return z.record() as a safe default
+    if (schema.type === 'object' && schema.properties) {
+      const shape: Record<string, z.ZodType> = {}
+      for (const [key, prop] of Object.entries(schema.properties)) {
+        const propSchema = prop as { type?: string; [key: string]: unknown }
+        if (propSchema.type === 'string') {
+          shape[key] = z.string()
+        } else if (propSchema.type === 'number' || propSchema.type === 'integer') {
+          shape[key] = z.number()
+        } else if (propSchema.type === 'boolean') {
+          shape[key] = z.boolean()
+        } else if (propSchema.type === 'array') {
+          shape[key] = z.array(z.unknown())
+        } else {
+          shape[key] = z.unknown()
+        }
+      }
+      return z.object(shape).partial() // Make all fields optional for safety
+    }
+    return z.record(z.string(), z.unknown())
   }
 
   /**
@@ -94,9 +164,40 @@ export class ObsidianToolRegistry {
       throw error
     }
 
-    // Execute tool based on name
+    // Check if this is an MCP tool
     let result: unknown
-    try {
+    const mcpToolName = this.mcpTools.get(toolName)
+    if (mcpToolName && this.mcpManager) {
+      // Execute MCP tool
+      try {
+        const mcpResult = await this.mcpManager.callTool(mcpToolName, validatedInput as Record<string, unknown>)
+        
+        // Convert MCP result format to expected format
+        // MCP tools return { content: Array<{ type, text, ... }> }
+        if (mcpResult.content && mcpResult.content.length > 0) {
+          // Extract text content from MCP result
+          const textContent = mcpResult.content
+            .filter(item => item.type === 'text' && item.text)
+            .map(item => item.text)
+            .join('\n')
+          
+          result = {
+            success: !mcpResult.isError,
+            content: textContent || '',
+            raw: mcpResult,
+          }
+        } else {
+          result = {
+            success: !mcpResult.isError,
+            content: '',
+            raw: mcpResult,
+          }
+        }
+      } catch (error) {
+        throw new Error(`MCP tool execution failed for ${toolName}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    } else {
+      // Execute Obsidian tool based on name
       switch (toolName) {
         case 'obsidian.search_vault':
           result = await this.executor.searchVault(validatedInput as ObsidianSearchVaultInput, sessionId, callId)
@@ -119,14 +220,8 @@ export class ObsidianToolRegistry {
         default:
           throw new Error(`Tool execution not implemented: ${toolName}`)
       }
-    } catch (error) {
-      // Re-throw PermissionPendingError as-is (needs user approval)
-      if (error instanceof PermissionPendingError) {
-        throw error
-      }
-      // Wrap other errors
-      throw new Error(`Tool execution failed for ${toolName}: ${error instanceof Error ? error.message : String(error)}`)
     }
+
 
     // Validate output using Zod schema
     try {
@@ -211,19 +306,15 @@ export class ObsidianToolRegistry {
           try {
             // Create a modified args with dryRun=true to get preview
             const modifiedArgs = { ...args as Record<string, unknown>, dryRun: true }
-            const previewResult = await this.execute(toolName, modifiedArgs, sessionId, callId, false)
+            const previewResult = await this.execute(toolName, modifiedArgs, sessionId, callId, false) as { preview?: { originalContent?: string; newContent?: string; addedLines?: number; removedLines?: number } }
             
-            if (previewResult.preview) {
+            if (previewResult?.preview) {
               const updateArgs = args as ObsidianUpdateNoteInput
               preview = {
-                // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-                originalContent: previewResult.preview.originalContent,
-                // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-                newContent: previewResult.preview.newContent,
+                originalContent: previewResult.preview.originalContent ?? '',
+                newContent: previewResult.preview.newContent ?? '',
                 mode: updateArgs.mode,
-                // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
                 addedLines: previewResult.preview.addedLines,
-                // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
                 removedLines: previewResult.preview.removedLines
               }
             }
@@ -281,8 +372,7 @@ export class ObsidianToolRegistry {
    * Convert Zod schema to JSON Schema (simplified implementation)
    * Note: A full implementation would properly traverse the Zod schema
    */
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  private zodToJSONSchema(schema: z.ZodSchema): object {
+  private zodToJSONSchema(schema: z.ZodType): object {
     // This is a simplified implementation - a full implementation would properly convert Zod schemas
     // For now, we'll return a placeholder structure
     // In production, you'd use a library like zod-to-json-schema

@@ -6,6 +6,7 @@ export interface CompactedMessage {
   content: string
   originalCount: number
   compactedAt: number
+  originalMessageIds: string[] // Track original message IDs for traceability
 }
 
 export interface CompactionStrategy {
@@ -17,6 +18,7 @@ export interface CompactionStrategy {
     messages: Array<{
       role: 'user' | 'assistant' | 'system'
       content: string | Array<{ type: string; text?: string; [key: string]: unknown }>
+      id?: string // Optional message ID for traceability
     }>,
     targetReduction: number // Target percentage reduction (0-1)
   ): {
@@ -32,6 +34,7 @@ export class SmartCompactionStrategy implements CompactionStrategy {
     messages: Array<{
       role: 'user' | 'assistant' | 'system'
       content: string | Array<{ type: string; text?: string; [key: string]: unknown }>
+      id?: string
     }>,
     targetReduction: number = 0.3 // Default: reduce by 30%
   ): {
@@ -83,42 +86,48 @@ export class SmartCompactionStrategy implements CompactionStrategy {
       // Summarize user messages
       if (userMessages.length > 0) {
         const userSummary = this.summarizeMessages(userMessages, 'user')
+        const userMessageIds = userMessages.map((m, idx) => m.id || `user-${idx}-${Date.now()}`)
         oldSummary += `User messages (${userMessages.length}): ${userSummary}\n\n`
       compactedOld.push({
         role: 'user' as const,
         content: userSummary,
         originalCount: userMessages.length,
         compactedAt: Date.now(),
+        originalMessageIds: userMessageIds,
       })
       }
 
       // Summarize assistant messages
       if (assistantMessages.length > 0) {
         const assistantSummary = this.summarizeMessages(assistantMessages, 'assistant')
+        const assistantMessageIds = assistantMessages.map((m, idx) => m.id || `assistant-${idx}-${Date.now()}`)
         oldSummary += `Assistant responses (${assistantMessages.length}): ${assistantSummary}\n\n`
       compactedOld.push({
         role: 'assistant' as const,
         content: assistantSummary,
         originalCount: assistantMessages.length,
         compactedAt: Date.now(),
+        originalMessageIds: assistantMessageIds,
       })
       }
     }
 
     // Combine: system + compacted old + recent
     const compacted: CompactedMessage[] = [
-      ...systemMessages.map(msg => ({
+      ...systemMessages.map((msg, idx) => ({
         role: msg.role,
         content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
         originalCount: 1,
         compactedAt: Date.now(),
+        originalMessageIds: [msg.id || `system-${idx}-${Date.now()}`],
       })),
       ...compactedOld,
-      ...recentMessages.map(msg => ({
+      ...recentMessages.map((msg, idx) => ({
         role: msg.role,
         content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
         originalCount: 1,
         compactedAt: Date.now(),
+        originalMessageIds: [msg.id || `${msg.role}-${idx}-${Date.now()}`],
       })),
     ]
 
@@ -143,6 +152,7 @@ export class SmartCompactionStrategy implements CompactionStrategy {
     messages: Array<{
       role: 'user' | 'assistant' | 'system'
       content: string | Array<{ type: string; text?: string; [key: string]: unknown }>
+      id?: string
     }>,
     role: 'user' | 'assistant'
   ): string {
@@ -244,11 +254,12 @@ export class CompactionManager {
 
     if (!shouldCompact) {
       return {
-        compacted: messages.map(msg => ({
+        compacted: messages.map((msg, idx) => ({
           role: msg.role,
           content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
           originalCount: 1,
           compactedAt: Date.now(),
+          originalMessageIds: [(msg as { id?: string }).id || `${msg.role}-${idx}-${Date.now()}`],
         })),
         summary: '',
         shouldCompact: false,

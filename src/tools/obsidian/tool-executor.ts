@@ -1,4 +1,5 @@
 import type { App, Vault, MetadataCache, TAbstractFile, TFile, TFolder } from 'obsidian'
+import { TFile as TFileClass } from 'obsidian'
 import { PermissionManager } from './permission-manager'
 import { AuditLogger } from './audit-logger'
 // ToolPermission imported but not used directly
@@ -7,7 +8,7 @@ import { AuditLogger } from './audit-logger'
  * Type guard to check if abstract file is a TFile
  */
 function isTFile(file: TAbstractFile | null): file is TFile {
-  return file !== null && 'extension' in file && typeof (file as unknown).extension === 'string'
+  return file !== null && file instanceof TFileClass
 }
 
 /**
@@ -112,10 +113,10 @@ export class ObsidianToolExecutor {
     sessionId: string | undefined,
     callId: string,
     input: unknown,
-    output?: unknown,
-    error?: Error,
     startTime: number,
     operation: 'read' | 'write' | 'create' | 'modify',
+    output?: unknown,
+    error?: Error,
     affectedPath?: string,
     approved?: boolean,
     dryRun?: boolean
@@ -229,10 +230,9 @@ export class ObsidianToolExecutor {
         sessionId,
         effectiveCallId,
         input,
-        output,
-        undefined,
         startTime,
-        'read'
+        'read',
+        output
       )
 
       return output
@@ -242,10 +242,10 @@ export class ObsidianToolExecutor {
         sessionId,
         effectiveCallId,
         input,
-        undefined,
-        error instanceof Error ? error : new Error(String(error)),
         startTime,
-        'read'
+        'read',
+        undefined,
+        error instanceof Error ? error : new Error(String(error))
       )
       throw error
     }
@@ -272,10 +272,10 @@ export class ObsidianToolExecutor {
           sessionId,
           effectiveCallId,
           input,
-          undefined,
-          error,
           startTime,
           'read',
+          undefined,
+          error,
           input.path
         )
         throw error
@@ -295,10 +295,10 @@ export class ObsidianToolExecutor {
           sessionId,
           effectiveCallId,
           input,
-          output,
-          undefined,
           startTime,
           'read',
+          output,
+          undefined,
           input.path
         )
         
@@ -318,10 +318,10 @@ export class ObsidianToolExecutor {
         sessionId,
         effectiveCallId,
         input,
-        output,
-        undefined,
         startTime,
         'read',
+        output,
+        undefined,
         input.path
       )
 
@@ -332,10 +332,10 @@ export class ObsidianToolExecutor {
         sessionId,
         effectiveCallId,
         input,
-        undefined,
-        error instanceof Error ? error : new Error(String(error)),
         startTime,
         'read',
+        undefined,
+        error instanceof Error ? error : new Error(String(error)),
         input.path
       )
       throw error
@@ -369,10 +369,9 @@ export class ObsidianToolExecutor {
           sessionId,
           effectiveCallId,
           input,
-          output,
-          undefined,
           startTime,
-          'read'
+          'read',
+          output
         )
         
         return output
@@ -422,10 +421,9 @@ export class ObsidianToolExecutor {
         sessionId,
         effectiveCallId,
         input,
-        output,
-        undefined,
         startTime,
-        'read'
+        'read',
+        output
       )
 
       return output
@@ -435,10 +433,10 @@ export class ObsidianToolExecutor {
         sessionId,
         effectiveCallId,
         input,
-        undefined,
-        error instanceof Error ? error : new Error(String(error)),
         startTime,
-        'read'
+        'read',
+        undefined,
+        error instanceof Error ? error : new Error(String(error))
       )
       throw error
     }
@@ -469,10 +467,10 @@ export class ObsidianToolExecutor {
           sessionId,
           effectiveCallId,
           input,
-          output,
-          undefined,
           startTime,
           'read',
+          output,
+          undefined,
           input.path
         )
         
@@ -498,7 +496,13 @@ export class ObsidianToolExecutor {
         ? {
             outlinks: cache?.links ? Array.from(new Set(cache.links.map(l => l.link))) : [],
             backlinks: this.getBacklinks(file),
-            unresolvedLinks: cache?.links ? cache.links.filter(l => !l.resolved).map(l => l.link) : []
+            unresolvedLinks: cache?.links ? cache.links
+              .map(l => l.link)
+              .filter(linkPath => {
+                // Check if the linked file actually exists
+                const linkedFile = this.vault.getAbstractFileByPath(linkPath)
+                return !linkedFile
+              }) : []
           }
         : undefined
 
@@ -516,7 +520,7 @@ export class ObsidianToolExecutor {
       } else {
         // Try to find first heading
         const headingMatch = content.match(/^#+\s+(.+)$/m)
-        if (headingMatch) {
+        if (headingMatch && headingMatch[1]) {
           title = headingMatch[1].trim()
         } else {
           title = file.basename
@@ -538,10 +542,10 @@ export class ObsidianToolExecutor {
         sessionId,
         effectiveCallId,
         input,
-        output,
-        undefined,
         startTime,
         'read',
+        output,
+        undefined,
         input.path
       )
 
@@ -552,10 +556,10 @@ export class ObsidianToolExecutor {
         sessionId,
         effectiveCallId,
         input,
-        undefined,
-        error instanceof Error ? error : new Error(String(error)),
         startTime,
         'read',
+        undefined,
+        error instanceof Error ? error : new Error(String(error)),
         input.path
       )
       throw error
@@ -584,10 +588,10 @@ export class ObsidianToolExecutor {
           sessionId,
           effectiveCallId,
           input,
-          undefined,
-          error,
           startTime,
           'create',
+          undefined,
+          error,
           input.path,
           false
         )
@@ -610,10 +614,10 @@ export class ObsidianToolExecutor {
           sessionId,
           effectiveCallId,
           input,
-          undefined,
-          error,
           startTime,
           'create',
+          undefined,
+          error,
           input.path,
           false
         )
@@ -647,10 +651,10 @@ export class ObsidianToolExecutor {
         sessionId,
         effectiveCallId,
         input,
-        output,
-        undefined,
         startTime,
         'create',
+        output,
+        undefined,
         input.path,
         approved,
         false
@@ -668,10 +672,10 @@ export class ObsidianToolExecutor {
         sessionId,
         effectiveCallId,
         input,
-        undefined,
-        error instanceof Error ? error : new Error(String(error)),
         startTime,
         'create',
+        undefined,
+        error instanceof Error ? error : new Error(String(error)),
         input.path,
         approved,
         false
@@ -702,10 +706,10 @@ export class ObsidianToolExecutor {
           sessionId,
           effectiveCallId,
           input,
-          undefined,
-          error,
           startTime,
           'modify',
+          undefined,
+          error,
           input.path,
           false,
           input.dryRun ?? true
@@ -811,10 +815,10 @@ export class ObsidianToolExecutor {
           sessionId,
           effectiveCallId,
           input,
-          output,
-          undefined,
           startTime,
           'modify',
+          output,
+          undefined,
           input.path,
           false,
           true
@@ -856,10 +860,10 @@ export class ObsidianToolExecutor {
         sessionId,
         effectiveCallId,
         input,
-        output,
-        undefined,
         startTime,
         'modify',
+        output,
+        undefined,
         input.path,
         approved,
         false
@@ -877,10 +881,10 @@ export class ObsidianToolExecutor {
         sessionId,
         effectiveCallId,
         input,
-        undefined,
-        error instanceof Error ? error : new Error(String(error)),
         startTime,
         'modify',
+        undefined,
+        error instanceof Error ? error : new Error(String(error)),
         input.path,
         approved,
         input.dryRun ?? true

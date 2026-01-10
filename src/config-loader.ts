@@ -2,7 +2,7 @@ import { TFile, Vault, TFolder } from 'obsidian'
 import type { CompatibleProvider, Agent, Skill } from './types'
 import * as yaml from 'js-yaml'
 import { SECURITY_CONFIG } from './utils/constants'
-import { validateOpenCodeConfig, validateProviderConfig, validateAgent, validateAgentFrontmatter, validateSkill, validateSkillFrontmatter } from './utils/validators'
+import { validateOpenCodeConfig, validateProviderConfig, validateAgent, validateAgentFrontmatter, validateSkill, validateSkillFrontmatter, validateProviderBaseURL } from './utils/validators'
 
 export interface OpenCodeConfig {
   providers?: Array<{
@@ -326,6 +326,24 @@ export class ConfigLoader {
         validationResult.errors.forEach((errorMsg: string) => console.warn(`  - ${errorMsg}`))
         continue
       }
+
+      // Validate baseURL for SSRF protection
+      if (providerConfig.baseURL) {
+        // Check if allowLocalhost is set in config (advanced option, with risk warning)
+        const allowLocalhost = (providerConfig as { allowLocalhost?: boolean }).allowLocalhost === true
+        const baseURLErrors = validateProviderBaseURL(providerConfig.baseURL, allowLocalhost)
+        
+        if (baseURLErrors.length > 0) {
+          console.warn(`[ConfigLoader] Skipping provider "${providerConfig.id}" due to baseURL validation errors:`)
+          baseURLErrors.forEach((errorMsg: string) => console.warn(`  - ${errorMsg}`))
+          
+          if (allowLocalhost) {
+            console.warn(`[ConfigLoader] Warning: allowLocalhost is enabled for provider "${providerConfig.id}". This is a security risk and should only be used in trusted environments.`)
+          }
+          
+          continue
+        }
+      }
       
       // Get API key from settings (not from config.json for security)
       const apiKey = apiKeys[providerConfig.id] || ''
@@ -383,11 +401,15 @@ export class ConfigLoader {
     const body = match[2] || ''
     
     try {
-      // Use js-yaml to parse YAML frontmatter
-      // yaml.load() is safe by default in js-yaml 4.x, preventing code execution
+      // Use js-yaml to parse YAML frontmatter with safe configuration
+      // In js-yaml 4.x, yaml.load() is safe by default (prevents code execution)
+      // We use DEFAULT_SCHEMA with json: true for JSON-compatible types
+      // Note: Anchor/alias DoS protection is handled by js-yaml's default limits
       const frontmatter = yaml.load(frontmatterText, {
         schema: yaml.DEFAULT_SCHEMA,
         json: true, // Use JSON-compatible types for better TypeScript compatibility
+        // Note: maxAliasCount is not available in js-yaml 4.x LoadOptions
+        // Anchor/alias DoS protection is handled by js-yaml internally
       }) as Record<string, unknown>
       
       // Ensure frontmatter is an object

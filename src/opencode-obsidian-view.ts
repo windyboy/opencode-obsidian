@@ -1,8 +1,16 @@
-import { ItemView, WorkspaceLeaf, Notice, Modal, Setting, MarkdownRenderer } from 'obsidian'
+import { ItemView, WorkspaceLeaf, Notice, Modal, Setting, MarkdownRenderer, TFile, App } from 'obsidian'
 import type OpenCodeObsidianPlugin from './main'
-import type { Conversation, Message, ToolUse, ToolResult } from './types'
+import type { Conversation, Message, ToolUse, ToolResult, ImageAttachment } from './types'
+import type { TaskPlan } from './todo/types'
+import { TaskStatus } from './todo/types'
 
 export const VIEW_TYPE_OPENCODE_OBSIDIAN = 'opencode-obsidian-view'
+
+interface UsageInfo {
+  model: string
+  inputTokens: number
+  outputTokens?: number
+}
 
 export class OpenCodeObsidianView extends ItemView {
   plugin: OpenCodeObsidianPlugin
@@ -36,6 +44,108 @@ export class OpenCodeObsidianView extends ItemView {
 
     this.renderView()
     await this.loadConversations()
+    
+    // Register OpenCode Server client callbacks if client is initialized
+    if (this.plugin.opencodeClient) {
+      this.registerClientCallbacks()
+      
+      // Connect to server if not already connected
+      if (!this.plugin.opencodeClient.isConnected()) {
+        try {
+          await this.plugin.opencodeClient.connect()
+          console.debug('[OpenCodeObsidianView] Connected to OpenCode Server')
+        } catch (error) {
+          console.error('[OpenCodeObsidianView] Failed to connect to OpenCode Server:', error)
+          new Notice('Failed to connect to opencode server. Check settings')
+        }
+      }
+    }
+  }
+  
+  /**
+   * Register callbacks for OpenCode Server client events
+   */
+  private registerClientCallbacks(): void {
+    if (!this.plugin.opencodeClient) return
+    
+    // Stream token callback - append tokens to the current assistant message
+    this.plugin.opencodeClient.onStreamToken((sessionId, token, done) => {
+      const activeConv = this.getActiveConversation()
+      if (!activeConv) return
+      
+      // Find the last assistant message and append token
+      const lastMessage = activeConv.messages[activeConv.messages.length - 1]
+      if (lastMessage && lastMessage.role === 'assistant') {
+        lastMessage.content += token
+        // Incremental update - only update the message content, not entire view
+        this.updateMessages()
+      }
+      
+      if (done) {
+        this.isStreaming = false
+        this.updateStreamingStatus(false)
+        activeConv.updatedAt = Date.now()
+        void this.saveConversations()
+      }
+    })
+    
+    // Stream thinking callback
+    this.plugin.opencodeClient.onStreamThinking((sessionId, content) => {
+      const activeConv = this.getActiveConversation()
+      if (!activeConv) return
+      
+      const lastMessage = activeConv.messages[activeConv.messages.length - 1]
+      if (lastMessage && lastMessage.role === 'assistant') {
+        void this.handleResponseChunk({ type: 'thinking', content }, lastMessage)
+      }
+    })
+    
+    // Error callback
+    this.plugin.opencodeClient.onError((error) => {
+      const activeConv = this.getActiveConversation()
+      if (!activeConv) return
+      
+      const lastMessage = activeConv.messages[activeConv.messages.length - 1]
+      if (lastMessage && lastMessage.role === 'assistant') {
+        lastMessage.content = `Error: ${error.message}`
+        this.updateMessages()
+      }
+      
+      new Notice(error.message)
+      this.isStreaming = false
+      this.updateStreamingStatus(false)
+    })
+    
+    // Progress update callback
+    this.plugin.opencodeClient.onProgressUpdate((sessionId, progress) => {
+      const activeConv = this.getActiveConversation()
+      if (!activeConv) return
+      
+      const lastMessage = activeConv.messages[activeConv.messages.length - 1]
+      if (lastMessage && lastMessage.role === 'assistant') {
+        void this.handleResponseChunk({
+          type: 'progress',
+          message: progress.message,
+          stage: progress.stage,
+          progress: progress.progress
+        }, lastMessage)
+      }
+    })
+    
+    // Session end callback
+    this.plugin.opencodeClient.onSessionEnd((sessionId, reason) => {
+      const activeConv = this.getActiveConversation()
+      if (activeConv && activeConv.sessionId === sessionId) {
+        activeConv.sessionId = null
+      }
+      
+      this.isStreaming = false
+      this.updateStreamingStatus(false)
+      
+      if (reason === 'error') {
+        new Notice('Session ended due to error')
+      }
+    })
   }
 
   async onClose() {
@@ -167,6 +277,9 @@ export class OpenCodeObsidianView extends ItemView {
       statusEl.textContent = '● connected to OpenCode server.'
     }
 
+    // Render task progress if there's an active task
+    this.renderTaskProgress(container)
+
     const controls = container.createDiv('opencode-obsidian-controls')
     
     // New conversation button
@@ -177,6 +290,185 @@ export class OpenCodeObsidianView extends ItemView {
     newConvBtn.onclick = () => {
       void this.createNewConversation()
     }
+  }
+
+  /**
+   * Render task progress display in header
+   */
+  private renderTaskProgress(container: HTMLElement): void {
+    if (!this.plugin.todoManager) {
+      return
+    }
+
+    // Get active conversation to find associated task plan
+    const activeConv = this.getActiveConversation()
+    if (!activeConv || !activeConv.id) {
+      return
+    }
+
+    // Find task plans for this session
+    const taskPlans = this.plugin.todoManager.getTaskPlansForSession(activeConv.id)
+    if (taskPlans.length === 0) {
+      return
+    }
+
+    // Find active (in-progress) task plan
+    const activePlan = taskPlans.find(plan => 
+      plan.status === TaskStatus.InProgress || plan.status === TaskStatus.Pending
+    )
+
+    if (!activePlan) {
+      return
+    }
+
+    // Get task progress
+    const progress = this.plugin.todoManager.getTaskProgress(activePlan.id)
+    if (!progress) {
+      return
+    }
+
+    // Create task progress container
+    const taskProgressContainer = container.createDiv('opencode-obsidian-task-progress')
+    
+    // Task goal
+    const goalEl = taskProgressContainer.createDiv('opencode-obsidian-task-goal')
+    goalEl.textContent = `Task: ${activePlan.goal.substring(0, 50)}${activePlan.goal.length > 50 ? '...' : ''}`
+
+    // Progress bar
+    const progressBarContainer = taskProgressContainer.createDiv('opencode-obsidian-progress-bar-container')
+    const progressBar = progressBarContainer.createDiv('opencode-obsidian-progress-bar')
+    progressBar.style.width = `${progress.progress * 100}%`
+    progressBar.setAttribute('role', 'progressbar')
+    progressBar.setAttribute('aria-valuenow', String(progress.progress * 100))
+    progressBar.setAttribute('aria-valuemin', '0')
+    progressBar.setAttribute('aria-valuemax', '100')
+
+    // Progress text
+    const progressText = taskProgressContainer.createDiv('opencode-obsidian-progress-text')
+    progressText.textContent = `${progress.completedSteps}/${progress.totalSteps} steps completed (${Math.round(progress.progress * 100)}%)`
+
+    // Current step info
+    if (progress.currentStepIndex !== undefined && activePlan.steps[progress.currentStepIndex]) {
+      const currentStep = activePlan.steps[progress.currentStepIndex]
+      if (currentStep) {
+        const currentStepEl = taskProgressContainer.createDiv('opencode-obsidian-current-step')
+        currentStepEl.textContent = `Current: ${currentStep.description.substring(0, 60)}${currentStep.description.length > 60 ? '...' : ''}`
+      }
+    }
+
+    // Controls (interrupt button)
+    const taskControls = taskProgressContainer.createDiv('opencode-obsidian-task-controls')
+    const interruptBtn = taskControls.createEl('button', {
+      text: 'Interrupt',
+      cls: 'mod-warning'
+    })
+    interruptBtn.onclick = () => {
+      if (this.plugin.todoManager) {
+        const interrupted = this.plugin.todoManager.interruptTask(activePlan.id, 'User requested interruption')
+        if (interrupted) {
+          new Notice('Task interrupted')
+          this.updateHeader()
+        }
+      }
+    }
+
+    // Task log button (view details)
+    const viewLogBtn = taskControls.createEl('button', {
+      text: 'View log',
+      cls: 'mod-secondary'
+    })
+    viewLogBtn.onclick = () => {
+      this.showTaskLogModal(activePlan)
+    }
+  }
+
+  /**
+   * Show task log modal with detailed execution information
+   */
+  private showTaskLogModal(plan: TaskPlan): void {
+    // Create modal
+    const modal = new Modal(this.app)
+    modal.titleEl.textContent = `Task Log: ${plan.goal}`
+
+    const content = modal.contentEl
+    content.empty()
+
+    // Task status
+    const statusEl = content.createDiv('opencode-obsidian-task-status')
+    statusEl.createEl('strong', { text: 'Status: ' })
+    statusEl.createSpan({ text: plan.status })
+    statusEl.createEl('br')
+
+    // Progress info
+    const progress = this.plugin.todoManager?.getTaskProgress(plan.id)
+    if (progress) {
+      statusEl.createEl('strong', { text: 'Progress: ' })
+      statusEl.createSpan({ text: `${progress.completedSteps}/${progress.totalSteps} steps (${Math.round(progress.progress * 100)}%)` })
+      statusEl.createEl('br')
+    }
+
+    // Steps list
+    const stepsContainer = content.createDiv('opencode-obsidian-task-steps')
+    stepsContainer.createEl('h3', { text: 'Steps' })
+
+    plan.steps.forEach((step, index) => {
+      const stepEl = stepsContainer.createDiv('opencode-obsidian-task-step')
+      stepEl.createEl('strong', { text: `Step ${index + 1}: ` })
+      stepEl.createSpan({ text: step.description })
+      stepEl.createEl('br')
+      const stepInfo = stepEl.createEl('small')
+      stepInfo.createSpan({ text: `Status: ${step.status} | Success Criteria: ${step.successCriteria}` })
+
+      // Show step results if available
+      if (this.plugin.todoManager) {
+        const stepResults = this.plugin.todoManager.getStepResults(step.id)
+        if (stepResults && stepResults.length > 0) {
+          const resultsEl = stepEl.createDiv('opencode-obsidian-step-results')
+          stepResults.forEach((result, idx) => {
+            const resultDiv = resultsEl.createDiv()
+            resultDiv.createSpan({ text: `Attempt ${idx + 1}: ${result.success ? '✓' : '✗'}` })
+            if (result.error) {
+              resultDiv.createSpan({ text: ` - ${result.error}` })
+            }
+          })
+        }
+      }
+
+      if (step.error) {
+        stepEl.createEl('br')
+        stepEl.createEl('small', { attr: { style: 'color: red;' }, text: `Error: ${step.error}` })
+      }
+    })
+
+    // Checkpoints
+    if (this.plugin.todoManager) {
+      const checkpoints = this.plugin.todoManager.getCheckpoints(plan.id)
+      if (checkpoints.length > 0) {
+        const checkpointsContainer = content.createDiv('opencode-obsidian-task-checkpoints')
+        checkpointsContainer.createEl('h3', { text: 'Checkpoints' })
+
+        checkpoints.forEach((checkpoint) => {
+          const cpEl = checkpointsContainer.createDiv('opencode-obsidian-checkpoint')
+          cpEl.createEl('strong', { text: new Date(checkpoint.createdAt).toLocaleString() })
+          cpEl.createEl('br')
+          cpEl.createSpan({ text: checkpoint.description || 'No description' })
+          cpEl.createEl('br')
+          const rollbackBtn = cpEl.createEl('button', { text: 'Rollback to this point', cls: 'mod-cta' })
+          rollbackBtn.onclick = () => {
+            if (this.plugin.todoManager) {
+              const rolledBack = this.plugin.todoManager.rollbackToCheckpoint(plan.id, checkpoint.id)
+              if (rolledBack) {
+                new Notice('Task rolled back to checkpoint')
+                modal.close()
+                this.updateHeader()
+              }
+            }
+          }
+        })
+      }
+    }
+
+    modal.open()
   }
 
   private renderConversationSelector(container: HTMLElement) {
@@ -291,7 +583,8 @@ export class OpenCodeObsidianView extends ItemView {
               this.plugin.app,
               textBeforeCodeBlock.trim(),
               textContainer,
-              ''
+              '',
+              this
             )
             textBeforeCodeBlock = ''
           }
@@ -337,7 +630,8 @@ export class OpenCodeObsidianView extends ItemView {
         this.plugin.app,
         textBeforeCodeBlock.trim(),
         textContainer,
-        ''
+        '',
+        this
       )
     }
   }
@@ -689,40 +983,103 @@ export class OpenCodeObsidianView extends ItemView {
     this.updateStreamingStatus(true)
 
     try {
+      // Check if OpenCode Server client is available
+      if (!this.plugin.opencodeClient) {
+        throw new Error('OpenCode Server client not initialized. Please check settings.')
+      }
+
+      // Ensure client is connected
+      if (!this.plugin.opencodeClient.isConnected()) {
+        try {
+          await this.plugin.opencodeClient.connect()
+        } catch (error) {
+          throw new Error(`Failed to connect to OpenCode Server: ${error instanceof Error ? error.message : 'Unknown error'}`)
+        }
+      }
+
       // Check if there's a pending image path to attach
       const imagePath = activeConv.pendingImagePath
+      let images: ImageAttachment[] | undefined
+      
       if (imagePath) {
+        // Read image file and convert to base64
+        try {
+          const imageFile = this.app.vault.getAbstractFileByPath(imagePath)
+          if (imageFile instanceof TFile) {
+            const file = imageFile
+            const arrayBuffer = await this.app.vault.readBinary(file)
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
+            
+            // Determine MIME type from extension
+            let mimeType = 'image/png'
+            const ext = file.extension.toLowerCase()
+            if (ext === 'jpg' || ext === 'jpeg') {
+              mimeType = 'image/jpeg'
+            } else if (ext === 'gif') {
+              mimeType = 'image/gif'
+            } else if (ext === 'webp') {
+              mimeType = 'image/webp'
+            }
+            
+            images = [{
+              data: base64,
+              mimeType,
+              name: file.name
+            }]
+          }
+        } catch (imageError) {
+          console.warn('[OpenCodeObsidianView] Failed to attach image:', imageError)
+          // Continue without image if reading fails
+        }
+        
         // Clear pending image path after using it
         activeConv.pendingImagePath = undefined
       }
 
-      // Build prompt parts: include text and optionally image path
-      const promptParts: Array<{ type: string; text?: string; filePath?: string }> = [
-        { type: 'text', text: content }
-      ]
+      // Get or create session ID
+      let sessionId = activeConv.sessionId || this.plugin.opencodeClient.getCurrentSessionId()
       
-      if (imagePath) {
-        // Add image path as image part - Plugin layer will handle encoding
-        promptParts.push({ type: 'image', filePath: imagePath })
+      if (!sessionId) {
+        // Start a new session
+        try {
+          // Build session context from current note if available
+          const activeFile = this.app.workspace.getActiveFile()
+          const context = activeFile ? {
+            currentNote: activeFile.path,
+            properties: this.app.metadataCache.getFileCache(activeFile)?.frontmatter
+          } : undefined
+          
+          sessionId = await this.plugin.opencodeClient.startSession(
+            context,
+            this.plugin.settings.agent,
+            activeConv.id
+          )
+          
+          activeConv.sessionId = sessionId
+          console.debug('[OpenCodeObsidianView] Started new session:', sessionId)
+        } catch (sessionError) {
+          throw new Error(`Failed to start session: ${sessionError instanceof Error ? sessionError.message : 'Unknown error'}`)
+        }
       }
 
-      // TODO: Implement OpenCode Server client communication
-      // This should connect to OpenCode Server via WebSocket and send messages
-      // For now, show an error message
-      throw new Error('OpenCode Server client not implemented. Please implement WebSocket client for OpenCode Server communication.')
+      // Send message to OpenCode Server
+      await this.plugin.opencodeClient.sendSessionMessage(sessionId, content, images)
+      
+      console.debug('[OpenCodeObsidianView] Message sent to OpenCode Server:', { sessionId, contentLength: content.length })
     } catch (error) {
-      console.error('Error sending message:', error)
+      console.error('[OpenCodeObsidianView] Error sending message:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       assistantMessage.content = `Error: ${errorMessage}`
       new Notice(`Error: ${errorMessage}`)
-    } finally {
       this.isStreaming = false
-      this.currentAbortController = null
-      activeConv.updatedAt = Date.now()
-      await this.saveConversations()
-      // Update messages (final state) and input area (streaming status off)
-      this.updateMessages()
       this.updateStreamingStatus(false)
+    } finally {
+      if (!this.isStreaming) {
+        this.currentAbortController = null
+        activeConv.updatedAt = Date.now()
+        await this.saveConversations()
+        this.updateMessages()
+      }
     }
   }
 
@@ -775,11 +1132,16 @@ export class OpenCodeObsidianView extends ItemView {
       case 'usage':
         // Handle usage information
          
-        if (chunkAny.usage) {
-           
-          console.debug('Token usage:', chunkAny.usage)
-           
-          this.showUsageInfo(chunkAny.usage)
+        if (chunkAny.usage && typeof chunkAny.usage === 'object') {
+          const usage = chunkAny.usage as { model?: string; inputTokens?: number; outputTokens?: number }
+          if (usage.model !== undefined && usage.inputTokens !== undefined) {
+            console.debug('Token usage:', usage)
+            this.showUsageInfo({
+              model: usage.model,
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens
+            })
+          }
         }
         break
       
@@ -841,7 +1203,7 @@ export class OpenCodeObsidianView extends ItemView {
     }
   }
 
-  private showUsageInfo(usage: unknown) {
+  private showUsageInfo(usage: UsageInfo) {
     // Show usage information in the status bar or as a temporary notice
     const usageText = `${usage.model}: ${usage.inputTokens} tokens`
     console.debug('Usage:', usageText)
@@ -1023,7 +1385,7 @@ export class OpenCodeObsidianView extends ItemView {
 class AttachmentModal extends Modal {
   private onFileSelect: (file: File) => void
 
-  constructor(app: unknown, onFileSelect: (file: File) => void) {
+  constructor(app: App, onFileSelect: (file: File) => void) {
     super(app)
     this.onFileSelect = onFileSelect
   }
@@ -1100,7 +1462,7 @@ class ConfirmationModal extends Modal {
   private message: string
   private onConfirm: () => void
 
-  constructor(app: unknown, title: string, message: string, onConfirm: () => void) {
+  constructor(app: App, title: string, message: string, onConfirm: () => void) {
     super(app)
     this.title = title
     this.message = message
