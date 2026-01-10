@@ -325,6 +325,31 @@ The `OpenCodeObsidianPlugin` class extends Obsidian's `Plugin` class and serves 
 - TODO continuation
 - User interrupt handling
 
+### Obsidian Tool System (`src/tools/obsidian/`)
+- Tool definitions and schemas (Zod validation)
+- Tool execution with permission checks
+- Audit logging for all tool operations
+- Permission management (read-only, scoped-write, full-write)
+- Tool registry and routing
+
+**Available Tools (6 core tools)**:
+1. `obsidian.search_vault` - Search notes in vault (read-only)
+2. `obsidian.read_note` - Read note content (read-only)
+3. `obsidian.list_notes` - List notes in folder (read-only)
+4. `obsidian.get_note_metadata` - Get note metadata including frontmatter, tags, links (read-only)
+5. `obsidian.create_note` - Create new note (scoped-write)
+6. `obsidian.update_note` - Update note content with multiple modes (scoped-write)
+   - `replace`: Replace entire content
+   - `append`: Append to end
+   - `prepend`: Prepend to beginning
+   - `insert`: Insert at line number or marker
+
+**Permission System**:
+- Read-only operations: No approval required
+- Scoped-write operations: Require user approval via PermissionModal
+- Permission scopes: Allowed/denied paths, file size limits, extension filters
+- Audit logging: All tool executions are logged with timestamps and metadata
+
 ## Data Flow
 
 ### Message Sending Flow
@@ -371,10 +396,47 @@ The `OpenCodeObsidianPlugin` class extends Obsidian's `Plugin` class and serves 
    - Shows user notification (if enabled and severity warrants)
 4. Error is handled gracefully, user sees friendly message
 
+## Tool System
+
+### Tool Execution Flow
+
+1. OpenCode Server sends tool call request via WebSocket
+2. `ObsidianToolRegistry` receives request and validates input schema
+3. `ObsidianToolExecutor` executes tool operation:
+   - Checks permissions using `PermissionManager`
+   - Performs the operation (read/write/create/update)
+   - Records audit log via `AuditLogger`
+   - Returns result or throws `PermissionPendingError` if approval needed
+4. If approval required, `PermissionModal` is shown to user
+5. User approves or denies the operation
+6. Result sent back to OpenCode Server
+
+### Permission Model
+
+**Permission Levels**:
+- `read-only`: Can only read vault files
+- `scoped-write`: Can write to specific paths (requires approval)
+- `full-write`: Can write anywhere (requires approval)
+
+**Permission Scope**:
+- `allowedPaths`: Glob patterns for allowed file paths
+- `deniedPaths`: Glob patterns for denied file paths (checked first)
+- `maxFileSize`: Maximum file size in bytes
+- `allowedExtensions`: List of allowed file extensions
+
+**Update Note Tool**:
+The `update_note` tool supports four update modes for markdown editing:
+- `replace`: Completely replace file content (useful for full rewrites)
+- `append`: Add content to end of file (useful for logging, notes)
+- `prepend`: Add content to beginning of file (useful for headers, metadata)
+- `insert`: Insert at specific line number or after marker string (most precise control)
+
+All write operations default to `dryRun=true` to show preview before applying.
+
 ## Testing Strategy
 
-- **Unit Tests**: Core business logic (ErrorHandler, AgentResolver) - using Vitest
-- **Integration Tests**: Configuration loading and validation
+- **Unit Tests**: Core business logic (ErrorHandler, AgentResolver, ToolExecutor, PermissionManager) - using Vitest
+- **Integration Tests**: Configuration loading and validation, tool execution flow
 - **E2E Tests**: Not implemented (would require Obsidian environment)
 
 ## Future Considerations

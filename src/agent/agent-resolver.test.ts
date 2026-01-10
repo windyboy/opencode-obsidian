@@ -231,6 +231,7 @@ describe('AgentResolver', () => {
       resolver.setAgents([agent])
       resolver.setConfigLoader(mockConfigLoader)
       
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       vi.mocked(mockConfigLoader.getCachedInstructions).mockReturnValue('Instruction content')
       
       const result = resolver.resolveAgentConfig({ agentID: 'test-agent' }, defaultModel)
@@ -267,7 +268,7 @@ describe('AgentResolver', () => {
       }
       resolver.setSkills([otherSkill])
       
-      const result2 = resolver.resolveAgentConfig({ agentID: 'test-agent' }, defaultModel)
+      void resolver.resolveAgentConfig({ agentID: 'test-agent' }, defaultModel)
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Skill "missing-skill" not found')
       )
@@ -437,6 +438,7 @@ describe('AgentResolver', () => {
 
     it('should return original prompt when instructions are empty', () => {
       resolver.setConfigLoader(mockConfigLoader)
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       vi.mocked(mockConfigLoader.getCachedInstructions).mockReturnValue('')
       
       const prompt = 'Original prompt'
@@ -446,6 +448,7 @@ describe('AgentResolver', () => {
 
     it('should merge instructions into prompt', () => {
       resolver.setConfigLoader(mockConfigLoader)
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       vi.mocked(mockConfigLoader.getCachedInstructions).mockReturnValue('Instruction content')
       
       const result = resolver.mergeInstructionsIntoPrompt('Base prompt')
@@ -456,6 +459,7 @@ describe('AgentResolver', () => {
 
     it('should return instructions when prompt is empty', () => {
       resolver.setConfigLoader(mockConfigLoader)
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       vi.mocked(mockConfigLoader.getCachedInstructions).mockReturnValue('Instruction content')
       
       const result = resolver.mergeInstructionsIntoPrompt('')

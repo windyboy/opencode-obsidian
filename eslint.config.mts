@@ -12,7 +12,11 @@ export default tseslint.config(
 				projectService: {
 					allowDefaultProject: [
 						'eslint.config.mts',
-						'manifest.json'
+						'manifest.json',
+						'__mocks__/obsidian.ts',
+						'scripts/debug.js',
+						'tests/integration/opencode-server.test.ts',
+						'vitest.config.ts'
 					]
 				},
 				tsconfigRootDir: import.meta.dirname,
@@ -31,5 +35,19 @@ export default tseslint.config(
 			"versions.json",
 			"main.js",
 		],
+	},
+	{
+		files: ["scripts/**/*.js", "vitest.config.ts"],
+		rules: {
+			"import/no-nodejs-modules": "off",
+			"no-console": "off",
+			"no-undef": "off",
+		},
+	},
+	{
+		files: ["package.json"],
+		rules: {
+			"depend/ban-dependencies": "off",
+		},
 	},
 );

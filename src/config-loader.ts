@@ -236,7 +236,7 @@ export class ConfigLoader {
       }
 
       if (!configFile) {
-        console.log('[ConfigLoader] No opencode config file found (checked:', ConfigLoader.CONFIG_FILE_PRIORITY.join(', '), ')')
+        console.debug('[ConfigLoader] No opencode config file found (checked:', ConfigLoader.CONFIG_FILE_PRIORITY.join(', '), ')')
         return null
       }
 
@@ -258,7 +258,7 @@ export class ConfigLoader {
       
       let config: OpenCodeConfig
       try {
-        config = JSON.parse(processedContent)
+        config = JSON.parse(processedContent) as OpenCodeConfig
       } catch (parseError) {
         if (parseError instanceof SyntaxError) {
           console.error(`[ConfigLoader] Invalid JSON in config file ${configFile.path}: ${parseError.message}`)
@@ -286,7 +286,7 @@ export class ConfigLoader {
         }
       }
       
-      console.log(`[ConfigLoader] Loaded config from ${configFile.path}`)
+      console.debug(`[ConfigLoader] Loaded config from ${configFile.path}`)
       return config
     } catch (error) {
       console.error('[ConfigLoader] Error loading config:', error)
@@ -323,7 +323,7 @@ export class ConfigLoader {
       const validationResult = validateProviderConfig(providerConfig, { strict: false })
       if (!validationResult.valid) {
         console.warn(`[ConfigLoader] Skipping invalid provider config:`, providerConfig)
-        validationResult.errors.forEach(error => console.warn(`  - ${error}`))
+        validationResult.errors.forEach((errorMsg: string) => console.warn(`  - ${errorMsg}`))
         continue
       }
       
@@ -340,7 +340,7 @@ export class ConfigLoader {
       })
     }
     
-    console.log(`[ConfigLoader] Loaded ${compatibleProviders.length} compatible provider(s) from config`)
+    console.debug(`[ConfigLoader] Loaded ${compatibleProviders.length} compatible provider(s) from config`)
     return compatibleProviders
   }
 
@@ -589,7 +589,7 @@ export class ConfigLoader {
       const skillDir = this.vault.getAbstractFileByPath('.opencode/skill')
       
       if (!skillDir || !(skillDir instanceof TFolder)) {
-        console.log('[ConfigLoader] No .opencode/skill directory found')
+        console.debug('[ConfigLoader] No .opencode/skill directory found')
         return []
       }
       
@@ -624,7 +624,7 @@ export class ConfigLoader {
           
           if (skill) {
             skills.push(skill)
-            console.log(`[ConfigLoader] Loaded skill: ${skill.id} (${skill.name})`)
+            console.debug(`[ConfigLoader] Loaded skill: ${skill.id} (${skill.name})`)
           }
         } catch (error) {
           console.warn(`[ConfigLoader] Failed to load skill file ${skillFile.path}:`, error)
@@ -632,7 +632,7 @@ export class ConfigLoader {
         }
       }
       
-      console.log(`[ConfigLoader] Loaded ${skills.length} skill(s) from .opencode/skill/`)
+      console.debug(`[ConfigLoader] Loaded ${skills.length} skill(s) from .opencode/skill/`)
       return skills
     } catch (error) {
       console.error('[ConfigLoader] Error loading skills:', error)
@@ -662,7 +662,7 @@ export class ConfigLoader {
       const agentDir = this.vault.getAbstractFileByPath('.opencode/agent')
       
       if (!agentDir || !(agentDir instanceof TFolder)) {
-        console.log('[ConfigLoader] No .opencode/agent directory found')
+        console.debug('[ConfigLoader] No .opencode/agent directory found')
         return []
       }
       
@@ -687,7 +687,7 @@ export class ConfigLoader {
           
           if (agent) {
             agents.push(agent)
-            console.log(`[ConfigLoader] Loaded agent: ${agent.id} (${agent.name})`)
+            console.debug(`[ConfigLoader] Loaded agent: ${agent.id} (${agent.name})`)
           }
         } catch (error) {
           console.warn(`[ConfigLoader] Failed to load agent file ${file.path}:`, error)
@@ -695,7 +695,7 @@ export class ConfigLoader {
         }
       }
       
-      console.log(`[ConfigLoader] Loaded ${agents.length} agent(s) from .opencode/agent/`)
+      console.debug(`[ConfigLoader] Loaded ${agents.length} agent(s) from .opencode/agent/`)
       return agents
     } catch (error) {
       console.error('[ConfigLoader] Error loading agents:', error)
@@ -795,7 +795,7 @@ export class ConfigLoader {
       }
       
       if (instructions.length === 0) {
-        console.log('[ConfigLoader] No instructions found in config or settings')
+        console.debug('[ConfigLoader] No instructions found in config or settings')
         return ''
       }
 
@@ -816,7 +816,7 @@ export class ConfigLoader {
           // Use glob pattern matching
           const matchedFiles = this.findFilesByGlob(pattern)
           filesToLoad.push(...matchedFiles)
-          console.log(`[ConfigLoader] Glob pattern "${pattern}" matched ${matchedFiles.length} file(s)`)
+          console.debug(`[ConfigLoader] Glob pattern "${pattern}" matched ${matchedFiles.length} file(s)`)
         } else {
           // Direct file path - validate path first
           if (!this.validateFilePath(pattern)) {
@@ -859,7 +859,7 @@ export class ConfigLoader {
           if (cached && cached.lastModified === lastModified) {
             // Use cached content
             content = cached.content
-            console.log(`[ConfigLoader] Using cached instruction: ${file.path}`)
+            console.debug(`[ConfigLoader] Using cached instruction: ${file.path}`)
           } else {
             // Load and cache
             content = await this.vault.read(file)
@@ -875,7 +875,7 @@ export class ConfigLoader {
               path: file.path,
               lastModified
             })
-            console.log(`[ConfigLoader] Loaded and cached instruction: ${file.path}`)
+            console.debug(`[ConfigLoader] Loaded and cached instruction: ${file.path}`)
           }
 
           instructionContents.push(`\n\n---\n# ${file.name}\n---\n\n${content}`)
@@ -887,7 +887,7 @@ export class ConfigLoader {
 
       const mergedInstructions = instructionContents.join('\n\n')
       this.mergedInstructions = mergedInstructions
-      console.log(`[ConfigLoader] Loaded ${uniqueFiles.length} instruction file(s), total length: ${mergedInstructions.length} chars`)
+      console.debug(`[ConfigLoader] Loaded ${uniqueFiles.length} instruction file(s), total length: ${mergedInstructions.length} chars`)
       return mergedInstructions
     } catch (error) {
       console.error('[ConfigLoader] Error loading instructions:', error)
@@ -908,7 +908,7 @@ export class ConfigLoader {
   clearInstructionCache(): void {
     this.instructionCache.clear()
     this.mergedInstructions = ''
-    console.log('[ConfigLoader] Instruction cache cleared')
+    console.debug('[ConfigLoader] Instruction cache cleared')
   }
 
   /**

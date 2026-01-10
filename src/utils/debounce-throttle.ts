@@ -14,7 +14,7 @@
  * const debouncedSave = debounce(() => saveSettings(), 500)
  * input.onChange = debouncedSave
  */
-export function debounce<T extends (...args: any[]) => any>(
+export function debounce<T extends (...args: unknown[]) => unknown>(
   fn: T,
   delay: number
 ): (...args: Parameters<T>) => void {
@@ -44,14 +44,14 @@ export function debounce<T extends (...args: any[]) => any>(
  * const debouncedSave = debounceAsync(async () => await saveSettings(), 500)
  * await debouncedSave()
  */
-export function debounceAsync<T extends (...args: any[]) => Promise<any>>(
+export function debounceAsync<T extends (...args: unknown[]) => Promise<unknown>>(
   fn: T,
   delay: number
 ): (...args: Parameters<T>) => Promise<ReturnType<T>> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
   let pendingPromise: Promise<ReturnType<T>> | null = null
   let resolveCallback: ((value: ReturnType<T>) => void) | null = null
-  let rejectCallback: ((reason?: any) => void) | null = null
+  let rejectCallback: ((reason?: unknown) => void) | null = null
 
   return function debounced(...args: Parameters<T>): Promise<ReturnType<T>> {
     // Cancel previous timeout
@@ -69,6 +69,7 @@ export function debounceAsync<T extends (...args: any[]) => Promise<any>>(
     }
 
     // Set new timeout
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
     timeoutId = setTimeout(async () => {
       try {
         const result = await fn(...args)
@@ -103,7 +104,7 @@ export function debounceAsync<T extends (...args: any[]) => Promise<any>>(
  * const throttledFetch = throttle(() => fetchModels(), 1000)
  * scrollHandler = throttledFetch
  */
-export function throttle<T extends (...args: any[]) => any>(
+export function throttle<T extends (...args: unknown[]) => unknown>(
   fn: T,
   delay: number
 ): (...args: Parameters<T>) => void {
@@ -145,7 +146,7 @@ export function throttle<T extends (...args: any[]) => any>(
  * const throttledFetch = throttleAsync(async () => await fetchModels(), 1000)
  * await throttledFetch()
  */
-export function throttleAsync<T extends (...args: any[]) => Promise<any>>(
+export function throttleAsync<T extends (...args: unknown[]) => Promise<unknown>>(
   fn: T,
   delay: number
 ): (...args: Parameters<T>) => Promise<ReturnType<T>> {
@@ -153,7 +154,7 @@ export function throttleAsync<T extends (...args: any[]) => Promise<any>>(
   let timeoutId: ReturnType<typeof setTimeout> | null = null
   let pendingPromise: Promise<ReturnType<T>> | null = null
   let resolveCallback: ((value: ReturnType<T>) => void) | null = null
-  let rejectCallback: ((reason?: any) => void) | null = null
+  let rejectCallback: ((reason?: unknown) => void) | null = null
 
   return function throttled(...args: Parameters<T>): Promise<ReturnType<T>> {
     const now = Date.now()
@@ -167,7 +168,6 @@ export function throttleAsync<T extends (...args: any[]) => Promise<any>>(
         timeoutId = null
       }
       // Resolve/reject any pending promise with the new result
-      const previousPendingPromise = pendingPromise
       const previousResolve = resolveCallback
       const previousReject = rejectCallback
       pendingPromise = null
@@ -206,7 +206,8 @@ export function throttleAsync<T extends (...args: any[]) => Promise<any>>(
         clearTimeout(timeoutId)
       }
 
-      timeoutId = setTimeout(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    timeoutId = setTimeout(async () => {
         lastInvokeTime = Date.now()
         try {
           const result = await fn(...args)

@@ -3,7 +3,7 @@
  */
 
 import type { Agent, Skill, CompatibleProvider } from '../types'
-import type { OpenCodeConfig, AgentFrontmatter, SkillFrontmatter } from '../config-loader'
+// Types imported but not used directly
 
 /**
  * Validation result interface
@@ -52,7 +52,9 @@ function validateNonEmptyString(value: string | undefined | null, fieldName: str
 
 /**
  * Validate a string matches a pattern
+ * @internal - Currently unused but kept for future use
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function validateStringPattern(value: string | undefined, pattern: RegExp, fieldName: string, errorMessage?: string): string[] {
   const errors: string[] = []
   if (value && !pattern.test(value)) {
@@ -288,7 +290,7 @@ export function validateCompatibleProvider(provider: CompatibleProvider, options
 
   // Validate apiType
   if (provider.apiType !== 'openai-compatible' && provider.apiType !== 'anthropic-compatible') {
-    errors.push(`Provider apiType must be 'openai-compatible' or 'anthropic-compatible', got: ${provider.apiType}`)
+    errors.push(`Provider apiType must be 'openai-compatible' or 'anthropic-compatible', got: ${String(provider.apiType)}`)
   }
 
   // Validate defaultModel if present

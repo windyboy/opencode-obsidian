@@ -1,6 +1,5 @@
 import type { Vault } from 'obsidian'
-import { SessionStorage, type StoredSession } from './session-storage'
-import type { EmbeddedSession } from '../embedded-ai-client'
+import { SessionStorage, type StoredSession, type Session } from './session-storage'
 import { SESSION_CONFIG } from '../utils/constants'
 
 export interface SessionManagerConfig {
@@ -40,7 +39,7 @@ export class SessionManager {
   /**
    * Save a session (immediate)
    */
-  async saveSession(session: EmbeddedSession): Promise<void> {
+  async saveSession(session: Session): Promise<void> {
     try {
       await this.storage.saveSession(session)
       this.lastSaved.set(session.id, Date.now())

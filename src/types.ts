@@ -78,44 +78,8 @@ export interface Agent {
  * @interface OpenCodeObsidianSettings
  */
 export interface OpenCodeObsidianSettings {
-  /** @deprecated Legacy field for migration - will be converted to apiKeys */
-  apiKey?: string
-  /** Multi-provider API keys - keys are stored securely in Obsidian settings */
-  apiKeys: {
-    /** Anthropic (Claude) API key */
-    anthropic?: string
-    /** OpenAI (GPT) API key */
-    openai?: string
-    /** Google (Gemini) API key */
-    google?: string
-    /** ZenMux API key */
-    zenmux?: string
-    /** Dynamic provider keys for compatible providers */
-    [key: string]: string | undefined
-  }
-  /** Compatible providers loaded from .opencode/config.json */
-  compatibleProviders?: CompatibleProvider[]
-  /** Provider-specific configuration options */
-  providerOptions?: {
-    /** ZenMux-specific options */
-    zenmux?: {
-      /** Custom baseURL for ZenMux API (defaults to https://zenmux.ai/api/v1) */
-      baseURL?: string
-    }
-    /** Allow other provider options in the future */
-    [key: string]: any
-  }
-  /** Default provider identifier - supports built-in and custom provider IDs */
-  providerID: 'anthropic' | 'openai' | 'google' | 'zenmux' | string
   /** Default agent identifier */
   agent: string
-  /** Default model configuration */
-  model: {
-    /** Provider identifier */
-    providerID: string
-    /** Model identifier */
-    modelID: string
-  }
   /** Loaded agents from .opencode/agent/*.md files */
   agents?: Agent[]
   /** Loaded skills from .opencode/skill/{skill-name}/SKILL.md files */
@@ -155,6 +119,35 @@ export interface OpenCodeObsidianSettings {
       /** Server-specific configuration */
       config: Record<string, unknown>
     }
+  }
+
+  /** OpenCode Server configuration (for client/server architecture) */
+  opencodeServer?: {
+    /** WebSocket URL for OpenCode Server (e.g., "ws://localhost:4096" or "wss://opencode.example.com") */
+    url: string
+    /** Optional authentication token */
+    token?: string
+    /** Whether to automatically reconnect on connection loss (default: true) */
+    autoReconnect?: boolean
+    /** Delay between reconnection attempts in milliseconds (default: 3000) */
+    reconnectDelay?: number
+    /** Maximum number of reconnection attempts (default: 10, 0 = unlimited) */
+    reconnectMaxAttempts?: number
+  }
+
+  /** Tool permission level (default: 'read-only') */
+  toolPermission?: 'read-only' | 'scoped-write' | 'full-write'
+
+  /** Permission scope configuration */
+  permissionScope?: {
+    /** Allowed path patterns (glob patterns) */
+    allowedPaths?: string[]
+    /** Denied path patterns (glob patterns, checked first) */
+    deniedPaths?: string[]
+    /** Maximum file size in bytes */
+    maxFileSize?: number
+    /** Allowed file extensions (e.g., ['.md', '.txt']) */
+    allowedExtensions?: string[]
   }
 }
 
@@ -212,7 +205,7 @@ export interface Conversation {
   /** Path to image file pending to be sent with next message */
   pendingImagePath?: string
   /** Provider identifier for this conversation - supports built-in and custom provider IDs */
-  providerID?: 'anthropic' | 'openai' | 'google' | 'zenmux' | string
+  providerID?: string
 }
 
 /**
@@ -254,10 +247,8 @@ export interface ModelInfo {
   /** Optional display name for the model */
   name?: string
   /** Provider identifier - supports built-in and custom provider IDs */
-  providerID: 'anthropic' | 'openai' | 'google' | 'zenmux' | string
+  providerID: string
 }
-
-// ServerEvent removed - no longer needed for embedded client
 
 // Hook system types
 export type { Hook, HookContext, HookResult } from './hooks/types'

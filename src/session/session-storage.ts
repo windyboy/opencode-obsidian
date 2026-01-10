@@ -1,7 +1,16 @@
 import type { Vault } from 'obsidian'
-import type { EmbeddedSession } from '../embedded-ai-client'
 
-export interface StoredSession extends EmbeddedSession {
+/**
+ * Session interface for OpenCode Server architecture
+ * Sessions are managed server-side, this is just for local storage
+ */
+export interface Session {
+  id: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface StoredSession extends Session {
   savedAt: number
   version: string
 }
@@ -20,7 +29,7 @@ export class SessionStorage {
   /**
    * Save a session to disk
    */
-  async saveSession(session: EmbeddedSession): Promise<void> {
+  async saveSession(session: Session): Promise<void> {
     try {
       // Ensure directory exists
       await this.ensureDirectoryExists()
@@ -61,7 +70,8 @@ export class SessionStorage {
       }
 
       const content = await this.vault.adapter.read(filePath)
-      const storedSession: StoredSession = JSON.parse(content)
+       
+      const storedSession: StoredSession = JSON.parse(content) as StoredSession
 
       // Session loaded
       return storedSession

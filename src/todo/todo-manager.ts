@@ -92,6 +92,7 @@ export class TodoManager {
    */
   getPendingTodos(sessionId?: string): Todo[] {
     return this.getTodosForSession(sessionId).filter(
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
       todo => todo.status === ('pending' as const) || todo.status === ('in-progress' as const)
     )
   }
@@ -101,6 +102,7 @@ export class TodoManager {
    */
   getCompletedTodos(sessionId?: string): Todo[] {
     return this.getTodosForSession(sessionId).filter(
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
       todo => todo.status === ('completed' as const)
     )
   }
@@ -238,7 +240,7 @@ export class TodoManager {
       }
 
       const content = await this.vault.adapter.read(filePath)
-      const todosArray: Todo[] = JSON.parse(content)
+      const todosArray: Todo[] = JSON.parse(content) as Todo[]
 
       // Load into memory
       for (const todo of todosArray) {

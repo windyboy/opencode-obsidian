@@ -175,8 +175,8 @@ describe('ErrorHandler', () => {
       expect(notificationCallback).toHaveBeenCalled()
       const callArgs = notificationCallback.mock.calls[0]
       expect(callArgs).toBeDefined()
-      if (callArgs) {
-        const [message] = callArgs
+      if (callArgs && Array.isArray(callArgs)) {
+        const [message] = callArgs as [string, ...unknown[]]
         expect(message.length).toBeLessThanOrEqual(200)
         expect(message).toContain('...')
       }
@@ -282,7 +282,7 @@ describe('ErrorHandler', () => {
         function: 'asyncFn',
       })
       
-      const result = await wrappedFn()
+      const result = await wrappedFn() as string
       expect(result).toBe('success')
       expect(consoleErrorSpy).not.toHaveBeenCalled()
     })
@@ -308,6 +308,7 @@ describe('ErrorHandler', () => {
         function: 'syncFn',
       })
       
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       expect(() => wrappedFn()).toThrow('Sync error')
       expect(consoleErrorSpy).toHaveBeenCalled()
     })
@@ -318,7 +319,7 @@ describe('ErrorHandler', () => {
         module: 'Test',
       })
       
-      const result = wrappedFn()
+      const result = wrappedFn() as string
       expect(result).toBe('success')
       expect(consoleErrorSpy).not.toHaveBeenCalled()
     })
@@ -337,7 +338,7 @@ describe('ErrorHandler', () => {
 
 describe('getDefaultErrorHandler', () => {
   afterEach(() => {
-    setDefaultErrorHandler(null as any)
+    setDefaultErrorHandler(null as unknown)
   })
 
   it('should create and return default error handler', () => {
@@ -359,7 +360,7 @@ describe('getDefaultErrorHandler', () => {
 
 describe('setDefaultErrorHandler', () => {
   afterEach(() => {
-    setDefaultErrorHandler(null as any)
+    setDefaultErrorHandler(null as unknown)
   })
 
   it('should set custom default error handler', () => {

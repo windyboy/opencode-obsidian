@@ -27,8 +27,10 @@
     "@anthropic-ai/sdk": "^0.71.2",
     "@google/generative-ai": "^0.21.0",
     "js-yaml": "^4.1.1",
+    "minimatch": "^10.1.1",
     "obsidian": "latest",
-    "openai": "^4.70.0"
+    "openai": "^4.70.0",
+    "zod": "^4.3.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.1",

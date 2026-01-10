@@ -168,7 +168,13 @@ export class ToolOutputTruncatorHook extends BaseHook {
 
   private truncateWithKeyInfo(output: string, maxLength: number, toolName: string): string {
     // Try to find sentence boundaries
-    const sentences = output.split(/(?<=[.!?])\s+/)
+    // Use match instead of split to avoid lookbehind for iOS compatibility
+    const sentencePattern = /[^.!?]*[.!?]+/g
+    const sentences: string[] = []
+    let match: RegExpExecArray | null
+    while ((match = sentencePattern.exec(output)) !== null) {
+      sentences.push(match[0].trim())
+    }
     
     if (sentences.length <= 1) {
       // No clear sentence boundaries, just truncate

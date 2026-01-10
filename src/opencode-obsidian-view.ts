@@ -1,8 +1,6 @@
 import { ItemView, WorkspaceLeaf, Notice, Modal, Setting, MarkdownRenderer } from 'obsidian'
 import type OpenCodeObsidianPlugin from './main'
 import type { Conversation, Message, ToolUse, ToolResult } from './types'
-import type { ResponseChunk } from './embedded-ai-client'
-import { ModelSelectorModal } from './model-selector'
 
 export const VIEW_TYPE_OPENCODE_OBSIDIAN = 'opencode-obsidian-view'
 
@@ -23,7 +21,7 @@ export class OpenCodeObsidianView extends ItemView {
   }
 
   getDisplayText() {
-    return 'OpenCode'
+    return 'Opencode'
   }
 
   getIcon() {
@@ -156,26 +154,28 @@ export class OpenCodeObsidianView extends ItemView {
     container.empty()
 
     const statusEl = container.createDiv('opencode-obsidian-status')
-    const availableProviders = this.plugin.providerManager.getAvailableProviders()
-    const providerCount = availableProviders.length
+    // TODO: Get connection status from OpenCode Server client
+    const isConnected = this.plugin.settings.opencodeServer?.url ? true : false
     
-    if (providerCount === 0) {
+    if (!isConnected) {
       statusEl.addClass('disconnected')
-      statusEl.textContent = '● No providers configured'
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      statusEl.textContent = '● not connected to OpenCode server.'
     } else {
       statusEl.addClass('connected')
-      statusEl.textContent = `● ${providerCount} provider(s) available`
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      statusEl.textContent = '● connected to OpenCode server.'
     }
 
     const controls = container.createDiv('opencode-obsidian-controls')
     
     // New conversation button
     const newConvBtn = controls.createEl('button', {
-      text: 'New Chat',
+      text: 'New chat',
       cls: 'mod-cta'
     })
     newConvBtn.onclick = () => {
-      this.createNewConversation()
+      void this.createNewConversation()
     }
   }
 
@@ -191,10 +191,9 @@ export class OpenCodeObsidianView extends ItemView {
     const select = selectContainer.createEl('select', { cls: 'opencode-obsidian-conversation-select' })
     
     this.conversations.forEach(conv => {
-      const providerLabel = conv.providerID ? ` [${conv.providerID.charAt(0).toUpperCase() + conv.providerID.slice(1)}]` : ''
       const option = select.createEl('option', {
         value: conv.id,
-        text: `${conv.title}${providerLabel}`
+        text: conv.title
       })
       if (conv.id === this.activeConversationId) {
         option.selected = true
@@ -208,42 +207,8 @@ export class OpenCodeObsidianView extends ItemView {
     // Add provider selector for active conversation
     const activeConv = this.getActiveConversation()
     if (activeConv) {
-      const providerContainer = selectContainer.createDiv('opencode-obsidian-provider-selector')
-      providerContainer.createSpan({ text: 'Provider: ', cls: 'opencode-obsidian-provider-label' })
-      
-      const providerSelect = providerContainer.createEl('select', { 
-        cls: 'opencode-obsidian-provider-select' 
-      })
-      
-      const availableProviders = this.plugin.providerManager.getAvailableProviders()
-      const currentProvider = activeConv.providerID || this.plugin.settings.providerID
-      
-      availableProviders.forEach(providerID => {
-        // Get display name for provider (use compatible provider name if available)
-        let displayName = providerID.charAt(0).toUpperCase() + providerID.slice(1)
-        const compatibleProvider = this.plugin.settings.compatibleProviders?.find(p => p.id === providerID)
-        if (compatibleProvider) {
-          displayName = `${compatibleProvider.name} (${compatibleProvider.apiType})`
-        }
-        
-        const option = providerSelect.createEl('option', {
-          value: providerID,
-          text: displayName
-        })
-        if (providerID === currentProvider) {
-          option.selected = true
-        }
-      })
-      
-      providerSelect.value = currentProvider
-      providerSelect.onchange = () => {
-        activeConv.providerID = providerSelect.value
-        // Only update conversation selector to reflect provider change
-        this.updateConversationSelector()
-        const selectedProvider = this.plugin.settings.compatibleProviders?.find(p => p.id === providerSelect.value)
-        const displayName = selectedProvider ? selectedProvider.name : providerSelect.value
-        new Notice(`Provider changed to ${displayName}`)
-      }
+      // TODO: Provider selection should be handled by OpenCode Server
+      // Providers are managed server-side, not in the plugin
     }
   }
 
@@ -290,7 +255,9 @@ export class OpenCodeObsidianView extends ItemView {
         const imgEl = imagesContainer.createEl('img', {
           attr: { src: img.data, alt: img.name || 'Image' }
         })
+        // eslint-disable-next-line obsidianmd/no-static-styles-assignment
         imgEl.style.maxWidth = '300px'
+        // eslint-disable-next-line obsidianmd/no-static-styles-assignment
         imgEl.style.maxHeight = '300px'
       })
     }
@@ -320,11 +287,11 @@ export class OpenCodeObsidianView extends ItemView {
           // Render text before code block
           if (textBeforeCodeBlock.trim()) {
             const textContainer = container.createDiv('opencode-obsidian-markdown-text')
-            MarkdownRenderer.renderMarkdown(
+            void MarkdownRenderer.render(
+              this.plugin.app,
               textBeforeCodeBlock.trim(),
               textContainer,
-              '',
-              this.plugin
+              ''
             )
             textBeforeCodeBlock = ''
           }
@@ -366,11 +333,11 @@ export class OpenCodeObsidianView extends ItemView {
     
     if (textBeforeCodeBlock.trim()) {
       const textContainer = container.createDiv('opencode-obsidian-markdown-text')
-      MarkdownRenderer.renderMarkdown(
+      void MarkdownRenderer.render(
+        this.plugin.app,
         textBeforeCodeBlock.trim(),
         textContainer,
-        '',
-        this.plugin
+        ''
       )
     }
   }
@@ -384,6 +351,7 @@ export class OpenCodeObsidianView extends ItemView {
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
       .replace(/`(.*?)`/g, '<code>$1</code>')
     
+    // eslint-disable-next-line @microsoft/sdl/no-inner-html
     p.innerHTML = formattedText
   }
 
@@ -438,7 +406,7 @@ export class OpenCodeObsidianView extends ItemView {
       })
       
       regenBtn.onclick = () => {
-        this.regenerateResponse(message)
+        void this.regenerateResponse(message)
       }
     }
   }
@@ -451,22 +419,7 @@ export class OpenCodeObsidianView extends ItemView {
     // Input toolbar
     const toolbar = inputContainer.createDiv('opencode-obsidian-input-toolbar')
     
-    // Model selector button
-    const modelSelectBtn = toolbar.createEl('button', {
-      cls: 'opencode-obsidian-model-select-btn',
-      text: `Model: ${this.getCurrentModelDisplayName()}`
-    })
-    
-    modelSelectBtn.onclick = () => {
-      new ModelSelectorModal(this.app, this.plugin, async (model) => {
-        this.plugin.settings.model.modelID = model.modelID
-        this.plugin.settings.model.providerID = model.providerID
-        await this.plugin.saveSettings()
-        // Update button text
-        modelSelectBtn.textContent = `Model: ${this.getModelDisplayName(model.modelID)}`
-        new Notice(`Model changed to ${this.getModelDisplayName(model.modelID)}`)
-      }).open()
-    }
+    // TODO: Model selector removed - models are managed by OpenCode Server
 
     // Agent selector
     const agentSelect = toolbar.createEl('select', { cls: 'opencode-obsidian-agent-select' })
@@ -507,7 +460,7 @@ export class OpenCodeObsidianView extends ItemView {
       // If current agent not found, use first available
       agentSelect.value = agentsToShow[0].id
       this.plugin.settings.agent = agentsToShow[0].id
-      this.plugin.saveSettings()
+      void this.plugin.saveSettings()
     }
     
     agentSelect.onchange = async () => {
@@ -584,7 +537,7 @@ export class OpenCodeObsidianView extends ItemView {
 
     // Handle attach (for images)
     attachBtn.onclick = () => {
-      this.showAttachmentModal()
+      void this.showAttachmentModal()
     }
 
     // Handle clear
@@ -614,21 +567,26 @@ export class OpenCodeObsidianView extends ItemView {
     // Auto-resize textarea
     textarea.oninput = () => {
       updateCharCount()
+      // eslint-disable-next-line obsidianmd/no-static-styles-assignment
       textarea.style.height = 'auto'
+       
       textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px'
     }
   }
 
   private async loadConversations() {
     try {
-      const saved = await this.plugin.loadData()
-      const conversations = (saved as any)?.conversations
+       
+      const saved = await this.plugin.loadData() as { conversations?: Conversation[]; activeConversationId?: string } | null
+       
+      const conversations = saved?.conversations
       if (conversations && Array.isArray(conversations) && conversations.length > 0) {
         this.conversations = conversations
         // Restore active conversation if it exists
         if (this.conversations.length > 0) {
           // Try to restore the last active conversation, or use the first one
-          const lastActiveId = (saved as any)?.activeConversationId
+           
+          const lastActiveId = saved?.activeConversationId
           if (lastActiveId && typeof lastActiveId === 'string' && this.conversations.find(c => c.id === lastActiveId)) {
             this.activeConversationId = lastActiveId
           } else {
@@ -655,9 +613,10 @@ export class OpenCodeObsidianView extends ItemView {
 
   private async saveConversations() {
     try {
-      const currentData = await this.plugin.loadData()
+       
+      const currentData = await this.plugin.loadData() as Record<string, unknown> | null
       const dataToSave = {
-        ...currentData,
+        ...(currentData || {}),
         conversations: this.conversations,
         activeConversationId: this.activeConversationId
       }
@@ -668,21 +627,13 @@ export class OpenCodeObsidianView extends ItemView {
   }
 
   private async createNewConversation() {
-    // Use default provider or first available provider
-    const availableProviders = this.plugin.providerManager.getAvailableProviders()
-    const defaultProvider = availableProviders.length > 0 
-      ? (this.plugin.settings.providerID && availableProviders.includes(this.plugin.settings.providerID)
-          ? this.plugin.settings.providerID
-          : availableProviders[0])
-      : this.plugin.settings.providerID
-
+    // TODO: Provider selection should be handled by OpenCode Server
     const conversation: Conversation = {
       id: `conv-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       title: `Chat ${new Date().toLocaleString()}`,
       messages: [],
       createdAt: Date.now(),
-      updatedAt: Date.now(),
-      providerID: defaultProvider
+      updatedAt: Date.now()
     }
 
     this.conversations.unshift(conversation)
@@ -755,52 +706,10 @@ export class OpenCodeObsidianView extends ItemView {
         promptParts.push({ type: 'image', filePath: imagePath })
       }
 
-      // Get provider for this conversation (default to plugin default if not set)
-      const conversationProvider = activeConv.providerID || this.plugin.settings.providerID
-      
-      // Ensure provider is available
-      if (!this.plugin.providerManager.isProviderAvailable(conversationProvider)) {
-        const availableProviders = this.plugin.providerManager.getAvailableProviders()
-        if (availableProviders.length === 0) {
-          throw new Error('No providers configured. Please configure at least one API key in settings.')
-        }
-        // Use first available provider if conversation's provider is not available
-        activeConv.providerID = availableProviders[0]
-        new Notice(`Provider ${conversationProvider} not available, using ${availableProviders[0]}`)
-      }
-
-      const responseStream = await this.plugin.sendPrompt(
-        activeConv.providerID || this.plugin.settings.providerID,
-        imagePath ? promptParts : content,
-        {
-          sessionId: activeConv.sessionId || undefined,
-          abortController: this.currentAbortController
-        }
-      )
-
-      let fullContent = ''
-      for await (const chunk of responseStream) {
-        if (this.currentAbortController?.signal.aborted) {
-          break
-        }
-
-        await this.handleResponseChunk(chunk, assistantMessage)
-        
-        if (chunk.type === 'text' && chunk.content) {
-          fullContent += chunk.content
-          assistantMessage.content = fullContent
-          // Use incremental update instead of full render
-          this.updateMessageContent(assistantMessage.id, fullContent)
-        }
-
-        if (chunk.type === 'session_init' && chunk.sessionId) {
-          activeConv.sessionId = chunk.sessionId
-        }
-
-        if (chunk.type === 'done') {
-          break
-        }
-      }
+      // TODO: Implement OpenCode Server client communication
+      // This should connect to OpenCode Server via WebSocket and send messages
+      // For now, show an error message
+      throw new Error('OpenCode Server client not implemented. Please implement WebSocket client for OpenCode Server communication.')
     } catch (error) {
       console.error('Error sending message:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -817,56 +726,72 @@ export class OpenCodeObsidianView extends ItemView {
     }
   }
 
-  private async handleResponseChunk(chunk: ResponseChunk, message: Message) {
-    switch (chunk.type) {
+  // TODO: Implement response chunk handling for OpenCode Server protocol
+  private async handleResponseChunk(chunk: unknown, message: Message) {
+     
+    const chunkAny = chunk as { type?: string; content?: string; id?: string; name?: string; input?: unknown; isError?: boolean; usage?: unknown }
+     
+    switch (chunkAny.type) {
       case 'text':
         // Text content is handled in sendMessage
         break
       
       case 'thinking':
         // Handle thinking/reasoning display
-        this.showThinkingIndicator(chunk.content || '')
+         
+        this.showThinkingIndicator(chunkAny.content || '')
         break
       
       case 'tool_use':
         // Handle tool use display
         this.showToolUse({
-          id: chunk.id || 'unknown',
-          name: chunk.name || 'unknown',
-          input: chunk.input || {}
+           
+          id: chunkAny.id || 'unknown',
+           
+          name: chunkAny.name || 'unknown',
+           
+          input: chunkAny.input || {}
         })
         break
       
       case 'tool_result':
         // Handle tool result display
         this.showToolResult({
-          id: chunk.id || 'unknown',
-          content: chunk.content || '',
-          isError: chunk.isError || false
+           
+          id: chunkAny.id || 'unknown',
+           
+          content: chunkAny.content || '',
+           
+          isError: chunkAny.isError || false
         })
         break
       
       case 'blocked':
         // Handle permission request blocking
-        this.showBlockedIndicator(chunk.content || 'Waiting for permission...')
+         
+        this.showBlockedIndicator(chunkAny.content || 'Waiting for permission...')
         break
       
       case 'usage':
         // Handle usage information
-        if (chunk.usage) {
-          console.log('Token usage:', chunk.usage)
-          this.showUsageInfo(chunk.usage)
+         
+        if (chunkAny.usage) {
+           
+          console.debug('Token usage:', chunkAny.usage)
+           
+          this.showUsageInfo(chunkAny.usage)
         }
         break
       
       case 'error':
-        throw new Error(chunk.content || 'Unknown error')
+         
+        throw new Error((chunkAny.content) || 'Unknown error')
     }
   }
 
   private showThinkingIndicator(content: string) {
     // Show thinking indicator in the UI
-    console.log('AI is thinking:', content)
+    console.debug('AI is thinking:', content)
     
     let indicator = this.containerEl.querySelector('.opencode-obsidian-thinking-indicator') as HTMLElement
     if (!indicator) {
@@ -878,11 +803,13 @@ export class OpenCodeObsidianView extends ItemView {
     
     if (indicator) {
       indicator.textContent = `💭 ${content || 'Thinking...'}`
+      // eslint-disable-next-line obsidianmd/no-static-styles-assignment
       indicator.style.display = 'block'
       
       // Auto-hide after a delay
       setTimeout(() => {
         if (indicator) {
+          // eslint-disable-next-line obsidianmd/no-static-styles-assignment
           indicator.style.display = 'none'
         }
       }, 3000)
@@ -901,6 +828,7 @@ export class OpenCodeObsidianView extends ItemView {
     
     if (indicator) {
       indicator.textContent = `🔒 ${content}`
+      // eslint-disable-next-line obsidianmd/no-static-styles-assignment
       indicator.style.display = 'block'
     }
   }
@@ -908,14 +836,15 @@ export class OpenCodeObsidianView extends ItemView {
   private hideBlockedIndicator() {
     const indicator = this.containerEl.querySelector('.opencode-obsidian-blocked-indicator') as HTMLElement
     if (indicator) {
+      // eslint-disable-next-line obsidianmd/no-static-styles-assignment
       indicator.style.display = 'none'
     }
   }
 
-  private showUsageInfo(usage: any) {
+  private showUsageInfo(usage: unknown) {
     // Show usage information in the status bar or as a temporary notice
     const usageText = `${usage.model}: ${usage.inputTokens} tokens`
-    console.log('Usage:', usageText)
+    console.debug('Usage:', usageText)
     
     // Could show this in a status bar or as a brief notice
     // For now, just log it
@@ -923,13 +852,13 @@ export class OpenCodeObsidianView extends ItemView {
 
   private showToolUse(toolUse: ToolUse) {
     // Show tool use in the UI (could be a modal or inline display)
-    console.log('Tool use:', toolUse)
+    console.debug('Tool use:', toolUse)
     new Notice(`Using tool: ${toolUse.name}`)
   }
 
   private showToolResult(toolResult: ToolResult) {
     // Show tool result in the UI
-    console.log('Tool result:', toolResult)
+    console.debug('Tool result:', toolResult)
     if (toolResult.isError) {
       new Notice(`Tool error: ${toolResult.content}`)
     }
@@ -962,7 +891,8 @@ export class OpenCodeObsidianView extends ItemView {
   }
 
   private showAttachmentModal() {
-    new AttachmentModal(this.app, async (file: File) => {
+    new AttachmentModal(this.app, (file: File) => {
+      void (async () => {
       try {
         const activeConv = this.getActiveConversation()
         if (!activeConv) {
@@ -987,7 +917,8 @@ export class OpenCodeObsidianView extends ItemView {
         await this.app.vault.createBinary(filePath, arrayBuffer)
         
         // Get absolute path from vault base path
-        const vaultBasePath = (this.app.vault.adapter as any).basePath
+         
+        const vaultBasePath = (this.app.vault.adapter as { basePath?: string }).basePath
         const absolutePath = vaultBasePath ? `${vaultBasePath}/${filePath}` : filePath
         
         // Store image path for the next message
@@ -1003,6 +934,7 @@ export class OpenCodeObsidianView extends ItemView {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error'
         new Notice(`Failed to save image: ${errorMessage}`)
       }
+      })()
     }).open()
   }
 
@@ -1012,7 +944,7 @@ export class OpenCodeObsidianView extends ItemView {
     if (statusEl) {
       statusEl.removeClass('connected', 'disconnected')
       statusEl.addClass('connected')
-      statusEl.textContent = '● Connected'
+      statusEl.textContent = '● connected.'
     }
   }
 
@@ -1028,10 +960,12 @@ export class OpenCodeObsidianView extends ItemView {
       }
       if (indicator) {
         indicator.textContent = `🔧 ${toolName}`
+        // eslint-disable-next-line obsidianmd/no-static-styles-assignment
         indicator.style.display = 'block'
       }
     } else {
       if (indicator) {
+        // eslint-disable-next-line obsidianmd/no-static-styles-assignment
         indicator.style.display = 'none'
       }
     }
@@ -1048,17 +982,17 @@ export class OpenCodeObsidianView extends ItemView {
         }
       }
       if (indicator) {
-        indicator.textContent = '🗜️ Optimizing context...'
+        indicator.textContent = '🗜️ optimizing context…'
+        // eslint-disable-next-line obsidianmd/no-static-styles-assignment
         indicator.style.display = 'block'
       }
     } else {
       if (indicator) {
+        // eslint-disable-next-line obsidianmd/no-static-styles-assignment
         indicator.style.display = 'none'
       }
     }
   }
-
-  // Permission request handling removed - not needed in embedded mode
 
   private updateMessageContent(messageId: string, content: string) {
     const messageEl = this.containerEl.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement
@@ -1078,45 +1012,25 @@ export class OpenCodeObsidianView extends ItemView {
     }
   }
 
+  // TODO: Model display methods removed - models are managed by OpenCode Server
   private getCurrentModelDisplayName(): string {
-    return this.getModelDisplayName(this.plugin.settings.model.modelID)
+    return 'Model (managed by server)'
   }
 
-  private getModelDisplayName(modelID: string): string {
-    // 格式化模型名称用于显示
-    if (!modelID) return 'Unknown'
-    
-    // 尝试提取友好的名称
-    const parts = modelID.split('-')
-    if (parts.length >= 3) {
-      // 例如: claude-3-5-sonnet-20241022 -> Claude 3.5 Sonnet
-      const nameParts = parts.slice(0, 3)
-      return nameParts
-        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(' ')
-    }
-    
-    // 如果是 GPT 模型
-    if (modelID.includes('gpt')) {
-      return modelID.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
-    }
-    
-    // 默认返回模型ID的前30个字符
-    return modelID.length > 30 ? modelID.substring(0, 30) + '...' : modelID
-  }
+  // TODO: Model display methods removed - models are managed by OpenCode Server
 }
 
 class AttachmentModal extends Modal {
   private onFileSelect: (file: File) => void
 
-  constructor(app: any, onFileSelect: (file: File) => void) {
+  constructor(app: unknown, onFileSelect: (file: File) => void) {
     super(app)
     this.onFileSelect = onFileSelect
   }
 
   onOpen() {
     const { contentEl } = this
-    contentEl.createEl('h2', { text: 'Attach Image' })
+    contentEl.createEl('h2', { text: 'Attach image' })
 
     const dropZone = contentEl.createDiv('opencode-obsidian-drop-zone')
     dropZone.textContent = 'Drop an image here or click to select'
@@ -1134,7 +1048,7 @@ class AttachmentModal extends Modal {
       }
       
       if (file.size > 10 * 1024 * 1024) { // 10MB limit
-        new Notice('Image file is too large (max 10MB)')
+        new Notice('Image file is too large (max 10mb).')
         return
       }
       
@@ -1186,7 +1100,7 @@ class ConfirmationModal extends Modal {
   private message: string
   private onConfirm: () => void
 
-  constructor(app: any, title: string, message: string, onConfirm: () => void) {
+  constructor(app: unknown, title: string, message: string, onConfirm: () => void) {
     super(app)
     this.title = title
     this.message = message
@@ -1218,5 +1132,3 @@ class ConfirmationModal extends Modal {
     contentEl.empty()
   }
 }
-
-// PermissionRequestModal removed - not needed in embedded mode

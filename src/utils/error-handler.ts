@@ -68,6 +68,7 @@ export class ErrorHandler {
    * Handle an error with the specified severity and context
    */
   handleError(
+    // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
     error: Error | unknown,
     context: ErrorContext = {},
     severity: ErrorSeverity = ErrorSeverity.Error
@@ -116,7 +117,7 @@ export class ErrorHandler {
         })
         break
       case ErrorSeverity.Info:
-        console.info(message, {
+        console.debug(message, {
           error,
           context: context.metadata
         })
@@ -190,7 +191,7 @@ export class ErrorHandler {
   /**
    * Wrap an async function with error handling
    */
-  wrapAsync<T extends (...args: any[]) => Promise<any>>(
+  wrapAsync<T extends (...args: unknown[]) => Promise<unknown>>(
     fn: T,
     context: ErrorContext
   ): T {
@@ -207,7 +208,7 @@ export class ErrorHandler {
   /**
    * Wrap a sync function with error handling
    */
-  wrapSync<T extends (...args: any[]) => any>(
+  wrapSync<T extends (...args: unknown[]) => unknown>(
     fn: T,
     context: ErrorContext
   ): T {

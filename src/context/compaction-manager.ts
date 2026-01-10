@@ -237,7 +237,6 @@ export class CompactionManager {
   }> {
     // Estimate current usage
     const estimatedTokens = this.contextManager.estimateContextTokens(messages, systemPrompt)
-    const usage = this.contextManager.getUsage()
 
     // Check if we should trigger compaction
     const shouldCompact = this.contextManager.shouldTriggerPreemptiveCompaction() ||
@@ -246,7 +245,7 @@ export class CompactionManager {
     if (!shouldCompact) {
       return {
         compacted: messages.map(msg => ({
-          role: msg.role as 'user' | 'assistant' | 'system',
+          role: msg.role,
           content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
           originalCount: 1,
           compactedAt: Date.now(),
