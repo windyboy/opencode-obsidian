@@ -11,9 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `pnpm check` - Run TypeScript type checking only
 
 ### Testing
-- `pnpm test` - Run tests once with Vitest
-- `pnpm test:watch` - Run tests in watch mode
-- `pnpm test:ui` - Run tests with Vitest UI
+Testing infrastructure is configured with Vitest but no tests are currently implemented. The vitest.config.ts is set up to support unit tests when they are added.
 
 ### Version Management
 - `npm version patch|minor|major` - Bump version and update manifest/versions.json
@@ -63,7 +61,7 @@ Files: `src/tools/obsidian/permission-manager.ts`, `tool-executor.ts`
 5. `obsidian.create_note` - Create new note (scoped-write)
 6. `obsidian.update_note` - Update with replace/append/prepend/insert modes (scoped-write)
 
-Files: `src/tools/obsidian/tool-executor.ts`, `registry.ts`
+Files: `src/tools/obsidian/tool-executor.ts`, `tool-registry.ts`
 
 ### Core Service Modules
 
@@ -125,6 +123,105 @@ Custom agents and skills are loaded from:
 
 All configs are validated and can be patched into the main system prompt. See `src/config-loader.ts` for implementation.
 
+## Memory MCP Servers
+
+This project has access to two memory MCP servers for persistent context and knowledge management:
+
+### claude-mem (Automatic Conversation Memory)
+
+A search-based memory system that automatically tracks conversation history with efficient token usage.
+
+**3-Layer Workflow** (always follow this pattern):
+1. `search(query)` - Get index with IDs (~50-100 tokens/result)
+2. `timeline(anchor=ID)` - Get context around interesting results
+3. `get_observations([IDs])` - Fetch full details ONLY for filtered IDs
+
+**Key Features**:
+- Automatically captures observations, sessions, and prompts from conversations
+- Optimized for quick searches with minimal token usage
+- Timeline view for temporal context around specific results
+- Supports filtering by project, type, date range, and observation type
+
+**Usage Pattern**:
+```typescript
+// Step 1: Search to find relevant IDs
+const results = await search({ query: "authentication", limit: 10 });
+
+// Step 2: Get timeline context around interesting result
+const context = await timeline({ anchor: "#P123", depth_before: 2, depth_after: 2 });
+
+// Step 3: Fetch full details only for filtered IDs
+const details = await get_observations({ ids: [123, 124, 125] });
+```
+
+**When to Use**: Quick lookups of past conversations, finding previous decisions or implementations, understanding project history.
+
+### memvid (File-Based Memory System)
+
+A comprehensive memory system that stores data in `.mv2` files with semantic search, tagging, and export capabilities.
+
+**Core Operations**:
+- `memvid_create(file_path, description?)` - Create new memory file
+- `memvid_add_text(file_path, content, title?, uri?, tags?)` - Add text content
+- `memvid_add_file(file_path, source_file, title?, tags?)` - Import file content
+- `memvid_commit(file_path)` - Save changes to disk
+
+**Search & Retrieval**:
+- `memvid_search(file_path, query, top_k?, snippet_chars?)` - Semantic vector search
+- `memvid_search_by_tag(file_path, tag_key, tag_value?)` - Tag-based search
+- `memvid_export_search_results(file_path, query, format, top_k?)` - Export as text/json/markdown
+
+**Management**:
+- `memvid_info(file_path)` - Get metadata (size, entries, timestamps)
+- `memvid_list_contents(file_path, limit?)` - List recent entries
+- `memvid_get_status()` - Check server status and features
+
+**Usage Pattern**:
+```typescript
+// Create memory file
+await memvid_create({ file_path: "project-memory.mv2", description: "Project knowledge base" });
+
+// Add content with tags
+await memvid_add_text({
+  file_path: "project-memory.mv2",
+  content: "Authentication uses JWT tokens with 24h expiry",
+  title: "Auth Implementation",
+  tags: { category: "security", component: "auth" }
+});
+
+// Commit changes
+await memvid_commit({ file_path: "project-memory.mv2" });
+
+// Search semantically
+const results = await memvid_search({
+  file_path: "project-memory.mv2",
+  query: "how does authentication work",
+  top_k: 5
+});
+```
+
+**When to Use**: Building project knowledge bases, storing architectural decisions, documenting patterns, creating searchable documentation, organizing research notes.
+
+### Choosing Between Memory Systems
+
+**Use claude-mem when**:
+- You need to recall past conversations quickly
+- You want automatic memory without manual management
+- You're looking for temporal context (what was discussed when)
+- Token efficiency is critical
+
+**Use memvid when**:
+- You need persistent, structured knowledge storage
+- You want to organize information with tags
+- You need to import external files or documentation
+- You want to export memory for sharing or backup
+- You're building a project-specific knowledge base
+
+**Use both together**:
+- claude-mem for conversation history and quick lookups
+- memvid for curated project knowledge and documentation
+- Cross-reference between systems for comprehensive context
+
 ## Type System
 
 The project uses strict TypeScript with `noImplicitAny`, `strictNullChecks`, and other strict flags enabled. Key type definitions:
@@ -137,14 +234,15 @@ The project uses strict TypeScript with `noImplicitAny`, `strictNullChecks`, and
 
 ## Testing
 
-Tests use **Vitest** with unit tests for:
-- ErrorHandler (`src/utils/error-handler.test.ts`)
-- AgentResolver
-- ConfigLoader
-- ToolExecutor
-- PermissionManager
+Testing infrastructure is configured with **Vitest** (`vitest.config.ts`) but no tests are currently implemented. The test setup includes:
+- Mock for Obsidian API (`__mocks__/obsidian.ts`)
+- Coverage configuration (v8 provider)
+- Alias resolution (`@` for `src/`)
 
-No E2E tests (would require Obsidian environment). Integration tests cover config loading and tool execution flow.
+When tests are added, they should cover:
+- Core utilities (ErrorHandler, Validators)
+- Business logic (AgentResolver, ConfigLoader, ToolExecutor, PermissionManager)
+- No E2E tests planned (would require full Obsidian environment)
 
 ## Common Development Tasks
 
@@ -152,7 +250,7 @@ No E2E tests (would require Obsidian environment). Integration tests cover confi
 1. Define input schema in `src/tools/obsidian/types.ts` using Zod
 2. Implement execution logic in `src/tools/obsidian/tool-executor.ts`
 3. Add permission checks using `PermissionManager.canRead()` / `canWrite()`
-4. Register in `src/tools/obsidian/registry.ts`
+4. Register in `src/tools/obsidian/tool-registry.ts`
 5. Log all operations via `AuditLogger` for audit trail
 
 ### Handling Errors

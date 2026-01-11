@@ -296,6 +296,13 @@ export type ProtocolMessage = ClientMessage | ServerMessage
  */
 export class ProtocolMessageSerializer {
   /**
+   * Generate a unique ID with the given prefix
+   */
+  private static generateId(prefix: string): string {
+    return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+  }
+
+  /**
    * Serialize a message to JSON string
    */
   static serialize(message: ProtocolMessage): string {
@@ -323,94 +330,54 @@ export class ProtocolMessageSerializer {
    * Generate a unique message ID
    */
   static generateMessageId(): string {
-    return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+    return this.generateId('msg')
   }
 
   /**
    * Generate a unique call ID for tool calls
    */
   static generateCallId(): string {
-    return `call_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+    return this.generateId('call')
   }
 
   /**
    * Generate a unique session ID
    */
   static generateSessionId(): string {
-    return `session_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+    return this.generateId('session')
   }
 }
 
 /**
+ * Message type sets for type-safe comparisons
+ */
+const CLIENT_MESSAGE_TYPES = new Set(['session.start', 'session.message', 'tool.result', 'permission.response', 'session.interrupt'])
+const SERVER_MESSAGE_TYPES = new Set(['session.created', 'stream.token', 'stream.thinking', 'tool.call', 'permission.request', 'progress.update', 'error', 'session.end'])
+
+/**
  * Type guards for message types
  */
-export class ProtocolMessageTypeGuard {
-  /**
-   * Check if message is a client message
-   */
-  static isClientMessage(message: ProtocolMessage): message is ClientMessage {
-    return ['session.start', 'session.message', 'tool.result', 'permission.response', 'session.interrupt'].includes(message.type)
-  }
+export const ProtocolMessageTypeGuard = {
+  /** Check if message is a client message */
+  isClientMessage: (message: ProtocolMessage): message is ClientMessage =>
+    CLIENT_MESSAGE_TYPES.has(message.type),
 
-  /**
-   * Check if message is a server message
-   */
-  static isServerMessage(message: ProtocolMessage): message is ServerMessage {
-    return ['session.created', 'stream.token', 'stream.thinking', 'tool.call', 'permission.request', 'progress.update', 'error', 'session.end'].includes(message.type)
-  }
+  /** Check if message is a server message */
+  isServerMessage: (message: ProtocolMessage): message is ServerMessage =>
+    SERVER_MESSAGE_TYPES.has(message.type),
 
-  /**
-   * Type guards for specific message types
-   */
-  static isSessionStart(message: ProtocolMessage): message is ClientSessionStartMessage {
-    return message.type === 'session.start'
-  }
-
-  static isSessionMessage(message: ProtocolMessage): message is ClientSessionMessageMessage {
-    return message.type === 'session.message'
-  }
-
-  static isToolResult(message: ProtocolMessage): message is ClientToolResultMessage {
-    return message.type === 'tool.result'
-  }
-
-  static isPermissionResponse(message: ProtocolMessage): message is ClientPermissionResponseMessage {
-    return message.type === 'permission.response'
-  }
-
-  static isSessionInterrupt(message: ProtocolMessage): message is ClientSessionInterruptMessage {
-    return message.type === 'session.interrupt'
-  }
-
-  static isSessionCreated(message: ProtocolMessage): message is ServerSessionCreatedMessage {
-    return message.type === 'session.created'
-  }
-
-  static isStreamToken(message: ProtocolMessage): message is ServerStreamTokenMessage {
-    return message.type === 'stream.token'
-  }
-
-  static isStreamThinking(message: ProtocolMessage): message is ServerStreamThinkingMessage {
-    return message.type === 'stream.thinking'
-  }
-
-  static isToolCall(message: ProtocolMessage): message is ServerToolCallMessage {
-    return message.type === 'tool.call'
-  }
-
-  static isPermissionRequest(message: ProtocolMessage): message is ServerPermissionRequestMessage {
-    return message.type === 'permission.request'
-  }
-
-  static isProgressUpdate(message: ProtocolMessage): message is ServerProgressUpdateMessage {
-    return message.type === 'progress.update'
-  }
-
-  static isError(message: ProtocolMessage): message is ServerErrorMessage {
-    return message.type === 'error'
-  }
-
-  static isSessionEnd(message: ProtocolMessage): message is ServerSessionEndMessage {
-    return message.type === 'session.end'
-  }
+  /** Type guards for specific message types */
+  isSessionStart: (msg: ProtocolMessage): msg is ClientSessionStartMessage => msg.type === 'session.start',
+  isSessionMessage: (msg: ProtocolMessage): msg is ClientSessionMessageMessage => msg.type === 'session.message',
+  isToolResult: (msg: ProtocolMessage): msg is ClientToolResultMessage => msg.type === 'tool.result',
+  isPermissionResponse: (msg: ProtocolMessage): msg is ClientPermissionResponseMessage => msg.type === 'permission.response',
+  isSessionInterrupt: (msg: ProtocolMessage): msg is ClientSessionInterruptMessage => msg.type === 'session.interrupt',
+  isSessionCreated: (msg: ProtocolMessage): msg is ServerSessionCreatedMessage => msg.type === 'session.created',
+  isStreamToken: (msg: ProtocolMessage): msg is ServerStreamTokenMessage => msg.type === 'stream.token',
+  isStreamThinking: (msg: ProtocolMessage): msg is ServerStreamThinkingMessage => msg.type === 'stream.thinking',
+  isToolCall: (msg: ProtocolMessage): msg is ServerToolCallMessage => msg.type === 'tool.call',
+  isPermissionRequest: (msg: ProtocolMessage): msg is ServerPermissionRequestMessage => msg.type === 'permission.request',
+  isProgressUpdate: (msg: ProtocolMessage): msg is ServerProgressUpdateMessage => msg.type === 'progress.update',
+  isError: (msg: ProtocolMessage): msg is ServerErrorMessage => msg.type === 'error',
+  isSessionEnd: (msg: ProtocolMessage): msg is ServerSessionEndMessage => msg.type === 'session.end'
 }

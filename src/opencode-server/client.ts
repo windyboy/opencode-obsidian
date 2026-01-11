@@ -314,67 +314,45 @@ export class OpenCodeServerClient {
   private handleSessionCreated(message: ServerSessionCreatedMessage): void {
     const { sessionId, agentId } = message.payload
     this.currentSessionId = sessionId
-    
+
     console.debug('[OpenCodeServerClient] Session created:', { sessionId, agentId })
 
-    // Try to match by message ID first (if service echoes it)
-    let matched = false
-    if (message.id) {
-      const pendingRequest = this.pendingSessionRequests.get(message.id)
-      if (pendingRequest) {
-        clearTimeout(pendingRequest.timeout)
-        this.pendingSessionRequests.delete(message.id)
-        pendingRequest.resolve(sessionId)
-        matched = true
-        console.debug('[OpenCodeServerClient] Matched session by message ID:', message.id)
+    // Try to resolve pending request by message ID first
+    const pendingRequest = message.id ? this.pendingSessionRequests.get(message.id) : undefined
+
+    if (pendingRequest) {
+      this.resolvePendingRequest(message.id!, pendingRequest, sessionId)
+      return
+    }
+
+    // If only one pending request exists, resolve it (FIFO)
+    if (this.pendingSessionRequests.size === 1) {
+      const [key, request] = this.pendingSessionRequests.entries().next().value as [string, typeof pendingRequest]
+      if (request) {
+        this.resolvePendingRequest(key, request, sessionId)
+        return
       }
     }
 
-    // If not matched by ID, try to match by obsidianSessionId (FIFO: take first pending)
-    // Note: This is a fallback since server may not echo obsidianSessionId
-    // In practice, if multiple requests are pending, we'll resolve the first one
-    // This is still better than broadcasting to all callbacks
-    if (!matched && this.pendingSessionRequests.size > 0) {
-      // Try to find by obsidianSessionId if available
-      for (const [key, pendingRequest] of this.pendingSessionRequests.entries()) {
-        // Only match if this is not the requestId key (i.e., it's an obsidianSessionId key)
-        if (pendingRequest.obsidianSessionId && key === pendingRequest.obsidianSessionId) {
-          clearTimeout(pendingRequest.timeout)
-          this.pendingSessionRequests.delete(key)
-          pendingRequest.resolve(sessionId)
-          matched = true
-          console.debug('[OpenCodeServerClient] Matched session by obsidianSessionId:', key)
-          break
-        }
-      }
-
-      // If still not matched and only one pending request, resolve it (FIFO)
-      if (!matched && this.pendingSessionRequests.size === 1) {
-        const nextEntry = this.pendingSessionRequests.entries().next()
-        if (!nextEntry.done && nextEntry.value) {
-          const [key, pendingRequest] = nextEntry.value as [string, {
-            resolve: (sessionId: string) => void
-            reject: (error: Error) => void
-            timeout: ReturnType<typeof setTimeout>
-            obsidianSessionId?: string
-            requestId: string
-          }]
-          clearTimeout(pendingRequest.timeout)
-          this.pendingSessionRequests.delete(key)
-          pendingRequest.resolve(sessionId)
-          matched = true
-          console.debug('[OpenCodeServerClient] Matched session by FIFO (single pending):', key)
-        }
-      }
+    // Fallback to legacy callbacks
+    console.warn('[OpenCodeServerClient] Could not match session.created to pending request, using fallback callbacks')
+    for (const callback of this.sessionCreatedCallbacks) {
+      callback(sessionId, agentId)
     }
+  }
 
-    // Backward compatibility: trigger callbacks if not matched
-    if (!matched) {
-      console.warn('[OpenCodeServerClient] Could not match session.created to pending request, using fallback callbacks')
-      for (const callback of this.sessionCreatedCallbacks) {
-        callback(sessionId, agentId)
-      }
-    }
+  /**
+   * Resolve a pending session request
+   */
+  private resolvePendingRequest(
+    key: string,
+    request: { resolve: (sessionId: string) => void; timeout: ReturnType<typeof setTimeout> },
+    sessionId: string
+  ): void {
+    clearTimeout(request.timeout)
+    this.pendingSessionRequests.delete(key)
+    request.resolve(sessionId)
+    console.debug('[OpenCodeServerClient] Resolved pending session request:', key)
   }
 
   /**
@@ -382,11 +360,7 @@ export class OpenCodeServerClient {
    */
   private handleStreamToken(message: ServerStreamTokenMessage): void {
     const { sessionId, token, done } = message.payload
-
-    // Backward compatibility: trigger callbacks
-    for (const callback of this.streamTokenCallbacks) {
-      callback(sessionId, token, done ?? false)
-    }
+    this.streamTokenCallbacks.forEach(cb => cb(sessionId, token, done ?? false))
   }
 
   /**
@@ -394,11 +368,7 @@ export class OpenCodeServerClient {
    */
   private handleStreamThinking(message: ServerStreamThinkingMessage): void {
     const { sessionId, content } = message.payload
-
-    // Backward compatibility: trigger callbacks
-    for (const callback of this.streamThinkingCallbacks) {
-      callback(sessionId, content)
-    }
+    this.streamThinkingCallbacks.forEach(cb => cb(sessionId, content))
   }
 
   /**
@@ -417,7 +387,7 @@ export class OpenCodeServerClient {
 
       // Publish tool result event
       // Send tool result back to server
-      await this.sendToolResult(sessionId, callId, result, undefined, {
+      this.sendToolResult(sessionId, callId, result, undefined, {
         approved: false,
         dryRun: false,
         duration: Date.now() - startTime
@@ -457,7 +427,7 @@ export class OpenCodeServerClient {
         // Other error - publish error event and send error result
         const errorMessage = error instanceof Error ? error.message : String(error)
         
-        await this.sendToolResult(sessionId, callId, undefined, {
+        this.sendToolResult(sessionId, callId, undefined, {
           message: errorMessage,
           code: 'TOOL_EXECUTION_ERROR',
           details: error
@@ -487,14 +457,14 @@ export class OpenCodeServerClient {
                 const result = await this.toolRegistry.execute(toolName, args, sessionId, callId, true)
 
                 // Send tool result
-                await this.sendToolResult(sessionId, callId, result, undefined, {
+                this.sendToolResult(sessionId, callId, result, undefined, {
                   approved: true,
                   dryRun: false,
                   duration: Date.now() - startTime
                 })
               } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error)
-                await this.sendToolResult(sessionId, callId, undefined, {
+                this.sendToolResult(sessionId, callId, undefined, {
                   message: errorMessage,
                   code: 'TOOL_EXECUTION_ERROR',
                   details: error
@@ -503,7 +473,7 @@ export class OpenCodeServerClient {
             }
           } else {
             // User denied - send permission response
-            await this.sendPermissionResponse(sessionId, callId, false, reason)
+            this.sendPermissionResponse(sessionId, callId, false, reason)
             this.pendingToolCalls.delete(callId)
           }
 
@@ -537,16 +507,7 @@ export class OpenCodeServerClient {
    */
   private handleProgressUpdate(message: ServerProgressUpdateMessage): void {
     const { sessionId, message: progressMessage, stage, progress } = message.payload
-
-    // Publish event to event bus
-    // Backward compatibility: trigger callbacks
-    for (const callback of this.progressUpdateCallbacks) {
-      callback(sessionId, {
-        message: progressMessage,
-        stage,
-        progress
-      })
-    }
+    this.progressUpdateCallbacks.forEach(cb => cb(sessionId, { message: progressMessage, stage, progress }))
   }
 
   /**
@@ -567,10 +528,7 @@ export class OpenCodeServerClient {
       metadata: { sessionId, code, details }
     }, ErrorSeverity.Error)
 
-    // Backward compatibility: trigger error callbacks
-    for (const callback of this.errorCallbacks) {
-      callback(error)
-    }
+    this.errorCallbacks.forEach(cb => cb(error))
   }
 
   /**
@@ -583,10 +541,7 @@ export class OpenCodeServerClient {
       this.currentSessionId = null
     }
 
-    // Backward compatibility: trigger callbacks
-    for (const callback of this.sessionEndCallbacks) {
-      callback(sessionId, reason)
-    }
+    this.sessionEndCallbacks.forEach(cb => cb(sessionId, reason))
   }
 
   /**
@@ -605,9 +560,8 @@ export class OpenCodeServerClient {
    * Start a new session
    */
   async startSession(context?: SessionContext, agentId?: string, obsidianSessionId?: string): Promise<string> {
-    // Generate unique request ID for correlation
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
-    
+
     const message: ClientSessionStartMessage = {
       type: 'session.start',
       id: requestId,
@@ -620,35 +574,19 @@ export class OpenCodeServerClient {
 
     this.sendMessage(message)
 
-    // Wait for session.created response
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        // Clean up on timeout
-        const key = obsidianSessionId || requestId
-        this.pendingSessionRequests.delete(key)
-        // Also try deleting by requestId if obsidianSessionId was used as key
-        if (obsidianSessionId) {
-          this.pendingSessionRequests.delete(requestId)
-        }
+        this.pendingSessionRequests.delete(requestId)
         reject(new Error('Session start timeout'))
-      }, 10000) // 10 second timeout
+      }, 10000)
 
-      const pendingRequest = {
+      this.pendingSessionRequests.set(requestId, {
         resolve,
         reject,
         timeout,
         obsidianSessionId,
         requestId
-      }
-
-      // Use obsidianSessionId as primary key if provided, otherwise use requestId
-      const key = obsidianSessionId || requestId
-      this.pendingSessionRequests.set(key, pendingRequest)
-      
-      // Also store by requestId if obsidianSessionId was used as key (for message ID matching)
-      if (obsidianSessionId && obsidianSessionId !== requestId) {
-        this.pendingSessionRequests.set(requestId, pendingRequest)
-      }
+      })
     })
   }
 
@@ -675,13 +613,13 @@ export class OpenCodeServerClient {
   /**
    * Send tool execution result
    */
-  private async sendToolResult(
+  private sendToolResult(
     sessionId: string,
     callId: string,
     result?: unknown,
     error?: { message: string; code?: string; details?: unknown },
     auditLog?: { approved: boolean; dryRun: boolean; duration: number }
-  ): Promise<void> {
+  ): void {
     const message: ClientToolResultMessage = {
       type: 'tool.result',
       payload: {
@@ -699,13 +637,13 @@ export class OpenCodeServerClient {
   /**
    * Send permission response
    */
-  private async sendPermissionResponse(
+  private sendPermissionResponse(
     sessionId: string,
     callId: string,
     allowed: boolean,
     reason?: string,
     sessionOnly?: boolean
-  ): Promise<void> {
+  ): void {
     const message: ClientPermissionResponseMessage = {
       type: 'permission.response',
       payload: {

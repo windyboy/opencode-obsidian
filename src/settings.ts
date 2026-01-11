@@ -9,32 +9,66 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
     this.plugin = plugin
   }
 
+  /**
+   * Create a textarea element with common styling
+   */
+  private createTextarea(
+    container: HTMLElement,
+    placeholder: string,
+    value: string,
+    onChange: (value: string) => Promise<void>
+  ): HTMLTextAreaElement {
+    const textarea = container.createEl('textarea', {
+      cls: 'opencode-setting-textarea',
+      attr: { placeholder, rows: '3' }
+    })
+    textarea.style.width = '100%'
+    textarea.value = value
+    textarea.onchange = () => onChange(textarea.value)
+    return textarea
+  }
+
+  /**
+   * Ensure opencodeServer config exists with defaults
+   */
+  private ensureServerConfig(): NonNullable<typeof this.plugin.settings.opencodeServer> {
+    if (!this.plugin.settings.opencodeServer) {
+      this.plugin.settings.opencodeServer = {
+        url: 'ws://localhost:4096',
+        autoReconnect: true,
+        reconnectDelay: 3000,
+        reconnectMaxAttempts: 10
+      }
+    }
+    return this.plugin.settings.opencodeServer
+  }
+
   display(): void {
     const { containerEl } = this
     containerEl.empty()
 
-    // 主标题
+    // Main title
     containerEl.createEl('h2', { text: 'OpenCode Obsidian Settings' })
     containerEl.createEl('p', {
       text: 'Configure your OpenCode Obsidian plugin settings. Changes are saved automatically.',
       cls: 'setting-item-description'
     })
 
-    // 第一部分：OpenCode Server 配置
+    // Section 1: OpenCode Server configuration
     this.renderServerConfiguration(containerEl)
 
-    // 第二部分：Agent 配置
+    // Section 2: Agent configuration
     this.renderAgentConfiguration(containerEl)
 
-    // 第三部分：工具权限配置
+    // Section 3: Tool permission configuration
     this.renderToolPermissions(containerEl)
 
-    // 第四部分：高级配置（可折叠）
+    // Section 4: Advanced settings (collapsible)
     this.renderAdvancedSettings(containerEl)
   }
 
   /**
-   * 渲染 OpenCode Server 配置部分
+   * Render OpenCode Server configuration section
    */
   private renderServerConfiguration(containerEl: HTMLElement): void {
     new Setting(containerEl).setName('OpenCode Server').setHeading()
@@ -54,24 +88,16 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
           .inputEl.classList.add('opencode-setting-url')
         text.onChange(async (value: string) => {
           const trimmedValue = value.trim()
-          if (!this.plugin.settings.opencodeServer) {
-            this.plugin.settings.opencodeServer = {
-              url: trimmedValue,
-              autoReconnect: true,
-              reconnectDelay: 3000,
-              reconnectMaxAttempts: 10
-            }
-          } else {
-            this.plugin.settings.opencodeServer.url = trimmedValue
-          }
-          
-          // 验证 URL 格式
+          const serverConfig = this.ensureServerConfig()
+          serverConfig.url = trimmedValue
+
+          // Validate URL format
           if (trimmedValue && !this.isValidWebSocketUrl(trimmedValue)) {
             text.inputEl.classList.add('mod-invalid')
           } else {
             text.inputEl.classList.remove('mod-invalid')
           }
-          
+
           await this.plugin.debouncedSaveSettings()
         })
       })
@@ -81,9 +107,8 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
           .onClick(async () => {
             button.setDisabled(true)
             button.setButtonText('Testing...')
-            
+
             try {
-              // 这里可以添加连接测试逻辑
               await new Promise(resolve => setTimeout(resolve, 1000))
               new Notice('Connection test feature coming soon')
             } catch (error) {
@@ -95,7 +120,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
           })
       })
 
-    // Authentication Token (可选)
+    // Authentication Token (optional)
     new Setting(containerEl)
       .setName('Authentication token')
       .setDesc('Optional authentication token for OpenCode server. Leave empty if not required.')
@@ -104,22 +129,15 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.opencodeServer?.token || '')
           .inputEl.type = 'password'
         text.onChange(async (value: string) => {
-          if (!this.plugin.settings.opencodeServer) {
-            this.plugin.settings.opencodeServer = {
-              url: 'ws://localhost:4096',
-              autoReconnect: true,
-              reconnectDelay: 3000,
-              reconnectMaxAttempts: 10
-            }
-          }
-          this.plugin.settings.opencodeServer.token = value.trim() || undefined
+          const serverConfig = this.ensureServerConfig()
+          serverConfig.token = value.trim() || undefined
           await this.plugin.debouncedSaveSettings()
         })
       })
   }
 
   /**
-   * 渲染 Agent 配置部分
+   * Render Agent configuration section
    */
   private renderAgentConfiguration(containerEl: HTMLElement): void {
     new Setting(containerEl).setName('Agent Configuration').setHeading()
@@ -174,7 +192,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
   }
 
   /**
-   * 渲染工具权限配置部分
+   * Render tool permission configuration section
    */
   private renderToolPermissions(containerEl: HTMLElement): void {
     new Setting(containerEl).setName('Tool Permissions').setHeading()
@@ -184,7 +202,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
       cls: 'setting-item-description'
     })
 
-    // 权限级别选择
+    // Permission level selection
     const permissionLevelSetting = new Setting(containerEl)
       .setName('Permission level')
       .setDesc(this.getPermissionLevelDescription())
@@ -200,11 +218,11 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings()
           permissionLevelSetting.setDesc(this.getPermissionLevelDescription())
           
-          // 如果切换到 read-only，清除权限作用域配置
+          // If switching to read-only, clear permission scope configuration
           if (value === 'read-only') {
             this.plugin.settings.permissionScope = undefined
           } else if (value === 'scoped-write' && !this.plugin.settings.permissionScope) {
-            // 为 scoped-write 初始化默认配置
+            // Initialize default configuration for scoped-write
             this.plugin.settings.permissionScope = {
               allowedPaths: undefined,
               deniedPaths: ['**/.obsidian/**', '**/.git/**', '**/node_modules/**'],
@@ -213,14 +231,14 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
             }
           }
           
-          // 重新渲染以更新权限作用域 UI 的可见性
+          // Re-render to update permission scope UI visibility
           this.display()
           new Notice('Tool permission level updated')
         })
     })
 
-    // 权限作用域配置（仅在 scoped-write 或 full-write 时显示）
-    const showScopeSettings = this.plugin.settings.toolPermission === 'scoped-write' || 
+    // Permission scope configuration (only shown for scoped-write or full-write)
+    const showScopeSettings = this.plugin.settings.toolPermission === 'scoped-write' ||
                               this.plugin.settings.toolPermission === 'full-write'
 
     if (showScopeSettings) {
@@ -229,63 +247,50 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
   }
 
   /**
-   * 渲染权限作用域详细配置
+   * Render permission scope detailed configuration
    */
   private renderPermissionScope(containerEl: HTMLElement): void {
     const scope = this.plugin.settings.permissionScope || {}
 
-    // 允许的路径模式
+    // Allowed path patterns
     const allowedPathsSetting = new Setting(containerEl)
       .setName('Allowed paths')
       .setDesc('Glob patterns for allowed paths (e.g., notes/**, docs/*.md). Leave empty to allow all paths (subject to denied paths). One pattern per line.')
 
-    // 创建 textarea 用于多行输入
-    const allowedPathsTextarea = allowedPathsSetting.controlEl.createEl('textarea', {
-      cls: 'opencode-setting-textarea',
-      attr: {
-        placeholder: 'notes/**\ndocs/*.md',
-        rows: '3'
+    this.createTextarea(
+      allowedPathsSetting.controlEl,
+      'notes/**\ndocs/*.md',
+      scope.allowedPaths?.join('\n') || '',
+      async (value) => {
+        if (!this.plugin.settings.permissionScope) {
+          this.plugin.settings.permissionScope = {}
+        }
+        const paths = value.split('\n').map(p => p.trim()).filter(p => p.length > 0)
+        this.plugin.settings.permissionScope!.allowedPaths = paths.length > 0 ? paths : undefined
+        await this.plugin.debouncedSaveSettings()
       }
-    })
-    allowedPathsTextarea.style.width = '100%'
-    allowedPathsTextarea.value = scope.allowedPaths?.join('\n') || ''
-    allowedPathsTextarea.onchange = async () => {
-      if (!this.plugin.settings.permissionScope) {
-        this.plugin.settings.permissionScope = {}
-      }
-      const paths = allowedPathsTextarea.value.split('\n')
-        .map(p => p.trim())
-        .filter(p => p.length > 0)
-      this.plugin.settings.permissionScope!.allowedPaths = paths.length > 0 ? paths : undefined
-      await this.plugin.debouncedSaveSettings()
-    }
+    )
 
-    // 拒绝的路径模式
+    // Denied path patterns
     const deniedPathsSetting = new Setting(containerEl)
       .setName('Denied paths')
       .setDesc('Glob patterns for denied paths (checked first, always denied). Example: **/.obsidian/**, **/.git/**. One pattern per line.')
 
-    const deniedPathsTextarea = deniedPathsSetting.controlEl.createEl('textarea', {
-      cls: 'opencode-setting-textarea',
-      attr: {
-        placeholder: '**/.obsidian/**\n**/.git/**\n**/node_modules/**',
-        rows: '3'
+    this.createTextarea(
+      deniedPathsSetting.controlEl,
+      '**/.obsidian/**\n**/.git/**\n**/node_modules/**',
+      scope.deniedPaths?.join('\n') || '',
+      async (value) => {
+        if (!this.plugin.settings.permissionScope) {
+          this.plugin.settings.permissionScope = {}
+        }
+        const paths = value.split('\n').map(p => p.trim()).filter(p => p.length > 0)
+        this.plugin.settings.permissionScope!.deniedPaths = paths.length > 0 ? paths : undefined
+        await this.plugin.debouncedSaveSettings()
       }
-    })
-    deniedPathsTextarea.style.width = '100%'
-    deniedPathsTextarea.value = scope.deniedPaths?.join('\n') || ''
-    deniedPathsTextarea.onchange = async () => {
-      if (!this.plugin.settings.permissionScope) {
-        this.plugin.settings.permissionScope = {}
-      }
-      const paths = deniedPathsTextarea.value.split('\n')
-        .map(p => p.trim())
-        .filter(p => p.length > 0)
-      this.plugin.settings.permissionScope!.deniedPaths = paths.length > 0 ? paths : undefined
-      await this.plugin.debouncedSaveSettings()
-    }
+    )
 
-    // 最大文件大小
+    // Maximum file size
     const maxFileSizeSetting = new Setting(containerEl)
       .setName('Maximum file size')
       .setDesc('Maximum file size in bytes (e.g., 10485760 for 10MB). Leave empty for no limit.')
@@ -307,7 +312,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
       })
     })
 
-    // 添加帮助按钮
+    // Add help button
     maxFileSizeSetting.addExtraButton(button => {
       button.setIcon('help')
         .setTooltip('Common sizes: 1024 (1KB), 1048576 (1MB), 10485760 (10MB), 104857600 (100MB)')
@@ -316,7 +321,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         })
     })
 
-    // 允许的文件扩展名
+    // Allowed file extensions
     const allowedExtensionsSetting = new Setting(containerEl)
       .setName('Allowed file extensions')
       .setDesc('Comma-separated list of allowed file extensions (e.g., .md, .txt, .json). Leave empty to allow all extensions.')
@@ -337,7 +342,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
       })
     })
 
-    // 添加重置按钮
+    // Add reset button
     allowedExtensionsSetting.addExtraButton(button => {
       button.setIcon('reset')
         .setTooltip('Reset to default')
@@ -352,7 +357,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
   }
 
   /**
-   * 渲染高级设置部分（可折叠）
+   * Render advanced settings section (collapsible)
    */
   private renderAdvancedSettings(containerEl: HTMLElement): void {
     const advancedSection = containerEl.createDiv('opencode-settings-advanced')
@@ -374,10 +379,10 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
       toggleButton.textContent = isVisible ? 'Show' : 'Hide'
     }
 
-    // 重连配置
+    // Reconnection configuration
     this.renderReconnectionSettings(content)
 
-    // 重置配置按钮
+    // Reset configuration button
     new Setting(content)
       .setName('Reset to defaults')
       .setDesc('Reset all settings to default values. This cannot be undone.')
@@ -385,14 +390,14 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         button.setButtonText('Reset')
           .setWarning()
           .onClick(() => {
-            // 这里可以添加确认对话框
+            // Confirmation dialog can be added here
             new Notice('Reset functionality coming soon')
           })
       })
   }
 
   /**
-   * 渲染重连设置
+   * Render reconnection settings
    */
   private renderReconnectionSettings(containerEl: HTMLElement): void {
     new Setting(containerEl).setName('Reconnection Settings').setHeading()
@@ -402,28 +407,20 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
       cls: 'setting-item-description'
     })
 
-    // 自动重连开关
+    // Auto reconnect toggle
     new Setting(containerEl)
       .setName('Auto reconnect')
       .setDesc('Automatically attempt to reconnect when connection is lost')
       .addToggle(toggle => {
         toggle.setValue(this.plugin.settings.opencodeServer?.autoReconnect ?? true)
           .onChange(async (value) => {
-            if (!this.plugin.settings.opencodeServer) {
-              this.plugin.settings.opencodeServer = {
-                url: 'ws://localhost:4096',
-                autoReconnect: value,
-                reconnectDelay: 3000,
-                reconnectMaxAttempts: 10
-              }
-            } else {
-              this.plugin.settings.opencodeServer.autoReconnect = value
-            }
+            const serverConfig = this.ensureServerConfig()
+            serverConfig.autoReconnect = value
             await this.plugin.saveSettings()
           })
       })
 
-    // 重连延迟
+    // Reconnect delay
     new Setting(containerEl)
       .setName('Reconnect delay')
       .setDesc('Delay between reconnection attempts in milliseconds (default: 3000ms, with exponential backoff)')
@@ -434,22 +431,14 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         text.inputEl.type = 'number'
         text.inputEl.min = '1000'
         text.onChange(async (value: string) => {
-          if (!this.plugin.settings.opencodeServer) {
-            this.plugin.settings.opencodeServer = {
-              url: 'ws://localhost:4096',
-              autoReconnect: true,
-              reconnectDelay: 3000,
-              reconnectMaxAttempts: 10
-            }
-          }
+          const serverConfig = this.ensureServerConfig()
           const numValue = parseInt(value.trim(), 10)
-          this.plugin.settings.opencodeServer.reconnectDelay = 
-            !isNaN(numValue) && numValue >= 1000 ? numValue : 3000
+          serverConfig.reconnectDelay = !isNaN(numValue) && numValue >= 1000 ? numValue : 3000
           await this.plugin.debouncedSaveSettings()
         })
       })
 
-    // 最大重连次数
+    // Max reconnect attempts
     new Setting(containerEl)
       .setName('Max reconnect attempts')
       .setDesc('Maximum number of reconnection attempts (0 = unlimited, default: 10)')
@@ -460,25 +449,17 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         text.inputEl.type = 'number'
         text.inputEl.min = '0'
         text.onChange(async (value: string) => {
-          if (!this.plugin.settings.opencodeServer) {
-            this.plugin.settings.opencodeServer = {
-              url: 'ws://localhost:4096',
-              autoReconnect: true,
-              reconnectDelay: 3000,
-              reconnectMaxAttempts: 10
-            }
-          }
+          const serverConfig = this.ensureServerConfig()
           const trimmed = value.trim()
           const numValue = trimmed === '0' ? 0 : parseInt(trimmed, 10)
-          this.plugin.settings.opencodeServer.reconnectMaxAttempts = 
-            !isNaN(numValue) && numValue >= 0 ? numValue : 10
+          serverConfig.reconnectMaxAttempts = !isNaN(numValue) && numValue >= 0 ? numValue : 10
           await this.plugin.debouncedSaveSettings()
         })
       })
   }
 
   /**
-   * 辅助方法：验证 WebSocket URL 格式
+   * Helper method: Validate WebSocket URL format
    */
   private isValidWebSocketUrl(url: string): boolean {
     try {
@@ -490,7 +471,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
   }
 
   /**
-   * 获取 Agent 描述文本
+   * Get Agent description text
    */
   private getAgentDescription(): string {
     const agentCount = this.plugin.settings.agents?.filter(a => !a.hidden).length || 0
@@ -501,7 +482,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
   }
 
   /**
-   * 获取权限级别描述文本
+   * Get permission level description text
    */
   private getPermissionLevelDescription(): string {
     const level = this.plugin.settings.toolPermission || 'read-only'

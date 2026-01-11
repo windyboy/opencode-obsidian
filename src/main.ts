@@ -13,19 +13,51 @@ import { AuditLogger } from './tools/obsidian/audit-logger'
 import { ToolPermission } from './tools/obsidian/types'
 import type { PermissionScope } from './tools/obsidian/permission-types'
 
+/**
+ * Maps string permission level settings to ToolPermission enum values
+ */
+const PERMISSION_LEVEL_MAP: Record<string, ToolPermission> = {
+  'read-only': ToolPermission.ReadOnly,
+  'scoped-write': ToolPermission.ScopedWrite,
+  'full-write': ToolPermission.FullWrite
+}
+
+/**
+ * Convert string permission level to ToolPermission enum
+ */
+function getPermissionLevel(level: string | undefined): ToolPermission {
+  return PERMISSION_LEVEL_MAP[level || 'read-only'] ?? ToolPermission.ReadOnly
+}
+
+/**
+ * Convert settings permission scope to PermissionScope type
+ * Returns undefined if no scope is configured
+ */
+function toPermissionScope(scope: OpenCodeObsidianSettings['permissionScope']): PermissionScope | undefined {
+  if (!scope) return undefined
+  return {
+    allowedPaths: scope.allowedPaths,
+    deniedPaths: scope.deniedPaths,
+    maxFileSize: scope.maxFileSize,
+    allowedExtensions: scope.allowedExtensions
+  } as PermissionScope
+}
+
+/**
+ * Default OpenCode Server configuration
+ */
+const DEFAULT_SERVER_CONFIG = {
+  url: 'ws://localhost:4096',
+  autoReconnect: true,
+  reconnectDelay: 3000,
+  reconnectMaxAttempts: 10
+} as const
+
 const DEFAULT_SETTINGS: OpenCodeObsidianSettings = {
   agent: 'assistant',
   instructions: [],
-  // OpenCode Server configuration (required)
-  opencodeServer: {
-    url: 'ws://localhost:4096',
-    autoReconnect: true,
-    reconnectDelay: 3000,
-    reconnectMaxAttempts: 10
-  },
-  // Tool permission level (default: read-only for safety)
+  opencodeServer: { ...DEFAULT_SERVER_CONFIG },
   toolPermission: 'read-only',
-  // Permission scope (default: no restrictions for read-only)
   permissionScope: undefined,
 }
 
@@ -64,20 +96,10 @@ export default class OpenCodeObsidianPlugin extends Plugin {
       // Initialize tool execution layer
       try {
         if (this.app && this.app.vault) {
-          // Convert settings.permissionScope to PermissionScope type
-          const permissionScope: PermissionScope | undefined = this.settings.permissionScope ? {
-            allowedPaths: this.settings.permissionScope.allowedPaths,
-            deniedPaths: this.settings.permissionScope.deniedPaths,
-            maxFileSize: this.settings.permissionScope.maxFileSize,
-            allowedExtensions: this.settings.permissionScope.allowedExtensions
-          } as PermissionScope : undefined
-          
           this.permissionManager = new PermissionManager(
             this.app.vault,
-            this.settings.toolPermission === 'read-only' ? ToolPermission.ReadOnly :
-            this.settings.toolPermission === 'scoped-write' ? ToolPermission.ScopedWrite :
-            ToolPermission.FullWrite,
-            permissionScope
+            getPermissionLevel(this.settings.toolPermission),
+            toPermissionScope(this.settings.permissionScope)
           )
           
           const auditLogger = new AuditLogger(this.app.vault)
@@ -176,16 +198,10 @@ export default class OpenCodeObsidianPlugin extends Plugin {
   async loadSettings() {
     const loadedData = await this.loadData() as Partial<OpenCodeObsidianSettings> | null
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData ?? {})
-    
 
     // Ensure OpenCode Server configuration exists
     if (!this.settings.opencodeServer) {
-      this.settings.opencodeServer = {
-        url: 'ws://localhost:4096',
-        autoReconnect: true,
-        reconnectDelay: 3000,
-        reconnectMaxAttempts: 10
-      }
+      this.settings.opencodeServer = { ...DEFAULT_SERVER_CONFIG }
     }
 
     console.debug('[OpenCode Obsidian] Settings loaded from storage:', loadedData)
@@ -193,19 +209,13 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 
   /**
    * Migrate old settings format to new format
-   * - Initializes OpenCode Server and permission settings with defaults if not present
    */
-  private migrateSettings() {
+  private migrateSettings(): void {
     let needsSave = false
 
     // Initialize OpenCode Server configuration with defaults if not present
     if (!this.settings.opencodeServer) {
-      this.settings.opencodeServer = {
-        url: 'ws://localhost:4096',
-        autoReconnect: true,
-        reconnectDelay: 3000,
-        reconnectMaxAttempts: 10
-      }
+      this.settings.opencodeServer = { ...DEFAULT_SERVER_CONFIG }
       needsSave = true
       console.debug('[OpenCode Obsidian] Initialized OpenCode Server configuration with defaults')
     }
@@ -217,43 +227,18 @@ export default class OpenCodeObsidianPlugin extends Plugin {
       console.debug('[OpenCode Obsidian] Initialized tool permission: read-only (default)')
     }
 
-    // Initialize permission scope if toolPermission is set but scope is not
-    if (this.settings.toolPermission && !this.settings.permissionScope) {
-      // Permission scope defaults are applied at runtime based on permission level
-      // We don't need to set defaults here - they're handled by PermissionManager
-      console.debug('[OpenCode Obsidian] Permission scope will use defaults based on permission level')
-    }
-
-    // Save migrated settings if needed
     if (needsSave) {
       void this.saveSettings()
     }
   }
 
   async saveSettings() {
-    // 更新 PermissionManager 配置（如果已初始化）
+    // Update PermissionManager configuration (if initialized)
     if (this.permissionManager) {
-      const permissionLevel = this.settings.toolPermission === 'read-only' ? ToolPermission.ReadOnly :
-                              this.settings.toolPermission === 'scoped-write' ? ToolPermission.ScopedWrite :
-                              ToolPermission.FullWrite
-      
-      this.permissionManager.setPermissionLevel(permissionLevel)
-      
-      if (this.settings.permissionScope) {
-        const permissionScope: PermissionScope = {
-          allowedPaths: this.settings.permissionScope.allowedPaths,
-          deniedPaths: this.settings.permissionScope.deniedPaths,
-          maxFileSize: this.settings.permissionScope.maxFileSize,
-          allowedExtensions: this.settings.permissionScope.allowedExtensions
-        } as PermissionScope
-        
-        this.permissionManager.setScope(permissionScope)
-      } else {
-        // 如果 permissionScope 为 undefined，重置为默认值
-        this.permissionManager.setScope({} as PermissionScope)
-      }
+      this.permissionManager.setPermissionLevel(getPermissionLevel(this.settings.toolPermission))
+      this.permissionManager.setScope(toPermissionScope(this.settings.permissionScope) ?? {} as PermissionScope)
     }
-    
+
     await this.saveData(this.settings)
   }
 

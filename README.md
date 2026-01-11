@@ -1,29 +1,34 @@
 # OpenCode Obsidian
 
-AI-powered chat interface for Obsidian that connects to OpenCode Server for AI interactions.
+AI-powered chat interface for Obsidian that integrates with OpenCode Server for advanced AI interactions and tool execution.
 
 ## What is this?
 
-OpenCode Obsidian is an Obsidian plugin that provides a chat interface to interact with AI models via OpenCode Server, enabling you to:
+OpenCode Obsidian is an Obsidian plugin that provides a sophisticated chat interface to interact with AI models via OpenCode Server. It enables you to:
 
--   Chat with AI directly from Obsidian
--   Connect to OpenCode Server for AI interactions
--   Send prompts and receive streaming responses
--   Attach images to conversations
--   Manage multiple conversation sessions
--   Execute tools for Obsidian operations (read/write notes, search vault, etc.)
+-   Chat with AI directly from Obsidian with real-time streaming responses
+-   Connect to OpenCode Server for agent orchestration and tool execution
+-   Execute Obsidian tools with permission-based security (read/write notes, search vault, etc.)
+-   Attach images to conversations for multimodal interactions
+-   Manage multiple conversation sessions with auto-save
+-   Use custom agents and skills for specialized tasks
+-   Configure advanced context management and TODO tracking
 
 ## Features
 
--   **Chat Interface**: Clean, intuitive chat UI integrated into Obsidian
--   **Real-time Streaming**: See AI responses stream in real-time
--   **Image Support**: Attach images to your conversations
--   **Multiple Sessions**: Manage multiple conversation sessions
--   **OpenCode Server Integration**: Connect to OpenCode Server for AI provider and model management
--   **Tool Execution**: Execute Obsidian tools (read/write notes, search vault, etc.) with permission management
--   **Settings Panel**: Configure server connection and tool permissions
--   **Error Handling**: Unified error handling system with user-friendly notifications
--   **Performance Optimized**: Incremental DOM updates, debounced settings
+-   **Chat Interface**: Clean, intuitive chat UI with incremental DOM updates for smooth performance
+-   **Real-time Streaming**: See AI responses stream in real-time with token-by-token updates
+-   **Image Support**: Attach images to conversations for multimodal AI interactions
+-   **Multiple Sessions**: Manage multiple conversation sessions with auto-save and persistence
+-   **OpenCode Server Integration**: WebSocket-based connection for agent orchestration and tool execution
+-   **Tool Execution**: 6 core Obsidian tools with permission-based security (read-only, scoped-write, full-write)
+-   **Custom Agents & Skills**: Create specialized agents with YAML frontmatter and reusable skills
+-   **Configuration System**: Load agents, skills, and instructions from `.opencode/` directory
+-   **Context Management**: Advanced context retrieval, token estimation, and budget allocation
+-   **TODO Management**: Automatic TODO extraction and task plan tracking
+-   **Settings Panel**: Comprehensive settings for server connection, permissions, and agent configuration
+-   **Error Handling**: Unified error handling system with severity levels and user-friendly notifications
+-   **Performance Optimized**: LRU caching, debounced settings, throttled API calls
 
 ## Installation
 
@@ -94,17 +99,15 @@ OpenCode Obsidian is an Obsidian plugin that provides a chat interface to intera
 
 Configure the following settings in the plugin settings panel:
 
--   **API Keys**: Enter API keys for multiple providers (stored securely in Obsidian settings)
-    -   Anthropic (Claude)
-    -   OpenAI (GPT)
-    -   Google (Gemini)
-    -   ZenMux
-    -   Compatible Providers (from `.opencode/config.json`)
--   **AI Provider**: Choose from available providers
--   **Model ID**: The specific model to use (e.g., `claude-3-5-sonnet-20241022`, `gpt-4`, `gemini-pro`)
--   **Default Agent**: The default agent/system prompt to use for conversations
+-   **OpenCode Server**: Configure WebSocket connection URL (default: `ws://localhost:4096`)
+-   **Default Agent**: Select the default agent for new conversations
     -   Built-in agents: Assistant, Bootstrap, Thinking Partner, Research Assistant, Read Only
     -   Custom agents: Loaded from `.opencode/agent/*.md` files
+-   **Tool Permissions**: Set permission level for tool execution
+    -   `read-only`: No approval needed for read operations
+    -   `scoped-write`: Requires user approval for writes to specific paths
+    -   `full-write`: Requires approval for any write operation
+-   **Permission Scopes**: Configure allowed/denied paths, file size limits, and extensions
 -   **Context Management**: Configure context window thresholds and token limits
 -   **TODO Management**: Configure TODO extraction and continuation behavior
 -   **Instructions**: Add instruction files or glob patterns to merge into system prompts
@@ -193,8 +196,9 @@ When reviewing code, focus on:
 
 ### Connection Status
 
--   Green dot: Client initialized and ready
--   The embedded client is always ready once API key is configured
+-   Green dot: Connected to OpenCode Server
+-   Red dot: Disconnected from OpenCode Server
+-   The plugin automatically attempts to reconnect if the connection is lost
 
 ## Development
 
@@ -205,13 +209,16 @@ opencode-obsidian/
 ├── src/
 │   ├── main.ts                      # Main plugin entry point
 │   ├── opencode-obsidian-view.ts    # Chat view component with incremental DOM updates
-│   ├── embedded-ai-client.ts        # Multi-provider AI client with LRU session cache
-│   ├── provider-manager.ts          # Provider management with caching/throttling
 │   ├── settings.ts                  # Settings panel UI
 │   ├── types.ts                     # TypeScript type definitions
 │   ├── config-loader.ts             # Configuration file loading with security validations
 │   ├── agent/
 │   │   └── agent-resolver.ts        # Agent configuration resolution and skill merging
+│   ├── opencode-server/
+│   │   ├── client.ts                # WebSocket client for OpenCode Server
+│   │   └── protocol.ts              # Protocol message definitions
+│   ├── orchestrator/
+│   │   └── agent-orchestrator.ts    # Agent loop state machine
 │   ├── hooks/
 │   │   ├── hook-registry.ts         # Hook system for extensibility
 │   │   └── *.ts                     # Individual hook implementations
@@ -225,15 +232,21 @@ opencode-obsidian/
 │   ├── todo/
 │   │   ├── todo-manager.ts          # TODO extraction and management
 │   │   └── todo-extractor.ts        # TODO parsing logic
-│   ├── utils/
-│   │   ├── error-handler.ts         # Unified error handling system
-│   │   ├── validators.ts            # Input validation utilities
-│   │   ├── constants.ts             # Configuration constants
-│   │   ├── debounce-throttle.ts     # Debounce/throttle utilities
-│   │   └── error-handler.test.ts    # Unit tests
-│   └── mcp/                         # MCP (Model Context Protocol) - placeholder
+│   ├── tools/
+│   │   └── obsidian/                # Obsidian tool system
+│   │       ├── tool-executor.ts     # Tool execution with permissions
+│   │       ├── tool-registry.ts     # Tool registration and routing
+│   │       ├── permission-manager.ts # Permission management
+│   │       └── types.ts             # Tool type definitions
+│   └── utils/
+│       ├── error-handler.ts         # Unified error handling system
+│       ├── validators.ts            # Input validation utilities
+│       ├── constants.ts             # Configuration constants
+│       └── debounce-throttle.ts     # Debounce/throttle utilities
 ├── docs/
-│   └── ARCHITECTURE.md              # Architecture Decision Records
+│   ├── ARCHITECTURE.md              # Architecture Decision Records
+│   └── AGENTS.md                    # Agent documentation
+├── CLAUDE.md                        # Claude Code development guide
 ├── styles.css                       # Styles (automatically loaded by Obsidian)
 ├── manifest.json                    # Plugin manifest
 ├── versions.json                    # Version compatibility mapping
@@ -301,17 +314,12 @@ To bump the plugin version:
 
 ## Troubleshooting
 
-### API Key Issues
-
--   Ensure your API key is correct and has sufficient credits/quota
--   Check that the API key matches the selected provider
--   Verify the API key is entered correctly in settings (no extra spaces)
-
 ### Connection Issues
 
--   Check your internet connection
--   Verify the API key is valid for the selected provider
--   Check provider status pages for service outages
+-   Ensure OpenCode Server is running and accessible
+-   Check the WebSocket URL in settings (default: `ws://localhost:4096`)
+-   Verify firewall settings allow WebSocket connections
+-   Check OpenCode Server logs for connection errors
 
 ### Plugin not loading
 
@@ -386,8 +394,10 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture decis
 -   **ErrorHandler**: Unified error handling system (`src/utils/error-handler.ts`)
 -   **AgentResolver**: Agent configuration resolution (`src/agent/agent-resolver.ts`)
 -   **ConfigLoader**: Configuration file loading (`src/config-loader.ts`)
--   **ProviderManager**: Provider and model management (`src/provider-manager.ts`)
--   **EmbeddedAIClient**: AI provider client interface (`src/embedded-ai-client.ts`)
+-   **OpenCodeServerClient**: WebSocket client for OpenCode Server (`src/opencode-server/client.ts`)
+-   **AgentOrchestrator**: Agent loop state machine (`src/orchestrator/agent-orchestrator.ts`)
+-   **ToolExecutor**: Tool execution with permissions (`src/tools/obsidian/tool-executor.ts`)
+-   **PermissionManager**: Permission management (`src/tools/obsidian/permission-manager.ts`)
 
 All public interfaces and classes include comprehensive JSDoc comments. See source files for detailed API documentation.
 

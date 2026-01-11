@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(pnpm check:*)",
+      "Bash(pnpm lint:*)",
+      "mcp__plugin_claude-mem_mcp-search__search"
+    ]
+  }
+}

@@ -40,25 +40,138 @@ function createResult(valid: boolean, errors: string[] = [], warnings: string[] 
 }
 
 /**
+ * Validate a string field - checks type and optionally non-empty
+ */
+function validateStringField(
+  value: unknown,
+  fieldName: string,
+  options?: { allowEmpty?: boolean; required?: boolean }
+): string[] {
+  const errors: string[] = []
+
+  if (value === undefined || value === null) {
+    if (options?.required) {
+      errors.push(`${fieldName} is required`)
+    }
+    return errors
+  }
+
+  if (typeof value !== 'string') {
+    errors.push(`${fieldName} must be a string`)
+    return errors
+  }
+
+  if (!options?.allowEmpty && value.trim() === '') {
+    errors.push(`${fieldName} cannot be empty`)
+  }
+
+  return errors
+}
+
+/**
+ * Validate a boolean field
+ */
+function validateBooleanField(value: unknown, fieldName: string): string[] {
+  if (value !== undefined && typeof value !== 'boolean') {
+    return [`${fieldName} must be a boolean`]
+  }
+  return []
+}
+
+/**
+ * Validate a tools object (Record<string, boolean>)
+ */
+function validateToolsObject(value: unknown, fieldName: string): string[] {
+  const errors: string[] = []
+  if (typeof value !== 'object' || Array.isArray(value) || value === null) {
+    errors.push(`${fieldName} must be an object`)
+  } else {
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof val !== 'boolean') {
+        errors.push(`${fieldName}["${key}"] must be a boolean`)
+      }
+    }
+  }
+  return errors
+}
+
+/**
+ * Validate skills field (string or array of strings)
+ */
+function validateSkillsField(value: unknown, fieldName: string, options?: ValidatorOptions): string[] {
+  const errors: string[] = []
+  if (Array.isArray(value)) {
+    value.forEach((skill, index) => {
+      if (typeof skill !== 'string') {
+        errors.push(`${fieldName}[${index}] must be a string`)
+      } else if (!options?.allowEmpty && skill.trim() === '') {
+        errors.push(`${fieldName}[${index}] cannot be empty`)
+      }
+    })
+  } else if (typeof value !== 'string') {
+    errors.push(`${fieldName} must be a string or array of strings`)
+  } else if (!options?.allowEmpty && value.trim() === '') {
+    errors.push(`${fieldName} cannot be empty if provided as string`)
+  }
+  return errors
+}
+
+/**
+ * Validate an entity ID (no path separators, max 255 chars)
+ */
+function validateEntityId(id: string, fieldName: string): string[] {
+  const errors: string[] = []
+  if (id.includes('/') || id.includes('\\')) {
+    errors.push(`${fieldName} cannot contain path separators`)
+  }
+  if (id.length > 255) {
+    errors.push(`${fieldName} must be 255 characters or less`)
+  }
+  return errors
+}
+
+/**
+ * Validate model structure { providerID, modelID }
+ */
+function validateModelStructure(model: { providerID?: string; modelID?: string }, fieldName: string): string[] {
+  const errors: string[] = []
+  if (!model.providerID || typeof model.providerID !== 'string') {
+    errors.push(`${fieldName}.providerID must be a non-empty string`)
+  } else {
+    errors.push(...validateProviderID(model.providerID, `${fieldName}.providerID`))
+  }
+  if (!model.modelID || typeof model.modelID !== 'string') {
+    errors.push(`${fieldName}.modelID must be a non-empty string`)
+  }
+  return errors
+}
+
+/**
+ * Validate an array of strings
+ */
+function validateStringArray(arr: unknown, fieldName: string, options?: ValidatorOptions): string[] {
+  const errors: string[] = []
+  if (!Array.isArray(arr)) {
+    errors.push(`${fieldName} must be an array`)
+  } else {
+    arr.forEach((item, index) => {
+      if (typeof item !== 'string') {
+        errors.push(`${fieldName}[${index}] must be a string`)
+      } else if (!options?.allowEmpty && item.trim() === '') {
+        errors.push(`${fieldName}[${index}] cannot be empty`)
+      }
+    })
+  }
+  return errors
+}
+
+/**
  * Validate a string is not empty (if allowEmpty is false)
  */
 function validateNonEmptyString(value: string | undefined | null, fieldName: string, options?: ValidatorOptions): string[] {
   const errors: string[] = []
   if (!options?.allowEmpty && (!value || value.trim() === '')) {
     errors.push(`${fieldName} is required and cannot be empty`)
-  }
-  return errors
-}
-
-/**
- * Validate a string matches a pattern
- * @internal - Currently unused but kept for future use
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function validateStringPattern(value: string | undefined, pattern: RegExp, fieldName: string, errorMessage?: string): string[] {
-  const errors: string[] = []
-  if (value && !pattern.test(value)) {
-    errors.push(errorMessage || `${fieldName} does not match required pattern`)
   }
   return errors
 }
@@ -150,6 +263,52 @@ export function validateProviderBaseURL(baseURL: string, allowLocalhost: boolean
   }
 
   return errors
+}
+
+/**
+ * Validate common provider fields (shared between validateProviderConfig and validateCompatibleProvider)
+ */
+function validateProviderFields(
+  provider: Record<string, unknown>,
+  options?: ValidatorOptions
+): { errors: string[]; warnings: string[] } {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  // Required fields
+  errors.push(...validateNonEmptyString(provider.id as string | undefined, 'Provider ID', options))
+  errors.push(...validateNonEmptyString(provider.name as string | undefined, 'Provider name', options))
+  errors.push(...validateNonEmptyString(provider.baseURL as string | undefined, 'Provider baseURL', options))
+  errors.push(...validateNonEmptyString(provider.apiType as string | undefined, 'Provider apiType', options))
+
+  // Validate ID format
+  if (provider.id) {
+    errors.push(...validateProviderID(provider.id as string, 'Provider ID'))
+  }
+
+  // Validate baseURL format
+  if (provider.baseURL) {
+    errors.push(...validateURL(provider.baseURL as string, 'Provider baseURL'))
+  }
+
+  // Validate apiType
+  if (provider.apiType) {
+    const apiType = provider.apiType as string
+    if (apiType !== 'openai-compatible' && apiType !== 'anthropic-compatible') {
+      errors.push(`Provider apiType must be 'openai-compatible' or 'anthropic-compatible', got: ${apiType}`)
+    }
+  }
+
+  // Validate defaultModel if present
+  if (provider.defaultModel) {
+    if (typeof provider.defaultModel !== 'string') {
+      errors.push('Provider defaultModel must be a string')
+    } else {
+      errors.push(...validateModelFormat(provider.defaultModel))
+    }
+  }
+
+  return { errors, warnings }
 }
 
 /**
@@ -269,56 +428,18 @@ export function validateOpenCodeConfig(config: unknown, options?: ValidatorOptio
 
 /**
  * Validate provider configuration from config.json
- * 
- * Validates a provider configuration object including required fields,
- * URL format, API type, and model format.
- * 
+ *
  * @param {unknown} provider - Provider configuration object to validate
  * @param {ValidatorOptions} [options] - Optional validation options
  * @returns {ValidationResult} Validation result with errors and warnings
  */
 export function validateProviderConfig(provider: unknown, options?: ValidatorOptions): ValidationResult {
-  const errors: string[] = []
-  const warnings: string[] = []
-
   if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
     return createResult(false, ['Provider must be an object'])
   }
 
   const prov = provider as Record<string, unknown>
-
-  // Required fields
-  errors.push(...validateNonEmptyString(prov.id as string | undefined, 'Provider ID', options))
-  errors.push(...validateNonEmptyString(prov.name as string | undefined, 'Provider name', options))
-  errors.push(...validateNonEmptyString(prov.baseURL as string | undefined, 'Provider baseURL', options))
-  errors.push(...validateNonEmptyString(prov.apiType as string | undefined, 'Provider apiType', options))
-
-  // Validate ID format
-  if (prov.id) {
-    errors.push(...validateProviderID(prov.id as string, 'Provider ID'))
-  }
-
-  // Validate baseURL format
-  if (prov.baseURL) {
-    errors.push(...validateURL(prov.baseURL as string, 'Provider baseURL'))
-  }
-
-  // Validate apiType
-  if (prov.apiType) {
-    const apiType = prov.apiType as string
-    if (apiType !== 'openai-compatible' && apiType !== 'anthropic-compatible') {
-      errors.push(`Provider apiType must be 'openai-compatible' or 'anthropic-compatible', got: ${apiType}`)
-    }
-  }
-
-  // Optional fields
-  if (prov.defaultModel) {
-    if (typeof prov.defaultModel !== 'string') {
-      errors.push('Provider defaultModel must be a string')
-    } else {
-      errors.push(...validateModelFormat(prov.defaultModel))
-    }
-  }
+  const { errors, warnings } = validateProviderFields(prov, options)
 
   // Check for unknown fields (warnings)
   const knownFields = ['id', 'name', 'baseURL', 'apiType', 'defaultModel']
@@ -334,39 +455,14 @@ export function validateProviderConfig(provider: unknown, options?: ValidatorOpt
 
 /**
  * Validate CompatibleProvider with API key
- * 
- * Validates a complete CompatibleProvider object including API key.
- * This is used for providers that are fully configured and ready to use.
- * 
+ *
  * @param {CompatibleProvider} provider - Compatible provider object to validate
  * @param {ValidatorOptions} [options] - Optional validation options
  * @returns {ValidationResult} Validation result with errors and warnings
  */
 export function validateCompatibleProvider(provider: CompatibleProvider, options?: ValidatorOptions): ValidationResult {
-  const errors: string[] = []
-  const warnings: string[] = []
-
-  // Validate basic structure
-  errors.push(...validateNonEmptyString(provider.id, 'Provider ID', options))
-  errors.push(...validateNonEmptyString(provider.name, 'Provider name', options))
-  errors.push(...validateNonEmptyString(provider.baseURL, 'Provider baseURL', options))
-  errors.push(...validateNonEmptyString(provider.apiType, 'Provider apiType', options))
-
-  // Validate ID format
-  errors.push(...validateProviderID(provider.id, 'Provider ID'))
-
-  // Validate baseURL format
-  errors.push(...validateURL(provider.baseURL, 'Provider baseURL'))
-
-  // Validate apiType
-  if (provider.apiType !== 'openai-compatible' && provider.apiType !== 'anthropic-compatible') {
-    errors.push(`Provider apiType must be 'openai-compatible' or 'anthropic-compatible', got: ${String(provider.apiType)}`)
-  }
-
-  // Validate defaultModel if present
-  if (provider.defaultModel) {
-    errors.push(...validateModelFormat(provider.defaultModel))
-  }
+  const providerRecord = provider as unknown as Record<string, unknown>
+  const { errors, warnings } = validateProviderFields(providerRecord, options)
 
   // API key is optional (may be empty initially)
   // Note: We don't validate API key format here as different providers have different formats
@@ -395,21 +491,18 @@ export function validateAgentFrontmatter(frontmatter: unknown, options?: Validat
 
   const fm = frontmatter as Record<string, unknown>
 
-  // Optional fields with validation
-  if ('name' in fm && fm.name !== undefined) {
-    if (typeof fm.name !== 'string') {
-      errors.push('Agent frontmatter.name must be a string')
-    } else if (!options?.allowEmpty && fm.name.trim() === '') {
-      errors.push('Agent frontmatter.name cannot be empty if provided')
-    }
+  // Validate string fields
+  if ('name' in fm) {
+    errors.push(...validateStringField(fm.name, 'Agent frontmatter.name', { allowEmpty: options?.allowEmpty }))
+  }
+  if ('description' in fm) {
+    errors.push(...validateStringField(fm.description, 'Agent frontmatter.description', { allowEmpty: true }))
+  }
+  if ('mode' in fm) {
+    errors.push(...validateStringField(fm.mode, 'Agent frontmatter.mode', { allowEmpty: true }))
   }
 
-  if ('description' in fm && fm.description !== undefined) {
-    if (typeof fm.description !== 'string') {
-      errors.push('Agent frontmatter.description must be a string')
-    }
-  }
-
+  // Validate model with format check
   if ('model' in fm && fm.model !== undefined) {
     if (typeof fm.model !== 'string') {
       errors.push('Agent frontmatter.model must be a string')
@@ -418,36 +511,17 @@ export function validateAgentFrontmatter(frontmatter: unknown, options?: Validat
     }
   }
 
+  // Validate tools object
   if ('tools' in fm && fm.tools !== undefined) {
-    if (typeof fm.tools !== 'object' || Array.isArray(fm.tools) || fm.tools === null) {
-      errors.push('Agent frontmatter.tools must be an object')
-    } else {
-      // Validate tools object structure
-      const tools = fm.tools as Record<string, unknown>
-      for (const [key, value] of Object.entries(tools)) {
-        if (typeof value !== 'boolean') {
-          errors.push(`Agent frontmatter.tools["${key}"] must be a boolean`)
-        }
-      }
-    }
+    errors.push(...validateToolsObject(fm.tools, 'Agent frontmatter.tools'))
   }
 
+  // Validate skills (string or array)
   if ('skills' in fm && fm.skills !== undefined) {
-    if (Array.isArray(fm.skills)) {
-      fm.skills.forEach((skill, index) => {
-        if (typeof skill !== 'string') {
-          errors.push(`Agent frontmatter.skills[${index}] must be a string`)
-        } else if (!options?.allowEmpty && skill.trim() === '') {
-          errors.push(`Agent frontmatter.skills[${index}] cannot be empty`)
-        }
-      })
-    } else if (typeof fm.skills !== 'string') {
-      errors.push('Agent frontmatter.skills must be a string or array of strings')
-    } else if (!options?.allowEmpty && fm.skills.trim() === '') {
-      errors.push('Agent frontmatter.skills cannot be empty if provided as string')
-    }
+    errors.push(...validateSkillsField(fm.skills, 'Agent frontmatter.skills', options))
   }
 
+  // Validate color hex
   if ('color' in fm && fm.color !== undefined) {
     if (typeof fm.color !== 'string') {
       errors.push('Agent frontmatter.color must be a string')
@@ -456,17 +530,8 @@ export function validateAgentFrontmatter(frontmatter: unknown, options?: Validat
     }
   }
 
-  if ('hidden' in fm && fm.hidden !== undefined) {
-    if (typeof fm.hidden !== 'boolean') {
-      errors.push('Agent frontmatter.hidden must be a boolean')
-    }
-  }
-
-  if ('mode' in fm && fm.mode !== undefined) {
-    if (typeof fm.mode !== 'string') {
-      errors.push('Agent frontmatter.mode must be a string')
-    }
-  }
+  // Validate boolean fields
+  errors.push(...validateBooleanField(fm.hidden, 'Agent frontmatter.hidden'))
 
   const valid = errors.length === 0 && (!options?.strict || warnings.length === 0)
   return createResult(valid, errors, warnings)
@@ -491,55 +556,24 @@ export function validateAgent(agent: Agent, options?: ValidatorOptions): Validat
   errors.push(...validateNonEmptyString(agent.name, 'Agent name', options))
   errors.push(...validateNonEmptyString(agent.systemPrompt, 'Agent systemPrompt', options))
 
-  // Validate ID format (filename-based, should be valid filename)
+  // Validate ID format
   if (agent.id) {
-    // Agent ID comes from filename, should not contain path separators or invalid chars
-    if (agent.id.includes('/') || agent.id.includes('\\')) {
-      errors.push('Agent ID cannot contain path separators')
-    }
-    if (agent.id.length > 255) {
-      errors.push('Agent ID must be 255 characters or less')
-    }
+    errors.push(...validateEntityId(agent.id, 'Agent ID'))
   }
 
   // Validate model structure if present
   if (agent.model) {
-    if (!agent.model.providerID || typeof agent.model.providerID !== 'string') {
-      errors.push('Agent model.providerID must be a non-empty string')
-    } else {
-      errors.push(...validateProviderID(agent.model.providerID, 'Agent model.providerID'))
-    }
-    if (!agent.model.modelID || typeof agent.model.modelID !== 'string') {
-      errors.push('Agent model.modelID must be a non-empty string')
-    }
+    errors.push(...validateModelStructure(agent.model, 'Agent model'))
   }
 
   // Validate tools structure if present
   if (agent.tools) {
-    if (typeof agent.tools !== 'object' || Array.isArray(agent.tools)) {
-      errors.push('Agent tools must be an object')
-    } else {
-      for (const [key, value] of Object.entries(agent.tools)) {
-        if (typeof value !== 'boolean') {
-          errors.push(`Agent tools["${key}"] must be a boolean`)
-        }
-      }
-    }
+    errors.push(...validateToolsObject(agent.tools, 'Agent tools'))
   }
 
   // Validate skills array if present
   if (agent.skills) {
-    if (!Array.isArray(agent.skills)) {
-      errors.push('Agent skills must be an array')
-    } else {
-      agent.skills.forEach((skill, index) => {
-        if (typeof skill !== 'string') {
-          errors.push(`Agent skills[${index}] must be a string`)
-        } else if (!options?.allowEmpty && skill.trim() === '') {
-          errors.push(`Agent skills[${index}] cannot be empty`)
-        }
-      })
-    }
+    errors.push(...validateStringArray(agent.skills, 'Agent skills', options))
   }
 
   // Validate color if present
@@ -547,15 +581,9 @@ export function validateAgent(agent: Agent, options?: ValidatorOptions): Validat
     errors.push(...validateColorHex(agent.color))
   }
 
-  // Validate hidden if present
-  if (agent.hidden !== undefined && typeof agent.hidden !== 'boolean') {
-    errors.push('Agent hidden must be a boolean')
-  }
-
-  // Validate mode if present
-  if (agent.mode !== undefined && typeof agent.mode !== 'string') {
-    errors.push('Agent mode must be a string')
-  }
+  // Validate boolean fields
+  errors.push(...validateBooleanField(agent.hidden, 'Agent hidden'))
+  errors.push(...validateStringField(agent.mode, 'Agent mode', { allowEmpty: true }))
 
   const valid = errors.length === 0 && (!options?.strict || warnings.length === 0)
   return createResult(valid, errors, warnings)

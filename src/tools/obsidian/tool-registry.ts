@@ -13,6 +13,15 @@ import type {
 } from './types'
 
 /**
+ * Format Zod validation errors into a readable string
+ */
+function formatZodErrors(error: z.ZodError): string {
+  const issues = error.issues || []
+  // eslint-disable-next-line @typescript-eslint/no-deprecated
+  return issues.map((e: z.ZodIssue) => `${e.path.join('.')}: ${e.message}`).join(', ')
+}
+
+/**
  * Tool registry for Obsidian tools
  * Registers tools, routes tool calls, and validates input/output
  */
@@ -21,10 +30,29 @@ export class ObsidianToolRegistry {
   private executor: ObsidianToolExecutor
   private app: App | null = null
 
+  /** Tool name to executor method mapping */
+  private readonly toolExecutors: Record<string, (input: unknown, sessionId?: string, callId?: string, approved?: boolean) => Promise<unknown>>
+
   constructor(executor: ObsidianToolExecutor, app?: App) {
     this.executor = executor
     this.app = app || null
-    // Register all built-in tools
+
+    // Initialize tool executor dispatch map
+    this.toolExecutors = {
+      'obsidian.search_vault': (input, sessionId, callId) =>
+        this.executor.searchVault(input as ObsidianSearchVaultInput, sessionId, callId),
+      'obsidian.read_note': (input, sessionId, callId) =>
+        this.executor.readNote(input as ObsidianReadNoteInput, sessionId, callId),
+      'obsidian.list_notes': (input, sessionId, callId) =>
+        this.executor.listNotes(input as ObsidianListNotesInput, sessionId, callId),
+      'obsidian.get_note_metadata': (input, sessionId, callId) =>
+        this.executor.getNoteMetadata(input as ObsidianGetNoteMetadataInput, sessionId, callId),
+      'obsidian.create_note': (input, sessionId, callId, approved) =>
+        this.executor.createNote(input as ObsidianCreateNoteInput, sessionId, callId, approved),
+      'obsidian.update_note': (input, sessionId, callId, approved) =>
+        this.executor.updateNote(input as ObsidianUpdateNoteInput, sessionId, callId, approved)
+    }
+
     this.registerBuiltInTools()
   }
 
@@ -75,7 +103,6 @@ export class ObsidianToolRegistry {
     callId?: string,
     approved: boolean = false
   ): Promise<unknown> {
-    // Find tool definition
     const toolDef = this.tools.get(toolName)
     if (!toolDef) {
       throw new Error(`Tool not found: ${toolName}`)
@@ -87,47 +114,25 @@ export class ObsidianToolRegistry {
       validatedInput = toolDef.inputSchema.parse(args)
     } catch (error) {
       if (error instanceof z.ZodError) {
-        const issues = error.issues || []
-        // eslint-disable-next-line @typescript-eslint/no-deprecated
-        throw new Error(`Invalid input for ${toolName}: ${issues.map((e: z.ZodIssue) => `${e.path.join('.')}: ${e.message}`).join(', ')}`)
+        throw new Error(`Invalid input for ${toolName}: ${formatZodErrors(error)}`)
       }
       throw error
     }
 
-    // Execute Obsidian tool based on name
-    let result: unknown
-    switch (toolName) {
-      case 'obsidian.search_vault':
-        result = await this.executor.searchVault(validatedInput as ObsidianSearchVaultInput, sessionId, callId)
-        break
-      case 'obsidian.read_note':
-        result = await this.executor.readNote(validatedInput as ObsidianReadNoteInput, sessionId, callId)
-        break
-      case 'obsidian.list_notes':
-        result = await this.executor.listNotes(validatedInput as ObsidianListNotesInput, sessionId, callId)
-        break
-      case 'obsidian.get_note_metadata':
-        result = await this.executor.getNoteMetadata(validatedInput as ObsidianGetNoteMetadataInput, sessionId, callId)
-        break
-      case 'obsidian.create_note':
-        result = await this.executor.createNote(validatedInput as ObsidianCreateNoteInput, sessionId, callId, approved)
-        break
-      case 'obsidian.update_note':
-        result = await this.executor.updateNote(validatedInput as ObsidianUpdateNoteInput, sessionId, callId, approved)
-        break
-      default:
-        throw new Error(`Tool execution not implemented: ${toolName}`)
+    // Execute tool using dispatch map
+    const executor = this.toolExecutors[toolName]
+    if (!executor) {
+      throw new Error(`Tool execution not implemented: ${toolName}`)
     }
+
+    const result = await executor(validatedInput, sessionId, callId, approved)
 
     // Validate output using Zod schema
     try {
-      const validatedOutput = toolDef.outputSchema.parse(result)
-      return validatedOutput
+      return toolDef.outputSchema.parse(result)
     } catch (error) {
       if (error instanceof z.ZodError) {
-        const issues = error.issues || []
-        // eslint-disable-next-line @typescript-eslint/no-deprecated
-        throw new Error(`Invalid output from ${toolName}: ${issues.map((e: z.ZodIssue) => `${e.path.join('.')}: ${e.message}`).join(', ')}`)
+        throw new Error(`Invalid output from ${toolName}: ${formatZodErrors(error)}`)
       }
       throw error
     }
@@ -252,30 +257,12 @@ export class ObsidianToolRegistry {
       return undefined
     }
 
-    // Convert Zod schema to JSON Schema
-    // Note: This is a simplified conversion - a full implementation would properly convert Zod schemas
-    // For now, we'll return a basic structure
     return {
       name: toolDef.name,
       description: toolDef.description,
-      inputSchema: this.zodToJSONSchema(toolDef.inputSchema),
-      outputSchema: this.zodToJSONSchema(toolDef.outputSchema),
+      inputSchema: { type: 'object', properties: {}, required: [] },
+      outputSchema: { type: 'object', properties: {}, required: [] },
       permission: toolDef.permission
-    }
-  }
-
-  /**
-   * Convert Zod schema to JSON Schema (simplified implementation)
-   * Note: A full implementation would properly traverse the Zod schema
-   */
-  private zodToJSONSchema(schema: z.ZodType): object {
-    // This is a simplified implementation - a full implementation would properly convert Zod schemas
-    // For now, we'll return a placeholder structure
-    // In production, you'd use a library like zod-to-json-schema
-    return {
-      type: 'object',
-      properties: {},
-      required: []
     }
   }
 
@@ -289,11 +276,12 @@ export class ObsidianToolRegistry {
     outputSchema: object
     permission: string
   }> {
+    const schemaPlaceholder = { type: 'object', properties: {}, required: [] }
     return this.listTools().map(tool => ({
       name: tool.name,
       description: tool.description,
-      inputSchema: this.zodToJSONSchema(tool.inputSchema),
-      outputSchema: this.zodToJSONSchema(tool.outputSchema),
+      inputSchema: schemaPlaceholder,
+      outputSchema: schemaPlaceholder,
       permission: tool.permission
     }))
   }

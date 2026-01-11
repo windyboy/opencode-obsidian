@@ -80,7 +80,7 @@ export const DEFAULT_PERMISSION_CONFIGS: Record<ToolPermission, PermissionScope>
     deniedPaths: undefined,
     maxFileSize: undefined,
     allowedExtensions: undefined
-  } as PermissionScope,
+  },
   [ToolPermission.ScopedWrite]: {
     allowedPaths: undefined,
     deniedPaths: [
@@ -92,7 +92,7 @@ export const DEFAULT_PERMISSION_CONFIGS: Record<ToolPermission, PermissionScope>
     ],
     maxFileSize: 10485760,
     allowedExtensions: ['.md', '.txt', '.json', '.yaml', '.yml', '.toml']
-  } as PermissionScope,
+  },
   [ToolPermission.FullWrite]: {
     allowedPaths: undefined,
     deniedPaths: [
@@ -105,5 +105,5 @@ export const DEFAULT_PERMISSION_CONFIGS: Record<ToolPermission, PermissionScope>
     ],
     maxFileSize: undefined,
     allowedExtensions: undefined
-  } as PermissionScope
+  }
 }
