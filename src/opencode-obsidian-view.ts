@@ -43,7 +43,7 @@ export class OpenCodeObsidianView extends ItemView {
     this.renderView()
     await this.loadConversations()
     
-    // Register OpenCode Server client callbacks if client is initialized
+      // Register OpenCode Server client callbacks if client is initialized
     if (this.plugin.opencodeClient) {
       this.registerClientCallbacks()
       
@@ -54,7 +54,8 @@ export class OpenCodeObsidianView extends ItemView {
           console.debug('[OpenCodeObsidianView] Connected to OpenCode Server')
         } catch (error) {
           console.error('[OpenCodeObsidianView] Failed to connect to OpenCode Server:', error)
-          new Notice('Failed to connect to opencode server. Check settings')
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          new Notice(`Connection failed: ${errorMessage}`)
         }
       }
     }
@@ -913,6 +914,13 @@ export class OpenCodeObsidianView extends ItemView {
       if (!sessionId) {
         // Start a new session
         try {
+          // Ensure connection is established
+          if (!this.plugin.opencodeClient.isConnected()) {
+            console.debug('[OpenCodeObsidianView] Not connected, connecting...')
+            await this.plugin.opencodeClient.connect()
+            console.debug('[OpenCodeObsidianView] Connected to OpenCode Server')
+          }
+          
           // Build session context from current note if available
           const activeFile = this.app.workspace.getActiveFile()
           const context = activeFile ? {
@@ -929,7 +937,9 @@ export class OpenCodeObsidianView extends ItemView {
           activeConv.sessionId = sessionId
           console.debug('[OpenCodeObsidianView] Started new session:', sessionId)
         } catch (sessionError) {
-          throw new Error(`Failed to start session: ${sessionError instanceof Error ? sessionError.message : 'Unknown error'}`)
+          const errorMsg = sessionError instanceof Error ? sessionError.message : 'Unknown error'
+          console.error('[OpenCodeObsidianView] Session start failed:', sessionError)
+          throw new Error(`Failed to start session: ${errorMsg}`)
         }
       }
 

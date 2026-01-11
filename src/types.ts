@@ -89,10 +89,8 @@ export interface OpenCodeObsidianSettings {
 
   /** OpenCode Server configuration (for client/server architecture) */
   opencodeServer?: {
-    /** WebSocket URL for OpenCode Server (e.g., "ws://localhost:4096" or "wss://opencode.example.com") */
+    /** HTTP URL for OpenCode Server (e.g., "http://localhost:4096" or "https://opencode.example.com") */
     url: string
-    /** Optional authentication token */
-    token?: string
     /** Whether to automatically reconnect on connection loss (default: true) */
     autoReconnect?: boolean
     /** Delay between reconnection attempts in milliseconds (default: 3000) */

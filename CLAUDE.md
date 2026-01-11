@@ -27,21 +27,28 @@ This is an Obsidian plugin that integrates with OpenCode Server for AI-powered c
 
 1. **UI Layer** (`opencode-obsidian-view.ts`): Chat interface with incremental DOM updates
 2. **Service Layer**: Provider management, AI client, agent resolution, config loading
-3. **OpenCode Server Integration**: WebSocket client for agent orchestration and tool execution
+3. **OpenCode Server Integration**: HTTP + SSE client for agent orchestration and tool execution
 
 ### Key Integration Points
 
-#### OpenCode Server WebSocket Protocol
-The plugin communicates with OpenCode Server via WebSocket for:
+#### OpenCode Server HTTP + SSE Protocol
+The plugin communicates with OpenCode Server via HTTP + SSE for:
 - **Agent orchestration**: Planning → Executing → Validating → Retrying → Completed states
 - **Tool execution**: Server requests Obsidian tool execution with permission handling
-- **Streaming responses**: Real-time token/thinking/progress updates
+- **Streaming responses**: Real-time token/thinking/progress updates via SSE
 
-**Protocol Messages**:
-- Client → Server: `session.start`, `session.message`, `tool.result`, `permission.response`, `session.interrupt`
-- Server → Client: `session.created`, `stream.token`, `stream.thinking`, `tool.call`, `permission.request`, `progress.update`, `error`, `session.end`
+**HTTP API Endpoints**:
+- `POST /session` - Start a new session
+- `POST /session/{id}/message` - Send a message to a session
+- `POST /session/{id}/abort` - Interrupt/stop a session
 
-File: `src/opencode-server/protocol.ts` and `client.ts`
+**SSE Events**:
+- `message.part.updated` - Stream text/reasoning content
+- `session.status` - Session status updates
+- `session.error` - Session errors
+- `session.idle` - Session ended
+
+File: `src/opencode-server/client.ts`
 
 #### Permission System
 Tool execution is gated by a three-level permission model:
@@ -100,7 +107,7 @@ The ARCHITECTURE.md file documents several known issues that need attention:
 4. **Orchestrator is placeholder** - Doesn't wait for server responses, immediately marks steps as complete
 
 **Architecture Improvements** (medium priority):
-- SessionEventBus for decoupling UI from WebSocket protocol
+- SessionEventBus for decoupling UI from SSE protocol
 - Orchestrator as event-driven state machine (not placeholder)
 - Unified permission/audit system (preview and execution use same path)
 - Unified TaskPlan source between TodoManager and Orchestrator
@@ -270,12 +277,12 @@ ErrorHandler.handleError(error, {
 3. Debounce saves using `debounce()` from `src/utils/debounce-throttle.ts`
 4. Use `ErrorHandler` for validation errors
 
-### Working with OpenCode Server Protocol
-Messages are type-safe via `src/opencode-server/protocol.ts`. When handling tool calls:
+### Working with OpenCode Server HTTP + SSE API
+The plugin communicates via HTTP requests for sending messages and SSE for receiving streaming updates. When handling tool calls:
 1. Check sessionId matches current conversation (⚠️ known issue: currently not validated)
 2. Execute via ToolExecutor which handles permissions
 3. On PermissionPendingError, show PermissionModal
-4. Return tool.result message with execution outcome
+4. Send result via HTTP API
 
 ## Important Notes
 

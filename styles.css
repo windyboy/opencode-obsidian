@@ -727,3 +727,7 @@
 .opencode-settings-advanced-content {
   margin-top: 1em;
 }
+
+.opencode-settings-advanced-content.hidden {
+  display: none;
+}

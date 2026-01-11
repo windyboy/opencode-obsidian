@@ -9,11 +9,11 @@ The Obsidian Bridge plugin enables OpenCode Server to interact with Obsidian vau
 ## Architecture
 
 ```
-OpenCode Server → WebSocket → Obsidian Plugin → Tool Executor → Vault Operations
+OpenCode Server → HTTP + SSE → Obsidian Plugin → Tool Executor → Vault Operations
 ```
 
 The Obsidian plugin runs as a thin client that:
-- Receives tool calls from OpenCode Server via WebSocket
+- Receives tool calls from OpenCode Server via HTTP + SSE
 - Executes operations on the local Obsidian vault
 - Enforces permission checks and audit logging
 - Sends results back to OpenCode Server
@@ -340,11 +340,11 @@ Permission scopes control which operations are allowed:
 
 ### Permission Request Flow
 
-1. OpenCode Server sends `tool.call` or `permission.request` message
+1. OpenCode Server sends tool call request via HTTP API
 2. Obsidian plugin checks permissions
 3. If approval required, `PermissionModal` is displayed to user
 4. User approves or denies the operation
-5. Obsidian plugin sends `permission.response` or `tool.result` back to OpenCode Server
+5. Obsidian plugin sends result back to OpenCode Server via HTTP API
 
 ## Audit Logging
 

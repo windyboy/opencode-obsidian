@@ -130,25 +130,32 @@ The `OpenCodeObsidianPlugin` class extends Obsidian's `Plugin` class and serves 
 
 #### 7. OpenCode Server Client (`src/opencode-server/client.ts`)
 
-**Responsibility**: WebSocket communication with OpenCode Server runtime
+**Responsibility**: HTTP + SSE communication with OpenCode Server runtime
 
-- **OpenCodeServerClient**: Manages WebSocket connection and protocol messages
-  - Connection management with auto-reconnect
-  - Protocol message serialization/deserialization
-  - Session management (start, message, end)
-  - Tool call handling and permission requests
-  - Stream token/thinking/progress handling
+- **OpenCodeServerClient**: Manages HTTP requests and SSE event streaming
+  - HTTP request handling for session/message operations
+  - SSE connection management with auto-reconnect
+  - Session management (start, message, abort)
+  - Stream token/thinking/progress handling via SSE
 
 **Key Features**:
-- WebSocket connection with reconnection logic
-- Type-safe protocol messages (see `protocol.ts`)
+- HTTP + SSE connection with reconnection logic
+- HTTP API for client → server (POST /session, /session/{id}/message, /session/{id}/abort)
+- SSE events for server → client (message.part.updated, session.status, session.error, session.idle)
 - Tool execution coordination with Obsidian tools
 - Permission modal integration for write operations
 - Callback-based event system (to be replaced with event bus)
 
-**Protocol Messages**:
-- Client → Server: `session.start`, `session.message`, `tool.result`, `permission.response`, `session.interrupt`
-- Server → Client: `session.created`, `stream.token`, `stream.thinking`, `tool.call`, `permission.request`, `progress.update`, `error`, `session.end`
+**HTTP API Endpoints**:
+- POST /session - Start a new session
+- POST /session/{id}/message - Send a message to a session
+- POST /session/{id}/abort - Interrupt/stop a session
+
+**SSE Events**:
+- message.part.updated - Stream text/reasoning content
+- session.status - Session status updates
+- session.error - Session errors
+- session.idle - Session ended
 
 #### 8. Agent Orchestrator (`src/orchestrator/agent-orchestrator.ts`)
 
@@ -218,14 +225,14 @@ The `OpenCodeObsidianPlugin` class extends Obsidian's `Plugin` class and serves 
 
 ## OpenCode Server Integration
 
-The plugin integrates with OpenCode Server via WebSocket protocol for agent orchestration and tool execution.
+The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestration and tool execution.
 
 ### Architecture Overview
 
 ```
-┌─────────────────────┐         WebSocket         ┌──────────────────┐
+┌─────────────────────┐      HTTP + SSE         ┌──────────────────┐
 │  Obsidian Plugin    │ <────────────────────────> │  OpenCode Server │
-│  (Client)           │      Protocol Messages     │   (Runtime)      │
+│  (Client)           │   API Requests + Events │   (Runtime)      │
 └─────────────────────┘                            └──────────────────┘
          │                                                   │
          │                                                   │
@@ -245,16 +252,16 @@ The plugin integrates with OpenCode Server via WebSocket protocol for agent orch
 
 ### Protocol Implementation
 
-**File**: `src/opencode-server/protocol.ts`
+**File**: `src/opencode-server/client.ts`
 
-- Type-safe message definitions for all protocol messages
-- Serialization/deserialization utilities
-- Type guards for message validation
-- Message ID generation for correlation
+- HTTP API client for sending messages
+- SSE event handler for receiving streaming updates
+- Type-safe event handling
+- Session ID management
 
 **Current Architecture Issues**:
 
-⚠️ **Issue 1**: View directly binds WebSocket callbacks
+⚠️ **Issue 1**: View directly binds SSE callbacks
 - `OpenCodeObsidianView` registers callbacks directly on `OpenCodeServerClient`
 - UI layer knows transport protocol details (stream.token, thinking, progress)
 - Makes it difficult to replace protocol or introduce offline mode
@@ -405,17 +412,18 @@ The plugin integrates with OpenCode Server via WebSocket protocol for agent orch
 
 **Implementation**: `src/embedded-ai-client.ts` with `AnthropicEventTypes` namespace
 
-### ADR-11: WebSocket Protocol for OpenCode Server
+### ADR-11: HTTP + SSE Protocol for OpenCode Server
 
-**Decision**: Use WebSocket with structured protocol messages for OpenCode Server communication
+**Decision**: Use HTTP + SSE for OpenCode Server communication
 
 **Rationale**:
 - Real-time bidirectional communication required for agent orchestration
-- Structured messages enable type-safe communication
-- Supports streaming responses (tokens, thinking)
+- HTTP API for client-to-server (session/message operations)
+- SSE for server-to-client streaming (tokens, thinking, status)
 - Enables tool call coordination and permission requests
+- Better browser compatibility than WebSocket
 
-**Implementation**: `src/opencode-server/protocol.ts` and `client.ts`
+**Implementation**: `src/opencode-server/client.ts`
 
 **Status**: ✅ Implemented, but needs improvements (see Known Issues)
 
@@ -534,9 +542,10 @@ The plugin integrates with OpenCode Server via WebSocket protocol for agent orch
 - **Planned**: Unified source of truth for TaskPlan with Orchestrator
 
 ### OpenCode Server Client (`src/opencode-server/`)
-- WebSocket connection management (`client.ts`)
-- Protocol message serialization/deserialization (`protocol.ts`)
-- Session lifecycle (start, message, end)
+- HTTP + SSE connection management (`client.ts`)
+- HTTP API for client-to-server communication
+- SSE event handling for server-to-client streaming
+- Session lifecycle (start, message, abort)
 - Tool call coordination
 - Permission request handling
 - Stream token/thinking/progress handling
@@ -689,19 +698,19 @@ sequenceDiagram
 
 ### Tool Execution Flow
 
-1. OpenCode Server sends tool call request via WebSocket (`tool.call` message)
-2. `OpenCodeServerClient` receives request and calls `ObsidianToolRegistry`
+1. OpenCode Server sends tool call request via HTTP API
+2. `OpenCodeServerClient` receives SSE event and calls `ObsidianToolRegistry`
 3. `ObsidianToolRegistry` validates input schema and routes to `ObsidianToolExecutor`
 4. `ObsidianToolExecutor` executes tool operation:
    - Checks permissions using `PermissionManager.canRead()` / `canWrite()`
-   - Performs the operation (read/write/create/update)
+   - Performs operation (read/write/create/update)
    - Records audit log via `AuditLogger`
    - Returns result or throws `PermissionPendingError` if approval needed
 5. If approval required:
    - `generatePreview()` called (currently in `OpenCodeServerClient` - ⚠️ bypasses permissions)
    - `PermissionModal` is shown to user with preview
-   - User approves or denies the operation
-6. Result sent back to OpenCode Server via `tool.result` message
+   - User approves or denies operation
+6. Result sent back to OpenCode Server via HTTP API
 
 **Current Issues**:
 - ⚠️ Preview generation (`generatePreview`) in `OpenCodeServerClient` directly reads files, bypassing `PermissionManager`
@@ -795,14 +804,14 @@ All write operations default to `dryRun=true` to show preview before applying.
 ### Architecture Improvements (Medium Priority)
 
 #### 5. Session/Event Bus for Decoupling
-**Issue**: View directly binds WebSocket callbacks, UI knows transport protocol details.
+**Issue**: View directly binds SSE callbacks, UI knows transport protocol details.
 
 **Impact**: Difficult to replace protocol or introduce offline mode.
 
 **Solution**:
 - Create `SessionEventBus` class (`src/session/session-event-bus.ts`)
-- Convert WebSocket messages to domain events (TokenReceived, ToolCallRequested, etc.)
-- View subscribes to domain events, not WebSocket callbacks
+- Convert SSE events to domain events (TokenReceived, ToolCallRequested, etc.)
+- View subscribes to domain events, not SSE callbacks
 - Enables protocol abstraction and offline mode support
 
 **Files**: New `src/session/session-event-bus.ts`, `src/opencode-server/client.ts`, `src/opencode-obsidian-view.ts`
@@ -894,7 +903,7 @@ All write operations default to `dryRun=true` to show preview before applying.
 ## Future Considerations
 
 - **Event-Driven Architecture**: Complete migration to event bus pattern
-- **Protocol Abstraction**: Support multiple protocols (WebSocket, HTTP/SSE, local inference)
+- **Protocol Abstraction**: Support multiple protocols (HTTP/SSE, WebSocket, local inference)
 - **Offline Mode**: Support local LLM inference without server
 - **MCP (Model Context Protocol)**: Integration for standardized tool protocol
 - **LSP (Language Server Protocol)**: Integration for code intelligence

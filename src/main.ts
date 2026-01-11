@@ -47,7 +47,7 @@ function toPermissionScope(scope: OpenCodeObsidianSettings['permissionScope']): 
  * Default OpenCode Server configuration
  */
 const DEFAULT_SERVER_CONFIG = {
-  url: 'ws://localhost:4096',
+  url: 'http://localhost:4096',
   autoReconnect: true,
   reconnectDelay: 3000,
   reconnectMaxAttempts: 10

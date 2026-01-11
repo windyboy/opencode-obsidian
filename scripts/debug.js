@@ -111,7 +111,6 @@ if (allFilesExist) {
   console.log('  ✅ All required files are present')
   console.log('\n💡 Next steps:')
   // Note: This is documentation text, not actual code. The path is Obsidian's default config directory.
-  // eslint-disable-next-line obsidianmd/hardcoded-config-path
   console.log('  1. Copy plugin folder to your vault: .obsidian/plugins/opencode-obsidian/')
   console.log('  2. Reload Obsidian (Cmd/Ctrl + R)')
   console.log('  3. Enable plugin in Settings → Community Plugins')

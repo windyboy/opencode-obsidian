@@ -20,7 +20,7 @@ OpenCode Obsidian is an Obsidian plugin that provides a sophisticated chat inter
 -   **Real-time Streaming**: See AI responses stream in real-time with token-by-token updates
 -   **Image Support**: Attach images to conversations for multimodal AI interactions
 -   **Multiple Sessions**: Manage multiple conversation sessions with auto-save and persistence
--   **OpenCode Server Integration**: WebSocket-based connection for agent orchestration and tool execution
+-   **OpenCode Server Integration**: HTTP + SSE connection for agent orchestration and tool execution
 -   **Tool Execution**: 6 core Obsidian tools with permission-based security (read-only, scoped-write, full-write)
 -   **Custom Agents & Skills**: Create specialized agents with YAML frontmatter and reusable skills
 -   **Configuration System**: Load agents, skills, and instructions from `.opencode/` directory
@@ -91,7 +91,7 @@ OpenCode Obsidian is an Obsidian plugin that provides a sophisticated chat inter
 2. Go to Community Plugins
 3. Enable "OpenCode Obsidian"
 4. Open the plugin settings
-5. Configure OpenCode Server URL (default: `ws://localhost:4096`)
+5. Configure OpenCode Server URL (default: `http://localhost:4096`)
 6. Set tool permission level (read-only, scoped-write, or full-write)
 7. Start using the chat interface
 
@@ -99,7 +99,7 @@ OpenCode Obsidian is an Obsidian plugin that provides a sophisticated chat inter
 
 Configure the following settings in the plugin settings panel:
 
--   **OpenCode Server**: Configure WebSocket connection URL (default: `ws://localhost:4096`)
+-   **OpenCode Server**: Configure HTTP connection URL (default: `http://localhost:4096`)
 -   **Default Agent**: Select the default agent for new conversations
     -   Built-in agents: Assistant, Bootstrap, Thinking Partner, Research Assistant, Read Only
     -   Custom agents: Loaded from `.opencode/agent/*.md` files
@@ -215,7 +215,7 @@ opencode-obsidian/
 │   ├── agent/
 │   │   └── agent-resolver.ts        # Agent configuration resolution and skill merging
 │   ├── opencode-server/
-│   │   ├── client.ts                # WebSocket client for OpenCode Server
+│   │   ├── client.ts                # HTTP + SSE client for OpenCode Server
 │   │   └── protocol.ts              # Protocol message definitions
 │   ├── orchestrator/
 │   │   └── agent-orchestrator.ts    # Agent loop state machine
@@ -317,8 +317,8 @@ To bump the plugin version:
 ### Connection Issues
 
 -   Ensure OpenCode Server is running and accessible
--   Check the WebSocket URL in settings (default: `ws://localhost:4096`)
--   Verify firewall settings allow WebSocket connections
+-   Check HTTP URL in settings (default: `http://localhost:4096`)
+-   Verify firewall settings allow HTTP connections
 -   Check OpenCode Server logs for connection errors
 
 ### Plugin not loading
@@ -394,7 +394,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture decis
 -   **ErrorHandler**: Unified error handling system (`src/utils/error-handler.ts`)
 -   **AgentResolver**: Agent configuration resolution (`src/agent/agent-resolver.ts`)
 -   **ConfigLoader**: Configuration file loading (`src/config-loader.ts`)
--   **OpenCodeServerClient**: WebSocket client for OpenCode Server (`src/opencode-server/client.ts`)
+-   **OpenCodeServerClient**: HTTP + SSE client for OpenCode Server (`src/opencode-server/client.ts`)
 -   **AgentOrchestrator**: Agent loop state machine (`src/orchestrator/agent-orchestrator.ts`)
 -   **ToolExecutor**: Tool execution with permissions (`src/tools/obsidian/tool-executor.ts`)
 -   **PermissionManager**: Permission management (`src/tools/obsidian/permission-manager.ts`)

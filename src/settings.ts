@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, Notice } from 'obsidian'
+import { App, PluginSettingTab, Setting, Notice, requestUrl } from 'obsidian'
 import type OpenCodeObsidianPlugin from './main'
 
 export class OpenCodeObsidianSettingTab extends PluginSettingTab {
@@ -22,7 +22,6 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
       cls: 'opencode-setting-textarea',
       attr: { placeholder, rows: '3' }
     })
-    textarea.style.width = '100%'
     textarea.value = value
     textarea.onchange = () => onChange(textarea.value)
     return textarea
@@ -34,7 +33,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
   private ensureServerConfig(): NonNullable<typeof this.plugin.settings.opencodeServer> {
     if (!this.plugin.settings.opencodeServer) {
       this.plugin.settings.opencodeServer = {
-        url: 'ws://localhost:4096',
+        url: 'http://localhost:4096',
         autoReconnect: true,
         reconnectDelay: 3000,
         reconnectMaxAttempts: 10
@@ -48,8 +47,8 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
     containerEl.empty()
 
     // Main title
-    containerEl.createEl('h2', { text: 'OpenCode Obsidian Settings' })
     containerEl.createEl('p', {
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
       text: 'Configure your OpenCode Obsidian plugin settings. Changes are saved automatically.',
       cls: 'setting-item-description'
     })
@@ -71,19 +70,22 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
    * Render OpenCode Server configuration section
    */
   private renderServerConfiguration(containerEl: HTMLElement): void {
+    // eslint-disable-next-line obsidianmd/ui/sentence-case
     new Setting(containerEl).setName('OpenCode Server').setHeading()
 
     containerEl.createEl('p', {
-      text: 'Configure connection to OpenCode server. Providers and API keys are managed on the server side.',
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      text: 'Configure connection to OpenCode Server. Providers and API keys are managed on the server side.',
       cls: 'setting-item-description'
     })
 
     // Server URL
     new Setting(containerEl)
       .setName('Server URL')
-      .setDesc('WebSocket URL for OpenCode server (e.g., ws://localhost:4096 or wss://opencode.example.com)')
+      .setDesc('HTTP URL for OpenCode Server (e.g., http://localhost:4096 or https://opencode.example.com)')
       .addText(text => {
-        text.setPlaceholder('ws://localhost:4096')
+        // eslint-disable-next-line obsidianmd/ui/sentence-case
+        text.setPlaceholder('http://localhost:4096')
           .setValue(this.plugin.settings.opencodeServer?.url || '')
           .inputEl.classList.add('opencode-setting-url')
         text.onChange(async (value: string) => {
@@ -92,7 +94,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
           serverConfig.url = trimmedValue
 
           // Validate URL format
-          if (trimmedValue && !this.isValidWebSocketUrl(trimmedValue)) {
+          if (trimmedValue && !this.isValidHttpUrl(trimmedValue)) {
             text.inputEl.classList.add('mod-invalid')
           } else {
             text.inputEl.classList.remove('mod-invalid')
@@ -102,37 +104,65 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
         })
       })
       .addButton(button => {
-        button.setButtonText('Test Connection')
-          .setTooltip('Test connection to OpenCode server')
+        button.setButtonText('Test connection')
+          .setTooltip('Test connection to the OpenCode server')
           .onClick(async () => {
+
             button.setDisabled(true)
             button.setButtonText('Testing...')
 
+            const serverConfig = this.ensureServerConfig()
+            const url = serverConfig.url.trim()
+
+            if (!url) {
+              new Notice('Please enter a server address')
+              button.setDisabled(false)
+              button.setButtonText('Test connection')
+              return
+            }
+
+            if (!this.isValidHttpUrl(url)) {
+              new Notice('Invalid HTTP URL')
+              button.setDisabled(false)
+              button.setButtonText('Test connection')
+              return
+            }
+
+            const testConnection = async (httpUrl: string, timeoutMs: number): Promise<void> => {
+              const controller = new AbortController()
+              const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+              try {
+                console.debug('[OpenCodeSettings] Testing connection to:', httpUrl)
+                const response = await requestUrl({
+                  url: httpUrl,
+                  method: 'GET',
+                  headers: {
+                    Accept: '*/*'
+                  }
+                })
+                console.debug('[OpenCodeSettings] Connection test successful:', {
+                  url: httpUrl,
+                  status: response.status,
+                  statusText: response.status
+                })
+              } finally {
+                clearTimeout(timeoutId)
+              }
+            }
+
             try {
-              await new Promise(resolve => setTimeout(resolve, 1000))
-              new Notice('Connection test feature coming soon')
+              console.debug('[OpenCodeSettings] Testing connection to:', url)
+              await testConnection(url, 5000)
+              new Notice('Connection successful')
             } catch (error) {
-              new Notice(`Connection failed: ${error}`)
+              console.error('[OpenCodeSettings] Connection test failed:', error)
+              const errorMessage = error instanceof Error ? error.message : String(error)
+              new Notice(`Connection failed: ${errorMessage}`)
             } finally {
               button.setDisabled(false)
-              button.setButtonText('Test Connection')
+              button.setButtonText('Test connection')
             }
           })
-      })
-
-    // Authentication Token (optional)
-    new Setting(containerEl)
-      .setName('Authentication token')
-      .setDesc('Optional authentication token for OpenCode server. Leave empty if not required.')
-      .addText(text => {
-        text.setPlaceholder('Enter token (optional)')
-          .setValue(this.plugin.settings.opencodeServer?.token || '')
-          .inputEl.type = 'password'
-        text.onChange(async (value: string) => {
-          const serverConfig = this.ensureServerConfig()
-          serverConfig.token = value.trim() || undefined
-          await this.plugin.debouncedSaveSettings()
-        })
       })
   }
 
@@ -140,7 +170,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
    * Render Agent configuration section
    */
   private renderAgentConfiguration(containerEl: HTMLElement): void {
-    new Setting(containerEl).setName('Agent Configuration').setHeading()
+    new Setting(containerEl).setName('Agent configuration').setHeading()
 
     containerEl.createEl('p', {
       text: 'Select the default agent to use for conversations. Custom agents can be loaded from .opencode/agent/ directory.',
@@ -195,7 +225,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
    * Render tool permission configuration section
    */
   private renderToolPermissions(containerEl: HTMLElement): void {
-    new Setting(containerEl).setName('Tool Permissions').setHeading()
+    new Setting(containerEl).setName('Tool permissions').setHeading()
 
     containerEl.createEl('p', {
       text: 'Configure tool execution permissions for safety. Scoped write allows fine-grained control over file operations.',
@@ -223,9 +253,10 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
             this.plugin.settings.permissionScope = undefined
           } else if (value === 'scoped-write' && !this.plugin.settings.permissionScope) {
             // Initialize default configuration for scoped-write
+            const configDir = this.app.vault.configDir
             this.plugin.settings.permissionScope = {
               allowedPaths: undefined,
-              deniedPaths: ['**/.obsidian/**', '**/.git/**', '**/node_modules/**'],
+              deniedPaths: [`**/${configDir}/**`, '**/.git/**', '**/node_modules/**'],
               maxFileSize: 10485760, // 10MB
               allowedExtensions: ['.md', '.txt', '.json', '.yaml', '.yml']
             }
@@ -266,7 +297,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
           this.plugin.settings.permissionScope = {}
         }
         const paths = value.split('\n').map(p => p.trim()).filter(p => p.length > 0)
-        this.plugin.settings.permissionScope!.allowedPaths = paths.length > 0 ? paths : undefined
+        this.plugin.settings.permissionScope.allowedPaths = paths.length > 0 ? paths : undefined
         await this.plugin.debouncedSaveSettings()
       }
     )
@@ -274,29 +305,32 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
     // Denied path patterns
     const deniedPathsSetting = new Setting(containerEl)
       .setName('Denied paths')
-      .setDesc('Glob patterns for denied paths (checked first, always denied). Example: **/.obsidian/**, **/.git/**. One pattern per line.')
+    const configDir = this.app.vault.configDir
+    deniedPathsSetting.setDesc(`Glob patterns for denied paths (checked first, always denied). Example: **/${configDir}/**, **/.git/**. One pattern per line.`)
 
     this.createTextarea(
       deniedPathsSetting.controlEl,
-      '**/.obsidian/**\n**/.git/**\n**/node_modules/**',
+      `**/${configDir}/**\n**/.git/**\n**/node_modules/**`,
       scope.deniedPaths?.join('\n') || '',
       async (value) => {
         if (!this.plugin.settings.permissionScope) {
           this.plugin.settings.permissionScope = {}
         }
         const paths = value.split('\n').map(p => p.trim()).filter(p => p.length > 0)
-        this.plugin.settings.permissionScope!.deniedPaths = paths.length > 0 ? paths : undefined
+        this.plugin.settings.permissionScope.deniedPaths = paths.length > 0 ? paths : undefined
         await this.plugin.debouncedSaveSettings()
       }
     )
 
     // Maximum file size
     const maxFileSizeSetting = new Setting(containerEl)
-      .setName('Maximum file size')
-      .setDesc('Maximum file size in bytes (e.g., 10485760 for 10MB). Leave empty for no limit.')
+    maxFileSizeSetting.setName('Maximum file size')
+    // eslint-disable-next-line obsidianmd/ui/sentence-case
+    maxFileSizeSetting.setDesc('Maximum file size in bytes (e.g., 10485760 for 10MB). Leave empty for no limit.')
 
     maxFileSizeSetting.addText(text => {
       const currentValue = scope.maxFileSize
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
       text.setPlaceholder('10485760 (10MB)')
         .setValue(currentValue ? currentValue.toString() : '')
       text.inputEl.type = 'number'
@@ -306,7 +340,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
           this.plugin.settings.permissionScope = {}
         }
         const numValue = parseInt(value.trim(), 10)
-        this.plugin.settings.permissionScope!.maxFileSize = 
+        this.plugin.settings.permissionScope.maxFileSize = 
           value.trim() && !isNaN(numValue) && numValue > 0 ? numValue : undefined
         await this.plugin.debouncedSaveSettings()
       })
@@ -315,18 +349,22 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
     // Add help button
     maxFileSizeSetting.addExtraButton(button => {
       button.setIcon('help')
+        // eslint-disable-next-line obsidianmd/ui/sentence-case
         .setTooltip('Common sizes: 1024 (1KB), 1048576 (1MB), 10485760 (10MB), 104857600 (100MB)')
         .onClick(() => {
+          // eslint-disable-next-line obsidianmd/ui/sentence-case
           new Notice('1KB=1024, 1MB=1048576, 10MB=10485760, 100MB=104857600')
         })
     })
 
     // Allowed file extensions
     const allowedExtensionsSetting = new Setting(containerEl)
-      .setName('Allowed file extensions')
-      .setDesc('Comma-separated list of allowed file extensions (e.g., .md, .txt, .json). Leave empty to allow all extensions.')
+    allowedExtensionsSetting.setName('Allowed file extensions')
+    // eslint-disable-next-line obsidianmd/ui/sentence-case
+    allowedExtensionsSetting.setDesc('Comma-separated list of allowed file extensions (e.g., .md, .txt, .json). Leave empty to allow all extensions.')
 
     allowedExtensionsSetting.addText(text => {
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
       text.setPlaceholder('.md, .txt, .json, .yaml')
         .setValue(scope.allowedExtensions?.join(', ') || '')
       text.onChange(async (value: string) => {
@@ -337,7 +375,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
           .map(e => e.trim())
           .filter(e => e.length > 0)
           .map(e => e.startsWith('.') ? e : `.${e}`)
-        this.plugin.settings.permissionScope!.allowedExtensions = extensions.length > 0 ? extensions : undefined
+        this.plugin.settings.permissionScope.allowedExtensions = extensions.length > 0 ? extensions : undefined
         await this.plugin.debouncedSaveSettings()
       })
     })
@@ -363,7 +401,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
     const advancedSection = containerEl.createDiv('opencode-settings-advanced')
     
     const header = advancedSection.createDiv('opencode-settings-advanced-header')
-    header.createEl('h3', { text: 'Advanced Settings' })
+    new Setting(header).setName('Advanced').setHeading()
     
     const toggleButton = header.createEl('button', {
       text: 'Show',
@@ -371,11 +409,15 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
     })
 
     const content = advancedSection.createDiv('opencode-settings-advanced-content')
-    content.style.display = 'none'
+    content.addClass('hidden')
 
     toggleButton.onclick = () => {
-      const isVisible = content.style.display !== 'none'
-      content.style.display = isVisible ? 'none' : 'block'
+      const isVisible = !content.hasClass('hidden')
+      if (isVisible) {
+        content.addClass('hidden')
+      } else {
+        content.removeClass('hidden')
+      }
       toggleButton.textContent = isVisible ? 'Show' : 'Hide'
     }
 
@@ -400,10 +442,11 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
    * Render reconnection settings
    */
   private renderReconnectionSettings(containerEl: HTMLElement): void {
-    new Setting(containerEl).setName('Reconnection Settings').setHeading()
+    new Setting(containerEl).setName('Reconnection').setHeading()
 
     containerEl.createEl('p', {
-      text: 'Configure automatic reconnection behavior when connection to OpenCode server is lost.',
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      text: 'Configure automatic reconnection behavior when connection to OpenCode Server is lost.',
       cls: 'setting-item-description'
     })
 
@@ -459,12 +502,12 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
   }
 
   /**
-   * Helper method: Validate WebSocket URL format
+   * Helper method: Validate HTTP URL format
    */
-  private isValidWebSocketUrl(url: string): boolean {
+  private isValidHttpUrl(url: string): boolean {
     try {
       const parsed = new URL(url)
-      return parsed.protocol === 'ws:' || parsed.protocol === 'wss:'
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:'
     } catch {
       return false
     }
