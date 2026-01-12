@@ -35,7 +35,8 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 	> {
 		if (!this.plugin.settings.opencodeServer) {
 			this.plugin.settings.opencodeServer = {
-				url: "http://localhost:4096",
+				url: "",
+				requestTimeoutMs: 10000,
 				autoReconnect: true,
 				reconnectDelay: 3000,
 				reconnectMaxAttempts: 10,
@@ -85,11 +86,11 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Server URL")
 			.setDesc(
-				"HTTP URL for OpenCode Server (e.g., http://localhost:4096 or https://opencode.example.com)",
+				"HTTP URL for OpenCode Server (e.g., http://127.0.0.1:4096 or https://opencode.example.com)",
 			)
 			.addText((text) => {
 				// eslint-disable-next-line obsidianmd/ui/sentence-case
-				text.setPlaceholder("http://localhost:4096")
+				text.setPlaceholder("http://127.0.0.1:4096")
 					.setValue(this.plugin.settings.opencodeServer?.url || "")
 					.inputEl.classList.add("opencode-setting-url");
 				text.onChange(async (value: string) => {
@@ -142,11 +143,6 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 								timeoutMs,
 							);
 							try {
-								console.debug(
-									"[OpenCodeSettings] Testing connection to:",
-									httpUrl,
-								);
-
 								// Try health check endpoint first
 								try {
 									const healthResponse = await requestUrl({
@@ -161,53 +157,26 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 										healthResponse.status >= 200 &&
 										healthResponse.status < 300
 									) {
-										const healthData =
-											healthResponse.json as {
-												healthy?: boolean;
-												version?: string;
-											};
-										console.debug(
-											"[OpenCodeSettings] Health check successful:",
-											{
-												url: httpUrl,
-												status: healthResponse.status,
-												health: healthData,
-											},
-										);
 										return; // Success
 									}
 								} catch (healthError) {
-									console.debug(
-										"[OpenCodeSettings] Health endpoint not available, trying basic connectivity",
-									);
+									// Health endpoint not available, try basic connectivity
 								}
 
 								// Fallback to basic connectivity test
-								const response = await requestUrl({
+								await requestUrl({
 									url: httpUrl,
 									method: "GET",
 									headers: {
 										Accept: "*/*",
 									},
 								});
-								console.debug(
-									"[OpenCodeSettings] Connection test successful:",
-									{
-										url: httpUrl,
-										status: response.status,
-										statusText: response.status,
-									},
-								);
 							} finally {
 								clearTimeout(timeoutId);
 							}
 						};
 
 						try {
-							console.debug(
-								"[OpenCodeSettings] Testing connection to:",
-								url,
-							);
 							await testConnection(url, 5000);
 							new Notice("Connection successful");
 						} catch (error) {
@@ -635,6 +604,29 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 						trimmed === "0" ? 0 : parseInt(trimmed, 10);
 					serverConfig.reconnectMaxAttempts =
 						!isNaN(numValue) && numValue >= 0 ? numValue : 10;
+					await this.plugin.debouncedSaveSettings();
+				});
+			});
+
+		// Request timeout
+		new Setting(containerEl)
+			.setName("Request timeout")
+			.setDesc(
+				"Maximum time to wait for HTTP requests in milliseconds (0 = no timeout, default: 10000)",
+			)
+			.addText((text) => {
+				const timeoutMs =
+					this.plugin.settings.opencodeServer?.requestTimeoutMs ?? 10000;
+				text.setPlaceholder("10000").setValue(timeoutMs.toString());
+				text.inputEl.type = "number";
+				text.inputEl.min = "0";
+				text.onChange(async (value: string) => {
+					const serverConfig = this.ensureServerConfig();
+					const trimmed = value.trim();
+					const numValue =
+						trimmed === "0" ? 0 : parseInt(trimmed, 10);
+					serverConfig.requestTimeoutMs =
+						!isNaN(numValue) && numValue >= 0 ? numValue : 10000;
 					await this.plugin.debouncedSaveSettings();
 				});
 			});

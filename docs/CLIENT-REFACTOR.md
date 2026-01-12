@@ -43,7 +43,7 @@ src/opencode-server/client.ts
 ```typescript
 import { createClient } from "./opencode-server/client";
 
-const client = createClient("http://localhost:4096");
+const client = createClient("http://127.0.0.1:4096");
 const { data: session } = await client.session.create({ body: {} });
 await client.session.prompt({
 	path: { id: session.id },

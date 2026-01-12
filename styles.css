@@ -10,10 +10,11 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
   position: relative;
+  transition: background 0.2s ease;
 }
 
 .opencode-obsidian-tool-indicator,
@@ -75,17 +76,30 @@
 }
 
 .opencode-obsidian-conversation-selector {
-  padding: 8px 12px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary-alt);
 }
 
 .opencode-obsidian-conversation-select {
   width: 100%;
-  padding: 4px 8px;
+  padding: 6px 10px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--background-primary);
   color: var(--text-normal);
+  transition: all 0.2s ease;
+}
+
+.opencode-obsidian-conversation-select:hover {
+  border-color: var(--color-accent);
+  background: var(--background-modifier-hover);
+}
+
+.opencode-obsidian-conversation-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-1);
 }
 
 .opencode-obsidian-no-conversations {
@@ -97,10 +111,31 @@
 .opencode-obsidian-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar styling */
+.opencode-obsidian-messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+.opencode-obsidian-messages::-webkit-scrollbar-track {
+  background: var(--background-secondary);
+  border-radius: 4px;
+}
+
+.opencode-obsidian-messages::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+.opencode-obsidian-messages::-webkit-scrollbar-thumb:hover {
+  background: var(--background-modifier-border-hover);
 }
 
 .opencode-obsidian-empty-messages {
@@ -108,16 +143,27 @@
   color: var(--text-muted);
   font-style: italic;
   margin-top: 50%;
+  padding: 24px;
+  font-size: 14px;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
 }
 
 .opencode-obsidian-message {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 12px;
-  border-radius: 8px;
+  gap: 6px;
+  padding: 12px 16px;
+  border-radius: 12px;
   max-width: 85%;
   position: relative;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.opencode-obsidian-message:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
 }
 
 .opencode-obsidian-message:hover .opencode-obsidian-message-actions {
@@ -128,12 +174,23 @@
   align-self: flex-end;
   background: var(--color-accent);
   color: var(--text-on-accent);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.opencode-obsidian-message-user:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .opencode-obsidian-message-assistant {
   align-self: flex-start;
   background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.opencode-obsidian-message-assistant:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-color: var(--background-modifier-border-hover);
 }
 
 .opencode-obsidian-message-header {
@@ -141,17 +198,29 @@
   justify-content: space-between;
   align-items: center;
   font-size: 11px;
-  opacity: 0.7;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  gap: 8px;
 }
 
 .opencode-obsidian-message-role {
   font-weight: 600;
   text-transform: capitalize;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--background-modifier-hover);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+}
+
+.opencode-obsidian-message-user .opencode-obsidian-message-role {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--text-on-accent);
 }
 
 .opencode-obsidian-message-time {
   font-size: 10px;
+  opacity: 0.6;
+  font-weight: 400;
 }
 
 .opencode-obsidian-message-content {
@@ -173,20 +242,28 @@
 
 .opencode-obsidian-message-content code {
   background: var(--background-modifier-hover);
-  padding: 2px 4px;
-  border-radius: 3px;
+  padding: 3px 6px;
+  border-radius: 4px;
   font-family: var(--font-monospace);
   font-size: 0.9em;
+  border: 1px solid var(--background-modifier-border);
 }
 
 .opencode-obsidian-code-block {
-  background: var(--background-modifier-hover);
+  background: var(--background-primary-alt, var(--background-modifier-hover));
   border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  padding: 12px;
-  margin: 8px 0;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 12px 0;
   position: relative;
   overflow-x: auto;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.opencode-obsidian-code-block:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  border-color: var(--background-modifier-border-hover);
 }
 
 .opencode-obsidian-code-block code {
@@ -195,31 +272,47 @@
   font-family: var(--font-monospace);
   font-size: 0.9em;
   white-space: pre;
+  color: var(--text-normal);
+  line-height: 1.5;
 }
 
 .opencode-obsidian-code-actions {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 12px;
+  right: 12px;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  transform: translateY(-2px);
+  z-index: 10;
 }
 
 .opencode-obsidian-code-block:hover .opencode-obsidian-code-actions {
   opacity: 1;
+  transform: translateY(0);
 }
 
 .opencode-obsidian-code-copy {
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 4px 8px;
+  border-radius: 6px;
+  padding: 6px 12px;
   font-size: 11px;
   cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .opencode-obsidian-code-copy:hover {
   background: var(--background-modifier-hover);
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.opencode-obsidian-code-copy:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .opencode-obsidian-message-actions {
@@ -262,29 +355,44 @@
 .opencode-obsidian-input {
   border-top: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
+  transition: background 0.2s ease;
 }
 
 .opencode-obsidian-input-container {
-  padding: 12px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .opencode-obsidian-input-toolbar {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
 }
 
 .opencode-obsidian-model-select,
 .opencode-obsidian-agent-select {
-  padding: 4px 8px;
+  padding: 6px 10px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--background-primary);
   color: var(--text-normal);
   font-size: 12px;
+  transition: all 0.2s ease;
+}
+
+.opencode-obsidian-model-select:hover,
+.opencode-obsidian-agent-select:hover {
+  border-color: var(--color-accent);
+  background: var(--background-modifier-hover);
+}
+
+.opencode-obsidian-model-select:focus,
+.opencode-obsidian-agent-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-1);
 }
 
 .opencode-obsidian-model-input {
@@ -314,22 +422,25 @@
 
 .opencode-obsidian-input-textarea {
   width: 100%;
-  min-height: 60px;
+  min-height: 70px;
   max-height: 200px;
-  padding: 8px 12px;
+  padding: 12px 16px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--background-primary);
   color: var(--text-normal);
   font-family: var(--font-interface);
   font-size: 14px;
-  line-height: 1.4;
+  line-height: 1.5;
   resize: none;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .opencode-obsidian-input-textarea:focus {
   outline: none;
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-1), 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .opencode-obsidian-input-status {
@@ -351,18 +462,41 @@
 .opencode-obsidian-input-buttons {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 10px;
+  align-items: center;
 }
 
 .opencode-obsidian-input-buttons button {
-  padding: 6px 12px;
+  padding: 8px 16px;
   font-size: 13px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.opencode-obsidian-input-buttons button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.opencode-obsidian-input-buttons button:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .opencode-obsidian-attach-btn,
 .opencode-obsidian-clear-btn {
-  padding: 6px 8px !important;
-  font-size: 14px !important;
+  padding: 8px 12px !important;
+  font-size: 16px !important;
+  border-radius: 6px !important;
+  transition: all 0.2s ease !important;
+}
+
+.opencode-obsidian-attach-btn:hover,
+.opencode-obsidian-clear-btn:hover {
+  background: var(--background-modifier-hover) !important;
+  transform: translateY(-1px);
 }
 
 /* Settings Styles */

@@ -50,6 +50,10 @@ export interface ProgressUpdate {
 export interface OpenCodeServerConfig {
 	/** Base HTTP URL for OpenCode Server */
 	url: string;
+	/** Force SDK fetch-based SSE instead of Node http/https */
+	forceSdkEventStream?: boolean;
+	/** HTTP request timeout in milliseconds (0 = no timeout, default: 30000) */
+	requestTimeoutMs?: number;
 	/** Whether to automatically reconnect on connection loss (default: true) */
 	autoReconnect?: boolean;
 	/** Delay between reconnection attempts in milliseconds (default: 3000) */

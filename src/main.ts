@@ -54,7 +54,8 @@ function toPermissionScope(
  * Default OpenCode Server configuration
  */
 const DEFAULT_SERVER_CONFIG = {
-	url: "http://localhost:4096",
+	url: "",
+	requestTimeoutMs: 10000,
 	autoReconnect: true,
 	reconnectDelay: 3000,
 	reconnectMaxAttempts: 10,
@@ -165,16 +166,11 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 				VIEW_TYPE_OPENCODE_OBSIDIAN,
 				(leaf) => new OpenCodeObsidianView(leaf, this),
 			);
-			console.debug(
-				"[OpenCode Obsidian] View registered:",
-				VIEW_TYPE_OPENCODE_OBSIDIAN,
-			);
 
 			// Add ribbon icon
 			this.addRibbonIcon("bot", "Open opencode", () => {
 				void this.activateView();
 			});
-			console.debug("[OpenCode Obsidian] Ribbon icon added");
 
 			// Add command to open view
 			this.addCommand({
@@ -184,11 +180,9 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 					void this.activateView();
 				},
 			});
-			console.debug("[OpenCode Obsidian] Command registered: open-view");
 
 			// Add settings tab
 			this.addSettingTab(new OpenCodeObsidianSettingTab(this.app, this));
-			console.debug("[OpenCode Obsidian] Settings tab added");
 
 			console.debug("[OpenCode Obsidian] Plugin loaded successfully ✓");
 		} catch (error) {
@@ -238,11 +232,6 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 		if (!this.settings.opencodeServer) {
 			this.settings.opencodeServer = { ...DEFAULT_SERVER_CONFIG };
 		}
-
-		console.debug(
-			"[OpenCode Obsidian] Settings loaded from storage:",
-			loadedData,
-		);
 	}
 
 	/**
@@ -255,18 +244,21 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 		if (!this.settings.opencodeServer) {
 			this.settings.opencodeServer = { ...DEFAULT_SERVER_CONFIG };
 			needsSave = true;
-			console.debug(
-				"[OpenCode Obsidian] Initialized OpenCode Server configuration with defaults",
-			);
+		}
+
+		if (
+			this.settings.opencodeServer &&
+			this.settings.opencodeServer.requestTimeoutMs === undefined
+		) {
+			this.settings.opencodeServer.requestTimeoutMs =
+				DEFAULT_SERVER_CONFIG.requestTimeoutMs;
+			needsSave = true;
 		}
 
 		// Initialize tool permission level if not present (default: read-only)
 		if (!this.settings.toolPermission) {
 			this.settings.toolPermission = "read-only";
 			needsSave = true;
-			console.debug(
-				"[OpenCode Obsidian] Initialized tool permission: read-only (default)",
-			);
 		}
 
 		if (needsSave) {
@@ -286,7 +278,42 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 			);
 		}
 
+		// Check if server URL changed and reinitialize client if needed
+		const oldClientUrl = this.opencodeClient?.getConfig()?.url;
+		const newServerUrl = this.settings.opencodeServer?.url;
+		
+		// Normalize URLs for comparison (both should be normalized, but compare as strings)
+		const normalizedOldUrl = oldClientUrl?.trim().replace(/\/+$/, '') || '';
+		const normalizedNewUrl = newServerUrl?.trim().replace(/\/+$/, '') || '';
+		const urlChanged = normalizedOldUrl !== normalizedNewUrl && newServerUrl;
+		
 		await this.saveData(this.settings);
+		
+		// Reinitialize OpenCode Server client if URL changed
+		if (urlChanged) {
+			console.debug(
+				"[OpenCode Obsidian] Server URL changed, reinitializing client...",
+				{ oldClientUrl, newServerUrl },
+			);
+			
+			// Disconnect old client
+			if (this.opencodeClient) {
+				await this.opencodeClient.disconnect();
+				this.opencodeClient = null;
+			}
+			
+			// Create new client with updated configuration
+			if (this.settings.opencodeServer) {
+				this.opencodeClient = new OpenCodeServerClient(
+					this.settings.opencodeServer,
+					this.errorHandler,
+				);
+				console.debug(
+					"[OpenCode Obsidian] OpenCode Server client reinitialized with new URL:",
+					newServerUrl,
+				);
+			}
+		}
 	}
 
 	/**

@@ -54,7 +54,11 @@ export class OpenCodeServerClient {
 
 	constructor(config: OpenCodeServerConfig, errorHandler: ErrorHandler) {
 		const normalizedUrl = this.normalizeServerUrl(config.url);
-		this.config = { ...config, url: normalizedUrl };
+		this.config = {
+			...config,
+			url: normalizedUrl,
+			requestTimeoutMs: config.requestTimeoutMs ?? 10000,
+		};
 		this.errorHandler = errorHandler;
 
 		// Initialize SDK client with custom Obsidian fetch
@@ -73,15 +77,43 @@ export class OpenCodeServerClient {
 				resolvedUrl,
 				method,
 				headers,
+				contentType,
 				body,
+				bodyLength,
 			} = await this.buildRequestOptions(url, init);
 			try {
-				const response = await requestUrl({
+				const timeoutMs = this.config.requestTimeoutMs ?? 10000;
+				const startedAt = Date.now();
+				let timeoutId: ReturnType<typeof setTimeout> | null = null;
+				
+				const request = requestUrl({
 					url: resolvedUrl,
 					method,
 					headers,
+					contentType,
 					body,
 				});
+				let response: Awaited<ReturnType<typeof requestUrl>>;
+				try {
+					response = (timeoutMs > 0
+						? await Promise.race([
+								request,
+								new Promise<never>((_, reject) => {
+									timeoutId = setTimeout(() => {
+										reject(
+											new Error(
+												`HTTP request timed out after ${timeoutMs}ms`,
+											),
+										);
+									}, timeoutMs);
+								}),
+							])
+						: await request) as Awaited<ReturnType<typeof requestUrl>>;
+				} finally {
+					if (timeoutId) {
+						clearTimeout(timeoutId);
+					}
+				}
 
 				// Convert Obsidian response to standard Response object
 				return new Response(
@@ -93,6 +125,45 @@ export class OpenCodeServerClient {
 					},
 				);
 			} catch (error) {
+				const errorMessage =
+					error instanceof Error ? error.message : "Unknown error";
+				const isTimeout = errorMessage.includes("timed out");
+				
+				// Provide more helpful error message for timeouts
+				if (isTimeout) {
+					// Extract base URL from resolvedUrl (remove path)
+					const baseUrl = resolvedUrl.replace(/\/[^/]*$/, "");
+					const enhancedError = new Error(
+						`Unable to connect to OpenCode Server at ${baseUrl}. ` +
+						`Please ensure the server is running and accessible.`,
+					);
+					
+					// Store original error for debugging (if cause is supported)
+					try {
+						(enhancedError as Error & { cause?: unknown }).cause = error;
+					} catch {
+						// Ignore if cause property is not supported
+					}
+					
+					// Don't add operation prefix for enhanced errors - they're already user-friendly
+					this.errorHandler.handleError(
+						enhancedError,
+						{
+							module: "OpenCodeClient",
+							function: "createObsidianFetch",
+							// Intentionally omit operation to avoid prefixing the user-friendly error message
+							metadata: { 
+								url: resolvedUrl, 
+								method,
+								suggestedFix: "Check if OpenCode Server is running at " + baseUrl,
+							},
+						},
+						ErrorSeverity.Error,
+					);
+					
+					throw enhancedError;
+				}
+				
 				this.errorHandler.handleError(
 					error,
 					{
@@ -115,6 +186,8 @@ export class OpenCodeServerClient {
 		resolvedUrl: string;
 		method: string;
 		headers: Record<string, string>;
+		contentType?: string;
+		bodyLength: number | null;
 		body?: string;
 	}> {
 		const resolvedUrl = this.resolveRequestUrl(url);
@@ -142,47 +215,48 @@ export class OpenCodeServerClient {
 		headers.forEach((value, key) => {
 			headerObject[key] = value;
 		});
+		const contentType =
+			headers.get("content-type") ?? headers.get("Content-Type") ?? undefined;
 
 		return {
 			resolvedUrl,
 			method,
 			headers: headerObject,
+			contentType,
+			bodyLength: body ? body.length : null,
 			body,
 		};
 	}
 
 	private resolveRequestUrl(url: RequestInfo | URL): string {
+		let resolved: string;
 		if (url instanceof URL) {
-			return url.toString();
-		}
-
-		if (typeof Request !== "undefined" && url instanceof Request) {
-			return url.url;
-		}
-
-		if (typeof url !== "string") {
+			resolved = url.toString();
+		} else if (typeof Request !== "undefined" && url instanceof Request) {
+			resolved = url.url;
+		} else if (typeof url !== "string") {
 			const requestUrl = (url as { url?: unknown }).url;
 			if (requestUrl instanceof URL) {
-				return requestUrl.toString();
-			}
-			if (typeof requestUrl === "string") {
+				resolved = requestUrl.toString();
+			} else if (typeof requestUrl === "string") {
 				return this.resolveRequestUrl(requestUrl);
+			} else {
+				throw new Error("OpenCode Server request URL is invalid.");
 			}
-
-			throw new Error("OpenCode Server request URL is invalid.");
+		} else {
+			const trimmed = url.trim();
+			if (!trimmed) {
+				resolved = trimmed;
+			} else {
+				const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
+				if (hasScheme) {
+					resolved = trimmed;
+				} else {
+					resolved = new URL(trimmed, `${this.config.url}/`).toString();
+				}
+			}
 		}
-
-		const trimmed = url.trim();
-		if (!trimmed) {
-			return trimmed;
-		}
-
-		const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
-		if (hasScheme) {
-			return trimmed;
-		}
-
-		return new URL(trimmed, `${this.config.url}/`).toString();
+		return resolved;
 	}
 
 	private normalizeServerUrl(url: string): string {
@@ -201,7 +275,7 @@ export class OpenCodeServerClient {
 			parsed = new URL(candidate);
 		} catch {
 			throw new Error(
-				"OpenCode Server URL is invalid. Use http:// or https:// (e.g., http://localhost:4096).",
+				"OpenCode Server URL is invalid. Use http:// or https:// (e.g., http://127.0.0.1:4096).",
 			);
 		}
 
@@ -222,6 +296,13 @@ export class OpenCodeServerClient {
 	}
 
 	/**
+	 * Get current server configuration
+	 */
+	getConfig(): OpenCodeServerConfig {
+		return { ...this.config };
+	}
+
+	/**
 	 * Check if client is connected
 	 */
 	isConnected(): boolean {
@@ -233,6 +314,38 @@ export class OpenCodeServerClient {
 	 */
 	getCurrentSessionId(): string | null {
 		return this.currentSessionId;
+	}
+
+	/**
+	 * Ensure session exists locally or on server.
+	 */
+	async ensureSession(sessionId: string): Promise<boolean> {
+		if (this.sessions.has(sessionId)) {
+			return true;
+		}
+
+		try {
+			const response = await this.sdkClient.session.get({
+				path: { id: sessionId },
+			});
+			if (response.error || !response.data) {
+				return false;
+			}
+			this.sessions.set(sessionId, response.data);
+			return true;
+		} catch (error) {
+			this.errorHandler.handleError(
+				error,
+				{
+					module: "OpenCodeClient",
+					function: "ensureSession",
+					operation: "Ensuring session",
+					metadata: { sessionId },
+				},
+				ErrorSeverity.Warning,
+			);
+			return false;
+		}
 	}
 
 	// Event callback registration methods
@@ -321,19 +434,44 @@ export class OpenCodeServerClient {
 			this.sessions.set(sessionId, sessionInfo);
 			this.currentSessionId = sessionId;
 
-			console.debug("[OpenCodeClient] Created session:", sessionId);
 			return sessionId;
 		} catch (error) {
-			this.errorHandler.handleError(
-				error,
-				{
-					module: "OpenCodeClient",
-					function: "createSession",
-					operation: "Creating session",
-					metadata: { title },
-				},
-				ErrorSeverity.Error,
-			);
+			// Don't wrap errors that are already enhanced with connection details
+			// This follows the pattern from opencode-web: simple error handling without nested messages
+			const errorMessage =
+				error instanceof Error ? error.message : "Unknown error";
+			const isAlreadyEnhanced = errorMessage.includes("Unable to connect to OpenCode Server");
+			
+			// Only show user notification if error is not already enhanced
+			// If already enhanced, just log to console (Warning level) to avoid duplicate notifications
+			if (!isAlreadyEnhanced) {
+				this.errorHandler.handleError(
+					error,
+					{
+						module: "OpenCodeClient",
+						function: "createSession",
+						operation: "Creating session",
+						metadata: { 
+							title,
+							serverUrl: this.config.url,
+						},
+					},
+					ErrorSeverity.Error,
+				);
+			} else {
+				// Error already has helpful message and user notification from lower layer
+				// Just log to console without showing user notification
+				this.errorHandler.handleError(
+					error,
+					{
+						module: "OpenCodeClient",
+						function: "createSession",
+						operation: "Creating session",
+						metadata: { title },
+					},
+					ErrorSeverity.Warning, // Use Warning to suppress user notification
+				);
+			}
 			throw error;
 		}
 	}
@@ -369,6 +507,14 @@ export class OpenCodeServerClient {
 
 			return sessionId;
 		} catch (error) {
+			// Check if error is already enhanced (connection errors from lower layers)
+			// If so, only log to console without showing user notification
+			const errorMessage =
+				error instanceof Error ? error.message : "Unknown error";
+			const isAlreadyEnhanced = errorMessage.includes("Unable to connect to OpenCode Server");
+			
+			// Use Warning severity for already-enhanced errors to suppress duplicate notifications
+			// Only show Error-level notification for unexpected errors
 			this.errorHandler.handleError(
 				error,
 				{
@@ -377,7 +523,7 @@ export class OpenCodeServerClient {
 					operation: "Starting session with context",
 					metadata: { context, agent, instructions },
 				},
-				ErrorSeverity.Error,
+				isAlreadyEnhanced ? ErrorSeverity.Warning : ErrorSeverity.Error,
 			);
 			throw error;
 		}
@@ -388,9 +534,16 @@ export class OpenCodeServerClient {
 	 */
 	async sendMessage(sessionId: string, content: string): Promise<void> {
 		try {
-			const session = this.sessions.get(sessionId);
+			let session = this.sessions.get(sessionId);
 			if (!session) {
-				throw new Error(`Session ${sessionId} not found`);
+				const response = await this.sdkClient.session.get({
+					path: { id: sessionId },
+				});
+				if (response.error || !response.data) {
+					throw new Error(`Session ${sessionId} not found`);
+				}
+				session = response.data;
+				this.sessions.set(sessionId, session);
 			}
 
 			const response = await this.sdkClient.session.prompt({
@@ -403,11 +556,6 @@ export class OpenCodeServerClient {
 			if (response.error) {
 				throw new Error(`Failed to send message: ${response.error}`);
 			}
-
-			console.debug(
-				"[OpenCodeClient] Message sent to session:",
-				sessionId,
-			);
 		} catch (error) {
 			this.errorHandler.handleError(
 				error,
@@ -489,8 +637,6 @@ export class OpenCodeServerClient {
 			if (this.currentSessionId === sessionId) {
 				this.currentSessionId = null;
 			}
-
-			console.debug("[OpenCodeClient] Aborted session:", sessionId);
 		} catch (error) {
 			this.errorHandler.handleError(
 				error,
@@ -602,6 +748,7 @@ export class OpenCodeServerClient {
 					if (attempt > 0) {
 						this.connectionState = "reconnecting";
 					}
+					
 					const stream = await this.createEventStream(signal);
 
 					if (this.connectionState !== "connected") {
@@ -634,8 +781,6 @@ export class OpenCodeServerClient {
 					await this.sleep(delay);
 				}
 			}
-
-			console.debug("[OpenCodeClient] Event subscription established");
 		} catch (error) {
 			this.errorHandler.handleError(
 				error,
@@ -664,6 +809,9 @@ export class OpenCodeServerClient {
 	}
 
 	private canUseNodeEventStream(): boolean {
+		if (this.config.forceSdkEventStream) {
+			return false;
+		}
 		const nodeRequire = this.getNodeRequire();
 		return (
 			typeof process !== "undefined" &&
@@ -848,7 +996,16 @@ export class OpenCodeServerClient {
 	private handleSDKEvent(event: any): void {
 		try {
 			// Extract session ID from various possible locations
-			const sessionId = event.sessionId || event.sessionID || event.id;
+			// Try properties first (as per SDK structure), including nested part.sessionID
+			// then direct fields
+			const sessionId = 
+				event.properties?.part?.sessionID ||
+				event.properties?.part?.sessionId ||
+				event.properties?.sessionID || 
+				event.properties?.sessionId || 
+				event.sessionId || 
+				event.sessionID || 
+				event.id;
 
 			// Handle different event types based on the event structure
 			if (event.type) {
@@ -856,29 +1013,33 @@ export class OpenCodeServerClient {
 					case "message.part.updated":
 					case "message.updated":
 						this.handleMessagePartUpdated(event, sessionId);
-						break;
+						return; // Prevent fallthrough to else if branch
 
 					case "session.idle":
 					case "session.completed":
 						this.handleSessionIdle(sessionId);
-						break;
+						return; // Prevent fallthrough to else if branch
 
 					case "session.progress":
 						this.handleSessionProgress(event, sessionId);
-						break;
+						return; // Prevent fallthrough to else if branch
 
 					case "session.ended":
 					case "session.aborted":
 						this.handleSessionEnded(event, sessionId);
-						break;
+						return; // Prevent fallthrough to else if branch
 
 					default:
 						console.debug(
 							"[OpenCodeClient] Unhandled event type:",
 							event.type,
 						);
+						return; // Prevent fallthrough to else if branch
 				}
-			} else if (event.role === "assistant" && event.parts) {
+			}
+			
+			// Only handle assistant message format if no explicit type was handled above
+			if (event.role === "assistant" && event.parts) {
 				// Handle message events that might not have explicit type
 				this.handleAssistantMessage(event, sessionId);
 			}
@@ -900,12 +1061,17 @@ export class OpenCodeServerClient {
 	 * Handle message.part.updated events for tokens and thinking content
 	 */
 	private handleMessagePartUpdated(event: any, sessionId: string): void {
-		const part = event.data?.part || event.part;
-		const delta = event.data?.delta || event.delta;
+		// Try multiple possible event structures (SDK may use properties, data, or direct fields)
+		const part = event.properties?.part || event.data?.part || event.part;
+		const delta = event.properties?.delta || event.data?.delta || event.delta;
 
-		if (!part && !delta) return;
+		if (!part && !delta) {
+			return;
+		}
 
-		const content = delta || part?.text || "";
+		// Prefer delta (incremental update) over part.text (which might be full content)
+		// Only use part.text if delta is not available
+		const content = delta || (part?.text || "");
 
 		if (part?.type === "text" || (!part?.type && content)) {
 			// Stream token content

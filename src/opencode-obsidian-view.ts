@@ -117,11 +117,29 @@ export class OpenCodeObsidianView extends ItemView {
 				if (!targetConv) return;
 			}
 
-			// Find the last assistant message and append token
+			// Find the last assistant message and update content
 			const lastMessage =
 				targetConv.messages[targetConv.messages.length - 1];
 			if (lastMessage && lastMessage.role === "assistant") {
-				lastMessage.content += token;
+				// Handle both incremental updates (delta) and full content (part.text)
+				// The SDK may send part.text as full content, not just the delta
+				const currentContent = lastMessage.content;
+				
+				// If token equals current content, no update needed
+				if (token === currentContent) {
+					return;
+				}
+				
+				// If token starts with current content, it's full content - replace it
+				if (currentContent && token.startsWith(currentContent)) {
+					lastMessage.content = token;
+				} else if (currentContent && token.length >= currentContent.length) {
+					// Token is longer or equal - likely full content, replace
+					lastMessage.content = token;
+				} else {
+					// Incremental update - append
+					lastMessage.content += token;
+				}
 				// Incremental update - only update the message content, not entire view
 				this.updateMessages();
 			}
@@ -960,6 +978,9 @@ export class OpenCodeObsidianView extends ItemView {
 	}
 
 	private async sendMessage(content: string): Promise<void> {
+		console.info("[OpenCodeObsidianView] sendMessage invoked:", {
+			contentLength: content.length,
+		});
 		const activeConv = this.getActiveConversation();
 		if (!activeConv) {
 			await this.createNewConversation();
@@ -1062,6 +1083,15 @@ export class OpenCodeObsidianView extends ItemView {
 			let sessionId =
 				activeConv.sessionId ||
 				this.plugin.opencodeClient.getCurrentSessionId();
+			const activeFile = this.app.workspace.getActiveFile();
+			const sessionContext = activeFile
+				? {
+						currentNote: activeFile.path,
+						properties:
+							this.app.metadataCache.getFileCache(activeFile)
+								?.frontmatter,
+					}
+				: undefined;
 
 			if (!sessionId) {
 				// Start a new session
@@ -1077,20 +1107,8 @@ export class OpenCodeObsidianView extends ItemView {
 						);
 					}
 
-					// Build session context from current note if available
-					const activeFile = this.app.workspace.getActiveFile();
-					const context = activeFile
-						? {
-								currentNote: activeFile.path,
-								properties:
-									this.app.metadataCache.getFileCache(
-										activeFile,
-									)?.frontmatter,
-							}
-						: undefined;
-
 					sessionId = await this.plugin.opencodeClient.startSession(
-						context,
+						sessionContext,
 						this.plugin.settings.agent,
 						this.plugin.settings.instructions,
 					);
@@ -1109,16 +1127,61 @@ export class OpenCodeObsidianView extends ItemView {
 						"[OpenCodeObsidianView] Session start failed:",
 						sessionError,
 					);
+					// Don't wrap if error already contains diagnostic information
+					// (e.g., "Unable to connect" or "Failed to create session")
+					if (
+						errorMsg.includes("Unable to connect") ||
+						errorMsg.includes("Failed to create session") ||
+						errorMsg.includes("Failed to start session")
+					) {
+						throw sessionError;
+					}
 					throw new Error(`Failed to start session: ${errorMsg}`);
 				}
 			}
 
+			if (sessionId) {
+				const hasSession =
+					await this.plugin.opencodeClient.ensureSession(sessionId);
+				if (!hasSession) {
+					activeConv.sessionId = null;
+					sessionId = await this.plugin.opencodeClient.startSession(
+						sessionContext,
+						this.plugin.settings.agent,
+						this.plugin.settings.instructions,
+					);
+					activeConv.sessionId = sessionId;
+				}
+			}
+
 			// Send message to OpenCode Server
-			await this.plugin.opencodeClient.sendSessionMessage(
-				sessionId,
-				content,
-				images,
-			);
+			try {
+				await this.plugin.opencodeClient.sendSessionMessage(
+					sessionId,
+					content,
+					images,
+				);
+			} catch (sendError) {
+				const errorText =
+					sendError instanceof Error ? sendError.message : "";
+				if (errorText.includes("Session") && errorText.includes("not found")) {
+					activeConv.sessionId = null;
+					const refreshedSessionId =
+						await this.plugin.opencodeClient.startSession(
+							sessionContext,
+							this.plugin.settings.agent,
+							this.plugin.settings.instructions,
+						);
+					activeConv.sessionId = refreshedSessionId;
+					await this.plugin.opencodeClient.sendSessionMessage(
+						refreshedSessionId,
+						content,
+						images,
+					);
+				} else {
+					throw sendError;
+				}
+			}
 
 			console.debug(
 				"[OpenCodeObsidianView] Message sent to OpenCode Server:",

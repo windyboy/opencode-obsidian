@@ -73,7 +73,7 @@ app.plugins.plugins["opencode-obsidian"].opencodeClient?.getCurrentSessionId();
 ### OpenCode Server 连接
 
 1. 打开插件设置
-2. 配置 OpenCode Server URL（默认：`http://localhost:4096`）
+2. 配置 OpenCode Server URL（例如：`http://127.0.0.1:4096`）
 3. 测试连接
 4. 保存设置
 

@@ -96,7 +96,7 @@ You need a running OpenCode Server before using the plugin.
     opencode serve
     ```
 
-3. Use the server URL in plugin settings (default: `http://localhost:4096`).
+3. Configure the server URL in plugin settings (e.g., `http://127.0.0.1:4096`).
 
 ## Configuration
 
@@ -106,7 +106,7 @@ You need a running OpenCode Server before using the plugin.
 2. Go to Community Plugins
 3. Enable "OpenCode Obsidian"
 4. Open the plugin settings
-5. Configure OpenCode Server URL (default: `http://localhost:4096`)
+5. Configure OpenCode Server URL (e.g., `http://127.0.0.1:4096`)
 6. Set tool permission level (read-only, scoped-write, or full-write)
 7. Start using the chat interface
 
@@ -114,7 +114,7 @@ You need a running OpenCode Server before using the plugin.
 
 Configure the following settings in the plugin settings panel:
 
--   **OpenCode Server**: Configure HTTP connection URL (default: `http://localhost:4096`)
+-   **OpenCode Server**: Configure HTTP connection URL (e.g., `http://127.0.0.1:4096`)
 -   **Default Agent**: Select the default agent for new conversations
     -   Built-in agents: Assistant, Bootstrap, Thinking Partner, Research Assistant, Read Only
     -   Custom agents: Loaded from `.opencode/agent/*.md` files
@@ -338,7 +338,7 @@ To bump the plugin version:
 ### Connection Issues
 
 -   Ensure OpenCode Server is running and accessible
--   Check HTTP URL in settings (default: `http://localhost:4096`)
+-   Check HTTP URL in settings (e.g., `http://127.0.0.1:4096`)
 -   Verify firewall settings allow HTTP connections
 -   Check OpenCode Server logs for connection errors
 

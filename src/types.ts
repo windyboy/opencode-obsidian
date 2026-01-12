@@ -89,8 +89,10 @@ export interface OpenCodeObsidianSettings {
 
   /** OpenCode Server configuration (for client/server architecture) */
   opencodeServer?: {
-    /** HTTP URL for OpenCode Server (e.g., "http://localhost:4096" or "https://opencode.example.com") */
+    /** HTTP URL for OpenCode Server (e.g., "http://127.0.0.1:4096" or "https://opencode.example.com") */
     url: string
+    /** HTTP request timeout in milliseconds (0 = no timeout, default: 30000) */
+    requestTimeoutMs?: number
     /** Whether to automatically reconnect on connection loss (default: true) */
     autoReconnect?: boolean
     /** Delay between reconnection attempts in milliseconds (default: 3000) */

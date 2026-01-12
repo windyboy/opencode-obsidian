@@ -43,7 +43,7 @@ describe("OpenCodeServerClient Event Handling", () => {
 		});
 
 		client = new OpenCodeServerClient(
-			{ url: "http://localhost:4096" },
+			{ url: "http://127.0.0.1:4096" },
 			errorHandler,
 		);
 	});
