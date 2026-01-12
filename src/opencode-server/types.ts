@@ -3,7 +3,7 @@
  * Minimal type definitions specific to Obsidian integration
  */
 
-// Re-export types from the official SDK
+// Re-export types from the official SDK client
 export type {
 	Session,
 	Message,
@@ -12,7 +12,8 @@ export type {
 	Agent,
 	AssistantMessage,
 	UserMessage,
-} from "@opencode-ai/sdk";
+} from "@opencode-ai/sdk/client";
+export type { OpenCodeClient } from "./client";
 
 /**
  * Connection state

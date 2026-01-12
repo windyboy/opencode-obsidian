@@ -85,6 +85,19 @@ OpenCode Obsidian is an Obsidian plugin that provides a sophisticated chat inter
 -   **Obsidian**: Version 1.0.0 or higher
 -   **OpenCode Server**: A running OpenCode Server instance (providers and API keys are managed server-side)
 
+## Start OpenCode Server
+
+You need a running OpenCode Server before using the plugin.
+
+1. Install the OpenCode CLI (see the OpenCode project).
+2. Start the server:
+
+    ```bash
+    opencode serve
+    ```
+
+3. Use the server URL in plugin settings (default: `http://localhost:4096`).
+
 ## Configuration
 
 ### Initial Setup
@@ -203,6 +216,7 @@ When reviewing code, focus on:
 -   Green dot: Connected to OpenCode Server
 -   Red dot: Disconnected from OpenCode Server
 -   The plugin automatically attempts to reconnect if the connection is lost
+-   Event streaming runs in the background, so reconnect attempts do not block the UI
 
 ## Development
 
@@ -219,7 +233,7 @@ opencode-obsidian/
 │   ├── agent/
 │   │   └── agent-resolver.ts        # Agent configuration resolution and skill merging
 │   ├── opencode-server/
-│   │   ├── client.ts                # HTTP + SSE client for OpenCode Server
+│   │   ├── client.ts                # SDK client helper + Obsidian wrapper (OpenCodeServerClient)
 │   │   └── protocol.ts              # Protocol message definitions
 │   ├── orchestrator/
 │   │   └── agent-orchestrator.ts    # Agent loop state machine and task orchestration
@@ -401,7 +415,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture decis
 -   **ErrorHandler**: Unified error handling system (`src/utils/error-handler.ts`)
 -   **AgentResolver**: Agent configuration resolution (`src/agent/agent-resolver.ts`)
 -   **ConfigLoader**: Configuration file loading (`src/config-loader.ts`)
--   **OpenCodeServerClient**: HTTP + SSE client for OpenCode Server (`src/opencode-server/client.ts`)
+-   **OpenCodeClient / OpenCodeServerClient**: SDK client helper and Obsidian wrapper for OpenCode Server (`src/opencode-server/client.ts`)
 -   **AgentOrchestrator**: Agent loop state machine and task orchestration (`src/orchestrator/agent-orchestrator.ts`)
 -   **ToolExecutor**: Tool execution with permissions (`src/tools/obsidian/tool-executor.ts`)
 -   **PermissionManager**: Permission management (`src/tools/obsidian/permission-manager.ts`)

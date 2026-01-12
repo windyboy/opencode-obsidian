@@ -9,12 +9,24 @@ import type {
 	ProgressUpdate,
 } from "./types";
 
+export type OpenCodeClient = ReturnType<typeof createOpencodeClient>;
+
+export function createClient(
+	baseUrl: string,
+	fetchImpl?: typeof fetch,
+): OpenCodeClient {
+	return createOpencodeClient({
+		baseUrl,
+		fetch: fetchImpl,
+	});
+}
+
 /**
- * OpenCode SDK Client wrapper for Obsidian integration
+ * OpenCode SDK client wrapper for Obsidian integration
  * Provides a clean interface to the official OpenCode SDK client
  */
-export class OpenCodeClient {
-	private sdkClient: ReturnType<typeof createOpencodeClient>;
+export class OpenCodeServerClient {
+	private sdkClient: OpenCodeClient;
 	private errorHandler: ErrorHandler;
 	private config: OpenCodeServerConfig;
 	private connectionState: ConnectionState = "disconnected";
@@ -37,29 +49,38 @@ export class OpenCodeClient {
 	// Session management
 	private currentSessionId: string | null = null;
 	private sessions: Map<string, Session> = new Map();
+	private eventStreamAbort: AbortController | null = null;
+	private lastEventId: string | null = null;
 
 	constructor(config: OpenCodeServerConfig, errorHandler: ErrorHandler) {
-		this.config = config;
+		const normalizedUrl = this.normalizeServerUrl(config.url);
+		this.config = { ...config, url: normalizedUrl };
 		this.errorHandler = errorHandler;
 
 		// Initialize SDK client with custom Obsidian fetch
-		this.sdkClient = createOpencodeClient({
-			baseUrl: config.url,
-			fetch: this.createObsidianFetch(),
-		});
+		this.sdkClient = createClient(
+			normalizedUrl,
+			this.createObsidianFetch(),
+		);
 	}
 
 	/**
 	 * Create custom fetch implementation using Obsidian's requestUrl API
 	 */
 	private createObsidianFetch(): typeof fetch {
-		return async (url: string | URL, init?: RequestInit) => {
+		return async (url: RequestInfo | URL, init?: RequestInit) => {
+			const {
+				resolvedUrl,
+				method,
+				headers,
+				body,
+			} = await this.buildRequestOptions(url, init);
 			try {
 				const response = await requestUrl({
-					url: url.toString(),
-					method: init?.method || "GET",
-					headers: init?.headers as Record<string, string>,
-					body: init?.body ? String(init.body) : undefined,
+					url: resolvedUrl,
+					method,
+					headers,
+					body,
 				});
 
 				// Convert Obsidian response to standard Response object
@@ -78,13 +99,119 @@ export class OpenCodeClient {
 						module: "OpenCodeClient",
 						function: "createObsidianFetch",
 						operation: "HTTP request",
-						metadata: { url: url.toString(), method: init?.method },
+						metadata: { url: resolvedUrl, method },
 					},
 					ErrorSeverity.Error,
 				);
 				throw error;
 			}
 		};
+	}
+
+	private async buildRequestOptions(
+		url: RequestInfo | URL,
+		init?: RequestInit,
+	): Promise<{
+		resolvedUrl: string;
+		method: string;
+		headers: Record<string, string>;
+		body?: string;
+	}> {
+		const resolvedUrl = this.resolveRequestUrl(url);
+		let method = init?.method || "GET";
+		let headers = new Headers(init?.headers ?? {});
+		let body = init?.body ? String(init.body) : undefined;
+
+		if (typeof Request !== "undefined" && url instanceof Request) {
+			method = init?.method ?? url.method ?? method;
+			headers = new Headers(url.headers);
+			if (init?.headers) {
+				const overrideHeaders = new Headers(init.headers);
+				overrideHeaders.forEach((value, key) => {
+					headers.set(key, value);
+				});
+			}
+			if (init?.body !== undefined) {
+				body = String(init.body);
+			} else if (url.body && !url.bodyUsed && method !== "GET" && method !== "HEAD") {
+				body = await url.clone().text();
+			}
+		}
+
+		const headerObject: Record<string, string> = {};
+		headers.forEach((value, key) => {
+			headerObject[key] = value;
+		});
+
+		return {
+			resolvedUrl,
+			method,
+			headers: headerObject,
+			body,
+		};
+	}
+
+	private resolveRequestUrl(url: RequestInfo | URL): string {
+		if (url instanceof URL) {
+			return url.toString();
+		}
+
+		if (typeof Request !== "undefined" && url instanceof Request) {
+			return url.url;
+		}
+
+		if (typeof url !== "string") {
+			const requestUrl = (url as { url?: unknown }).url;
+			if (requestUrl instanceof URL) {
+				return requestUrl.toString();
+			}
+			if (typeof requestUrl === "string") {
+				return this.resolveRequestUrl(requestUrl);
+			}
+
+			throw new Error("OpenCode Server request URL is invalid.");
+		}
+
+		const trimmed = url.trim();
+		if (!trimmed) {
+			return trimmed;
+		}
+
+		const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
+		if (hasScheme) {
+			return trimmed;
+		}
+
+		return new URL(trimmed, `${this.config.url}/`).toString();
+	}
+
+	private normalizeServerUrl(url: string): string {
+		const trimmed = url.trim();
+		if (!trimmed) {
+			throw new Error(
+				"OpenCode Server URL is empty. Please set it in settings.",
+			);
+		}
+
+		const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
+		const candidate = hasScheme ? trimmed : `http://${trimmed}`;
+		let parsed: URL;
+
+		try {
+			parsed = new URL(candidate);
+		} catch {
+			throw new Error(
+				"OpenCode Server URL is invalid. Use http:// or https:// (e.g., http://localhost:4096).",
+			);
+		}
+
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+			throw new Error(
+				"OpenCode Server URL must use http:// or https://.",
+			);
+		}
+
+		return candidate.replace(/\/+$/, "");
 	}
 
 	/**
@@ -148,31 +275,16 @@ export class OpenCodeClient {
 
 		this.connectionState = "connecting";
 
-		try {
-			// Subscribe to SDK client events
-			await this.subscribeToEvents();
-			this.connectionState = "connected";
-
-			console.debug("[OpenCodeClient] Connected to OpenCode Server");
-		} catch (error) {
-			this.connectionState = "disconnected";
-			this.errorHandler.handleError(
-				error,
-				{
-					module: "OpenCodeClient",
-					function: "connect",
-					operation: "Connecting to OpenCode Server",
-				},
-				ErrorSeverity.Error,
-			);
-			throw error;
-		}
+		// Subscribe to SDK client events without blocking the caller.
+		this.startEventLoop();
 	}
 
 	/**
 	 * Disconnect from OpenCode Server
 	 */
 	async disconnect(): Promise<void> {
+		this.eventStreamAbort?.abort();
+		this.eventStreamAbort = null;
 		this.connectionState = "disconnected";
 		this.currentSessionId = null;
 		this.sessions.clear();
@@ -195,11 +307,22 @@ export class OpenCodeClient {
 			}
 
 			const session = response.data;
-			this.sessions.set(session.id, session);
-			this.currentSessionId = session.id;
+			const sessionInfo = (session as { info?: Session }).info ?? session;
+			const sessionId =
+				(sessionInfo as { id?: string; sessionID?: string; sessionId?: string })
+					.id ||
+				(sessionInfo as { sessionID?: string; sessionId?: string }).sessionID ||
+				(sessionInfo as { sessionId?: string }).sessionId;
+			if (!sessionId) {
+				throw new Error(
+					"OpenCode Server session response did not include an id.",
+				);
+			}
+			this.sessions.set(sessionId, sessionInfo);
+			this.currentSessionId = sessionId;
 
-			console.debug("[OpenCodeClient] Created session:", session.id);
-			return session.id;
+			console.debug("[OpenCodeClient] Created session:", sessionId);
+			return sessionId;
 		} catch (error) {
 			this.errorHandler.handleError(
 				error,
@@ -463,12 +586,54 @@ export class OpenCodeClient {
 	 * Subscribe to SDK client events and translate them to UI callbacks
 	 */
 	private async subscribeToEvents(): Promise<void> {
-		try {
-			// Subscribe to SDK client events using the event stream
-			const eventResult = await this.sdkClient.event.subscribe();
+		const shouldReconnect = this.config.autoReconnect ?? true;
+		const baseDelay = this.config.reconnectDelay ?? 1000;
+		const maxDelay = 30000;
+		const maxAttempts = this.config.reconnectMaxAttempts ?? 10;
+		let attempt = 0;
 
-			// Process events from the async generator
-			this.processEventStream(eventResult.stream);
+		this.eventStreamAbort?.abort();
+		this.eventStreamAbort = new AbortController();
+		const { signal } = this.eventStreamAbort;
+
+		try {
+			while (!signal.aborted) {
+				try {
+					if (attempt > 0) {
+						this.connectionState = "reconnecting";
+					}
+					const stream = await this.createEventStream(signal);
+
+					if (this.connectionState !== "connected") {
+						this.connectionState = "connected";
+						console.debug(
+							"[OpenCodeClient] Connected to OpenCode Server",
+						);
+					}
+					attempt = 0;
+					await this.processEventStream(stream);
+
+					if (!shouldReconnect || signal.aborted) {
+						break;
+					}
+				} catch (error) {
+					if (signal.aborted) {
+						break;
+					}
+
+					if (!shouldReconnect) {
+						throw error;
+					}
+
+					attempt = Math.min(attempt + 1, maxAttempts);
+					if (maxAttempts !== 0 && attempt >= maxAttempts) {
+						throw error;
+					}
+
+					const delay = Math.min(baseDelay * 2 ** attempt, maxDelay);
+					await this.sleep(delay);
+				}
+			}
 
 			console.debug("[OpenCodeClient] Event subscription established");
 		} catch (error) {
@@ -483,6 +648,171 @@ export class OpenCodeClient {
 			);
 			throw error;
 		}
+	}
+
+	private startEventLoop(): void {
+		void this.subscribeToEvents().catch(() => {
+			this.connectionState = "disconnected";
+		});
+	}
+
+	private getNodeRequire(): ((id: string) => unknown) | null {
+		const nodeRequire = (
+			globalThis as { require?: (id: string) => unknown }
+		).require;
+		return typeof nodeRequire === "function" ? nodeRequire : null;
+	}
+
+	private canUseNodeEventStream(): boolean {
+		const nodeRequire = this.getNodeRequire();
+		return (
+			typeof process !== "undefined" &&
+			typeof process.versions === "object" &&
+			typeof process.versions.node === "string" &&
+			typeof nodeRequire === "function"
+		);
+	}
+
+	private async createEventStream(
+		signal: AbortSignal,
+	): Promise<AsyncGenerator<any, any, unknown>> {
+		if (this.canUseNodeEventStream()) {
+			return this.createNodeEventStream(signal);
+		}
+
+		const sub: any = await this.sdkClient.event.subscribe({
+			signal,
+		});
+		const stream = sub?.data?.stream ?? sub?.stream;
+		if (!stream) {
+			throw new Error("Event subscription did not include a stream");
+		}
+
+		return stream;
+	}
+
+	private async createNodeEventStream(
+		signal: AbortSignal,
+	): Promise<AsyncGenerator<any, any, unknown>> {
+		const eventUrl = new URL("/event", `${this.config.url}/`);
+		return this.nodeEventStream(eventUrl, signal);
+	}
+
+	private async *nodeEventStream(
+		eventUrl: URL,
+		signal: AbortSignal,
+	): AsyncGenerator<any, any, unknown> {
+		type NodeResponse = AsyncIterable<Uint8Array> & {
+			statusCode?: number;
+			statusMessage?: string;
+			resume?: () => void;
+		};
+		type NodeRequest = {
+			on: (event: "error", listener: (error: Error) => void) => void;
+			end: () => void;
+		};
+		type NodeRequestOptions = {
+			method: string;
+			headers: Record<string, string>;
+			hostname: string;
+			port?: string;
+			path: string;
+			signal: AbortSignal;
+		};
+
+		const moduleId = eventUrl.protocol === "https:" ? "node:https" : "node:http";
+		const nodeRequire = this.getNodeRequire();
+		const httpModule = nodeRequire
+			? nodeRequire(moduleId)
+			: await import(moduleId);
+		const request = (httpModule as unknown as {
+			request: (
+				options: NodeRequestOptions,
+				callback: (response: NodeResponse) => void,
+			) => NodeRequest;
+		}).request;
+
+		const response = await new Promise<NodeResponse>((resolve, reject) => {
+			const headers: Record<string, string> = {
+				Accept: "text/event-stream",
+				"Cache-Control": "no-cache",
+				Connection: "keep-alive",
+			};
+			if (this.lastEventId) {
+				headers["Last-Event-ID"] = this.lastEventId;
+			}
+
+			const req = request(
+				{
+					method: "GET",
+					headers,
+					hostname: eventUrl.hostname,
+					port: eventUrl.port || undefined,
+					path: `${eventUrl.pathname}${eventUrl.search}`,
+					signal,
+				},
+				(res) => {
+					const statusCode = res.statusCode ?? 0;
+					if (statusCode >= 400) {
+						res.resume?.();
+						reject(
+							new Error(
+								`Event stream failed: ${statusCode} ${
+									res.statusMessage ?? ""
+								}`.trim(),
+							),
+						);
+						return;
+					}
+					resolve(res);
+				},
+			);
+
+			req.on("error", (error) => reject(error));
+			req.end();
+		});
+
+		const decoder = new TextDecoder();
+		let buffer = "";
+
+		for await (const chunk of response) {
+			if (signal.aborted) {
+				break;
+			}
+
+			buffer += decoder.decode(chunk, { stream: true });
+			const chunks = buffer.split("\n\n");
+			buffer = chunks.pop() ?? "";
+
+			for (const rawChunk of chunks) {
+				const lines = rawChunk.split("\n");
+				const dataLines: string[] = [];
+
+				for (const line of lines) {
+					const cleaned = line.replace(/\r$/, "");
+					if (cleaned.startsWith("data:")) {
+						dataLines.push(cleaned.replace(/^data:\s*/, ""));
+					} else if (cleaned.startsWith("id:")) {
+						this.lastEventId = cleaned.replace(/^id:\s*/, "");
+					}
+				}
+
+				if (!dataLines.length) {
+					continue;
+				}
+
+				const rawData = dataLines.join("\n");
+				try {
+					yield JSON.parse(rawData);
+				} catch {
+					yield rawData;
+				}
+			}
+		}
+	}
+
+	private sleep(durationMs: number): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, durationMs));
 	}
 
 	/**
@@ -508,6 +838,7 @@ export class OpenCodeClient {
 
 			// Notify error callbacks
 			this.handleSDKError(error as Error);
+			throw error;
 		}
 	}
 

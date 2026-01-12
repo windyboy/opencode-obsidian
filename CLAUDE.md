@@ -83,7 +83,7 @@ Files: `src/tools/obsidian/tool-executor.ts`, `tool-registry.ts`
 
 ### Core Service Modules
 
-**OpenCodeClient** (`src/opencode-server/client.ts`): HTTP + SSE client for OpenCode Server communication using `@opencode-ai/sdk/client` for standardized API interactions.
+**OpenCodeServerClient** (`src/opencode-server/client.ts`): Obsidian wrapper around the SDK client. Uses `createClient` for HTTP requests and runs SSE streaming in a background loop; `connect()` is non-blocking and updates connection state when the stream is established.
 
 **AgentOrchestrator** (`src/orchestrator/agent-orchestrator.ts`): Manages agent loop state machine (Planning → Executing → Validating → Retrying → Completed) with task orchestration and progress tracking.
 
@@ -195,6 +195,8 @@ const details = await get_observations({ ids: [123, 124, 125] });
 ### memvid (File-Based Memory System)
 
 A comprehensive memory system that stores data in `.mv2` files with semantic search, tagging, and export capabilities.
+
+**Project default**: Use `./.mem/memory.mv2` for this repo.
 
 **Core Operations**:
 

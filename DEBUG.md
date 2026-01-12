@@ -64,10 +64,10 @@ pnpm run dev
 
 ```javascript
 const plugin = app.plugins.plugins["opencode-obsidian"];
-console.log("OpenCode Client:", plugin.openCodeClient);
+console.log("OpenCode Client:", plugin.opencodeClient);
 
 // 检查连接状态
-console.log("Connection Status:", plugin.openCodeClient.isConnected);
+console.log("Connection Status:", plugin.opencodeClient?.isConnected());
 
 // 查看任务编排器状态
 console.log("Orchestrator:", plugin.agentOrchestrator);
@@ -113,11 +113,11 @@ console.log("MCP Manager:", plugin.mcpManager);
 
 ```javascript
 const plugin = app.plugins.plugins["opencode-obsidian"];
-console.log("Server URL:", plugin.settings.serverUrl);
-console.log("Is Connected:", plugin.openCodeClient.isConnected);
+console.log("Server URL:", plugin.settings.opencodeServer?.url);
+console.log("Is Connected:", plugin.opencodeClient?.isConnected());
 
 // 手动连接测试
-plugin.openCodeClient.connect();
+void plugin.opencodeClient?.connect();
 ```
 
 ### 查看插件设置

@@ -8,7 +8,7 @@ import type { OpenCodeObsidianSettings } from "./types";
 import { UI_CONFIG } from "./utils/constants";
 import { ErrorHandler, ErrorSeverity } from "./utils/error-handler";
 import { debounceAsync } from "./utils/debounce-throttle";
-import { OpenCodeClient } from "./opencode-server/client";
+import { OpenCodeServerClient } from "./opencode-server/client";
 import { ObsidianToolRegistry } from "./tools/obsidian/tool-registry";
 import { ObsidianToolExecutor } from "./tools/obsidian/tool-executor";
 import { PermissionManager } from "./tools/obsidian/permission-manager";
@@ -71,7 +71,7 @@ const DEFAULT_SETTINGS: OpenCodeObsidianSettings = {
 export default class OpenCodeObsidianPlugin extends Plugin {
 	settings: OpenCodeObsidianSettings;
 	errorHandler: ErrorHandler;
-	opencodeClient: OpenCodeClient | null = null;
+	opencodeClient: OpenCodeServerClient | null = null;
 	toolRegistry: ObsidianToolRegistry | null = null;
 	permissionManager: PermissionManager | null = null;
 
@@ -133,7 +133,7 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 
 					// Initialize OpenCode Server client
 					if (this.settings.opencodeServer?.url) {
-						this.opencodeClient = new OpenCodeClient(
+						this.opencodeClient = new OpenCodeServerClient(
 							this.settings.opencodeServer,
 							this.errorHandler,
 						);

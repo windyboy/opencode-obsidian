@@ -64,10 +64,10 @@ pnpm run build
 app.plugins.plugins["opencode-obsidian"];
 
 // 查看客户端状态
-app.plugins.plugins["opencode-obsidian"].openCodeClient.isConnected;
+app.plugins.plugins["opencode-obsidian"].opencodeClient?.isConnected();
 
 // 查看当前会话 ID
-app.plugins.plugins["opencode-obsidian"].openCodeClient.getSessionId();
+app.plugins.plugins["opencode-obsidian"].opencodeClient?.getCurrentSessionId();
 ```
 
 ### OpenCode Server 连接

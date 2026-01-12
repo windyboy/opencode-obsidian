@@ -28,10 +28,10 @@ vi.mock("@opencode-ai/sdk/client", () => ({
 }));
 
 // Import after mocking
-import { OpenCodeClient } from "./client";
+import { OpenCodeServerClient } from "./client";
 
-describe("OpenCodeClient Event Handling", () => {
-	let client: OpenCodeClient;
+describe("OpenCodeServerClient Event Handling", () => {
+	let client: OpenCodeServerClient;
 	let errorHandler: ErrorHandler;
 
 	beforeEach(() => {
@@ -42,7 +42,7 @@ describe("OpenCodeClient Event Handling", () => {
 			collectErrors: false,
 		});
 
-		client = new OpenCodeClient(
+		client = new OpenCodeServerClient(
 			{ url: "http://localhost:4096" },
 			errorHandler,
 		);

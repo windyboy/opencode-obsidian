@@ -140,13 +140,15 @@ The `OpenCodeObsidianPlugin` class extends Obsidian's `Plugin` class and serves 
 
 -   **OpenCodeServerClient**: Manages HTTP requests and SSE event streaming
     -   HTTP request handling for session/message operations
-    -   SSE connection management with auto-reconnect
+    -   SSE connection management with auto-reconnect (background event loop)
     -   Session management (start, message, abort)
     -   Stream token/thinking/progress handling via SSE
+    -   `createClient` helper mirrors opencode-web SDK client creation
 
 **Key Features**:
 
 -   HTTP + SSE connection with reconnection logic
+-   `connect()` is non-blocking; it starts the SSE loop and returns immediately
 -   HTTP API for client → server (POST /session, /session/{id}/message, /session/{id}/abort)
 -   SSE events for server → client (message.part.updated, session.status, session.error, session.idle)
 -   Tool execution coordination with Obsidian tools

@@ -127,6 +127,8 @@ const context = await esbuild.context({
     '@lezer/common',
     '@lezer/highlight',
     '@lezer/lr',
+    'node:http',
+    'node:https',
     ...builtinModules,
   ],
   format: 'cjs',

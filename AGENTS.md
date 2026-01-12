@@ -4,6 +4,27 @@ This repository is an **Obsidian plugin** (TypeScript, ESM) that integrates with
 
 If you’re an agent working here: keep changes **minimal, secure, and consistent** with existing patterns.
 
+## Global agent instructions
+
+### Memvid MCP memory rules
+
+-   Use the `memvid` MCP server for durable user preferences, decisions, and long-lived project context.
+-   At the start of each new task, query memory for relevant context before acting.
+    -   Use `memvid_search` (or `memvid_search_by_tag` when tags are available).
+-   After each task, write back any new durable preferences/decisions/constraints.
+    -   Use `memvid_add_text` or `memvid_add_file`, then `memvid_commit`.
+-   Do not store secrets, tokens, credentials, or transient errors/logs.
+-   Use consistent tags like `project`, `decision`, `preference`, `constraint`.
+-   Default memory file path: `./.mem/memory.mv2`.
+
+### Memvid tracking list (maintain over time)
+
+-   **Project settings**: Memory file path, non-README internal notes, tooling constraints.
+-   **Client architecture**: SDK helper (`createClient`), Obsidian wrapper (`OpenCodeServerClient`), non-blocking connect, background SSE loop, reconnect semantics.
+-   **Agent rules**: Agent config locations, frontmatter expectations, default behaviors, restrictions.
+-   **Security/permissions**: Required permission checks, no direct vault reads/writes without `PermissionManager`.
+-   **Error handling**: Use `ErrorHandler` at async boundaries; avoid bare `console.error`.
+
 ## Quick commands
 
 ### Install
@@ -74,6 +95,11 @@ Notes:
 -   Indent: **tabs**, width **4**
 -   Line endings: **LF**
 -   Charset: UTF-8
+
+## Project memory (Codex)
+
+-   Use a per-project memvid file stored at `./.mem/memory.mv2`.
+-   Do not use the global default `~/.codex/memory/memvid.mv2` for this repo.
 
 ### ESLint
 

@@ -17,6 +17,7 @@ The Obsidian plugin runs as a thin client that:
 - Executes operations on the local Obsidian vault
 - Enforces permission checks and audit logging
 - Sends results back to OpenCode Server
+- Runs the SSE event loop in the background so UI initialization is non-blocking
 
 ## Available Tools
 
