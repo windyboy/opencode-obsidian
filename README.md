@@ -12,7 +12,8 @@ OpenCode Obsidian is an Obsidian plugin that provides a sophisticated chat inter
 -   Attach images to conversations for multimodal interactions
 -   Manage multiple conversation sessions with auto-save
 -   Use custom agents and skills for specialized tasks
--   Configure advanced context management and TODO tracking
+-   Configure advanced context management and task orchestration
+-   Access MCP (Model Context Protocol) servers for extended functionality
 
 ## Features
 
@@ -25,7 +26,8 @@ OpenCode Obsidian is an Obsidian plugin that provides a sophisticated chat inter
 -   **Custom Agents & Skills**: Create specialized agents with YAML frontmatter and reusable skills
 -   **Configuration System**: Load agents, skills, and instructions from `.opencode/` directory
 -   **Context Management**: Advanced context retrieval, token estimation, and budget allocation
--   **TODO Management**: Automatic TODO extraction and task plan tracking
+-   **Task Orchestration**: Automatic task planning, execution tracking, and progress monitoring
+-   **MCP Integration**: Support for Model Context Protocol servers and tools
 -   **Settings Panel**: Comprehensive settings for server connection, permissions, and agent configuration
 -   **Error Handling**: Unified error handling system with severity levels and user-friendly notifications
 -   **Performance Optimized**: LRU caching, debounced settings, throttled API calls
@@ -109,7 +111,8 @@ Configure the following settings in the plugin settings panel:
     -   `full-write`: Requires approval for any write operation
 -   **Permission Scopes**: Configure allowed/denied paths, file size limits, and extensions
 -   **Context Management**: Configure context window thresholds and token limits
--   **TODO Management**: Configure TODO extraction and continuation behavior
+-   **Task Orchestration**: Configure task planning, execution tracking, and progress monitoring
+-   **MCP Integration**: Configure Model Context Protocol servers and tools
 -   **Instructions**: Add instruction files or glob patterns to merge into system prompts
 
 ### Advanced Configuration
@@ -119,17 +122,18 @@ Configure the following settings in the plugin settings panel:
 Create custom agents and skills by adding files to your vault:
 
 **Agents**: `.opencode/agent/{agent-name}.md`
+
 ```markdown
 ---
 name: My Custom Agent
 description: A specialized agent for code review
 model: anthropic/claude-3-5-sonnet-20241022
 skills:
-  - code-review
-  - testing
+    - code-review
+    - testing
 tools:
-  "*": false
-  "github-triage": true
+    "*": false
+    "github-triage": true
 color: "#FF6B6B"
 ---
 
@@ -137,6 +141,7 @@ You are an expert code reviewer...
 ```
 
 **Skills**: `.opencode/skill/{skill-name}/SKILL.md`
+
 ```markdown
 ---
 name: Code Review
@@ -144,28 +149,27 @@ description: Guidelines for code review
 ---
 
 When reviewing code, focus on:
+
 1. Code quality and maintainability
 2. Security vulnerabilities
 3. Performance optimizations
-...
+   ...
 ```
 
 **Configuration File**: `.opencode/config.json` or `opencode.json`
+
 ```json
 {
-  "providers": [
-    {
-      "id": "my-custom-provider",
-      "name": "My Custom Provider",
-      "baseURL": "https://api.example.com/v1",
-      "apiType": "openai-compatible",
-      "defaultModel": "custom-model"
-    }
-  ],
-  "instructions": [
-    ".opencode/instructions/**/*.md",
-    "docs/rules.md"
-  ]
+	"providers": [
+		{
+			"id": "my-custom-provider",
+			"name": "My Custom Provider",
+			"baseURL": "https://api.example.com/v1",
+			"apiType": "openai-compatible",
+			"defaultModel": "custom-model"
+		}
+	],
+	"instructions": [".opencode/instructions/**/*.md", "docs/rules.md"]
 }
 ```
 
@@ -218,7 +222,7 @@ opencode-obsidian/
 │   │   ├── client.ts                # HTTP + SSE client for OpenCode Server
 │   │   └── protocol.ts              # Protocol message definitions
 │   ├── orchestrator/
-│   │   └── agent-orchestrator.ts    # Agent loop state machine
+│   │   └── agent-orchestrator.ts    # Agent loop state machine and task orchestration
 │   ├── hooks/
 │   │   ├── hook-registry.ts         # Hook system for extensibility
 │   │   └── *.ts                     # Individual hook implementations
@@ -230,8 +234,11 @@ opencode-obsidian/
 │   │   ├── session-manager.ts       # Session lifecycle management
 │   │   └── session-storage.ts       # Session persistence
 │   ├── todo/
-│   │   ├── todo-manager.ts          # TODO extraction and management
+│   │   ├── todo-manager.ts          # Task planning and orchestration
 │   │   └── todo-extractor.ts        # TODO parsing logic
+│   ├── mcp/
+│   │   ├── mcp-manager.ts           # Model Context Protocol integration
+│   │   └── types.ts                 # MCP type definitions
 │   ├── tools/
 │   │   └── obsidian/                # Obsidian tool system
 │   │       ├── tool-executor.ts     # Tool execution with permissions
@@ -395,9 +402,10 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture decis
 -   **AgentResolver**: Agent configuration resolution (`src/agent/agent-resolver.ts`)
 -   **ConfigLoader**: Configuration file loading (`src/config-loader.ts`)
 -   **OpenCodeServerClient**: HTTP + SSE client for OpenCode Server (`src/opencode-server/client.ts`)
--   **AgentOrchestrator**: Agent loop state machine (`src/orchestrator/agent-orchestrator.ts`)
+-   **AgentOrchestrator**: Agent loop state machine and task orchestration (`src/orchestrator/agent-orchestrator.ts`)
 -   **ToolExecutor**: Tool execution with permissions (`src/tools/obsidian/tool-executor.ts`)
 -   **PermissionManager**: Permission management (`src/tools/obsidian/permission-manager.ts`)
+-   **MCPManager**: Model Context Protocol integration (`src/mcp/mcp-manager.ts`)
 
 All public interfaces and classes include comprehensive JSDoc comments. See source files for detailed API documentation.
 

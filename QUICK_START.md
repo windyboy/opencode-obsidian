@@ -70,13 +70,12 @@ app.plugins.plugins["opencode-obsidian"].openCodeClient.isConnected;
 app.plugins.plugins["opencode-obsidian"].openCodeClient.getSessionId();
 ```
 
-### API Key 配置
+### OpenCode Server 连接
 
 1. 打开插件设置
-2. 输入你的 API Key（从 Anthropic、OpenAI 或 Google 获取）
-3. 选择 AI Provider
-4. 选择模型
-5. 保存设置
+2. 配置 OpenCode Server URL（默认：`http://localhost:4096`）
+3. 测试连接
+4. 保存设置
 
 ## 📚 更多信息
 

@@ -22,35 +22,37 @@ An agent is defined by the `Agent` interface in `src/types.ts`:
 
 ```typescript
 interface Agent {
-  id: string              // Agent identifier (filename without .md)
-  name: string            // Display name
-  description?: string    // Optional description
-  systemPrompt: string    // System prompt content
-  model?: {               // Optional model override
-    providerID: string    // Provider identifier
-    modelID: string       // Model identifier
-  }
-  tools?: {               // Tool enablement configuration
-    [key: string]: boolean
-  }
-  skills?: string[]       // Referenced skill IDs
-  color?: string          // UI color (hex format)
-  hidden?: boolean        // Hide from UI
-  mode?: string           // Agent mode identifier
+	id: string; // Agent identifier (filename without .md)
+	name: string; // Display name
+	description?: string; // Optional description
+	systemPrompt: string; // System prompt content
+	model?: {
+		// Optional model override
+		providerID: string; // Provider identifier
+		modelID: string; // Model identifier
+	};
+	tools?: {
+		// Tool enablement configuration
+		[key: string]: boolean;
+	};
+	skills?: string[]; // Referenced skill IDs
+	color?: string; // UI color (hex format)
+	hidden?: boolean; // Hide from UI
+	mode?: string; // Agent mode identifier
 }
 ```
 
 ### Key Properties
 
-- **id**: Derived from the filename (e.g., `docs.md` → `id: "docs"`)
-- **name**: Display name shown in the UI (from frontmatter or derived from id)
-- **systemPrompt**: The core instructions that define the agent's behavior
-- **model**: Optional override to use a specific AI model for this agent
-- **tools**: Control which tools the agent can access
-- **skills**: Reusable prompt components merged into the system prompt
-- **color**: Visual identifier in the UI (e.g., `"#38A3EE"`)
-- **hidden**: Set to `true` to hide the agent from the UI
-- **mode**: Agent mode identifier (e.g., `"primary"`)
+-   **id**: Derived from the filename (e.g., `docs.md` → `id: "docs"`)
+-   **name**: Display name shown in the UI (from frontmatter or derived from id)
+-   **systemPrompt**: The core instructions that define the agent's behavior
+-   **model**: Optional override to use a specific AI model for this agent
+-   **tools**: Control which tools the agent can access
+-   **skills**: Reusable prompt components merged into the system prompt
+-   **color**: Visual identifier in the UI (e.g., `"#38A3EE"`)
+-   **hidden**: Set to `true` to hide the agent from the UI
+-   **mode**: Agent mode identifier (e.g., `"primary"`)
 
 ## Creating Custom Agents
 
@@ -77,28 +79,30 @@ name: Documentation Writer
 description: Specialized agent for writing and updating documentation
 color: "#38A3EE"
 model:
-  providerID: anthropic
-  modelID: claude-3-5-sonnet-20241022
+    providerID: anthropic
+    modelID: claude-3-5-sonnet-20241022
 tools:
-  "*": false
-  obsidian.read_note: true
-  obsidian.update_note: true
-  obsidian.create_note: true
+    "*": false
+    obsidian.read_note: true
+    obsidian.update_note: true
+    obsidian.create_note: true
 skills:
-  - markdown-formatting
-  - technical-writing
+    - markdown-formatting
+    - technical-writing
 ---
 
 You are a documentation specialist focused on creating clear, comprehensive documentation.
 
 Your responsibilities:
-- Write clear, concise documentation
-- Follow markdown best practices
-- Maintain consistent formatting
-- Include relevant examples
-- Update existing documentation when needed
+
+-   Write clear, concise documentation
+-   Follow markdown best practices
+-   Maintain consistent formatting
+-   Include relevant examples
+-   Update existing documentation when needed
 
 When writing documentation:
+
 1. Start with a clear overview
 2. Use proper heading hierarchy
 3. Include code examples where appropriate
@@ -110,14 +114,14 @@ When writing documentation:
 
 All frontmatter fields are optional. If omitted, defaults are used:
 
-- **name**: Defaults to capitalized filename (e.g., `docs.md` → `"Docs"`)
-- **description**: No default, shown in agent selection UI
-- **color**: Defaults to plugin's default color
-- **model**: Uses the default model configured in settings
-- **tools**: Defaults to all tools enabled
-- **skills**: No skills included by default
-- **hidden**: Defaults to `false`
-- **mode**: No default mode
+-   **name**: Defaults to capitalized filename (e.g., `docs.md` → `"Docs"`)
+-   **description**: No default, shown in agent selection UI
+-   **color**: Defaults to plugin's default color
+-   **model**: Uses the default model configured in settings
+-   **tools**: Defaults to all tools enabled
+-   **skills**: No skills included by default
+-   **hidden**: Defaults to `false`
+-   **mode**: No default mode
 
 ## Agent Configuration
 
@@ -149,10 +153,10 @@ This resolution happens in the OpenCode Server, which manages the full agent lif
 
 Skills are reusable prompt components that can be referenced by multiple agents. They allow you to:
 
-- Share common instructions across agents
-- Modularize complex prompts
-- Maintain consistency across agent behaviors
-- Update shared logic in one place
+-   Share common instructions across agents
+-   Modularize complex prompts
+-   Maintain consistency across agent behaviors
+-   Update shared logic in one place
 
 ### Skill File Structure
 
@@ -177,10 +181,11 @@ description: Best practices for markdown formatting
 ---
 
 When formatting markdown:
-- Use ATX-style headers (# Header)
-- Add blank lines around code blocks
-- Use backticks for inline code
-- Prefer lists over long paragraphs
+
+-   Use ATX-style headers (# Header)
+-   Add blank lines around code blocks
+-   Use backticks for inline code
+-   Prefer lists over long paragraphs
 ```
 
 ### Referencing Skills
@@ -191,8 +196,8 @@ Reference skills in agent frontmatter:
 ---
 name: Documentation Writer
 skills:
-  - markdown-formatting
-  - technical-writing
+    - markdown-formatting
+    - technical-writing
 ---
 ```
 
@@ -202,7 +207,9 @@ Skills are merged into the agent's system prompt in the order specified.
 
 ### Available Tools
 
-The plugin provides 6 core Obsidian tools:
+The plugin provides 6 core Obsidian tools plus MCP integration:
+
+**Core Obsidian Tools:**
 
 1. **obsidian.search_vault** - Search notes (read-only)
 2. **obsidian.read_note** - Read note content (read-only)
@@ -210,6 +217,12 @@ The plugin provides 6 core Obsidian tools:
 4. **obsidian.get_note_metadata** - Get frontmatter, tags, links (read-only)
 5. **obsidian.create_note** - Create new note (scoped-write)
 6. **obsidian.update_note** - Update with replace/append/prepend/insert modes (scoped-write)
+
+**MCP Integration:**
+
+-   Dynamic tool registration from MCP servers
+-   Support for MCP resources and capabilities
+-   Unified permission management for MCP tools
 
 ### Tool Enablement
 
@@ -219,52 +232,56 @@ Control which tools an agent can access using the `tools` field:
 ---
 name: Read-Only Agent
 tools:
-  "*": false                      # Disable all tools by default
-  obsidian.search_vault: true     # Enable specific tools
-  obsidian.read_note: true
-  obsidian.list_notes: true
+    "*": false # Disable all tools by default
+    obsidian.search_vault: true # Enable specific tools
+    obsidian.read_note: true
+    obsidian.list_notes: true
 ---
 ```
 
 ### Tool Patterns
 
 **Enable all tools** (default):
+
 ```yaml
 tools:
-  "*": true
+    "*": true
 ```
 
 **Disable all tools**:
+
 ```yaml
 tools:
-  "*": false
+    "*": false
 ```
 
 **Enable specific tools only**:
+
 ```yaml
 tools:
-  "*": false
-  obsidian.read_note: true
-  obsidian.search_vault: true
+    "*": false
+    obsidian.read_note: true
+    obsidian.search_vault: true
 ```
 
 **Disable specific tools**:
+
 ```yaml
 tools:
-  "*": true
-  obsidian.update_note: false
-  obsidian.create_note: false
+    "*": true
+    obsidian.update_note: false
+    obsidian.create_note: false
 ```
 
 ### Permission Levels
 
 Tool execution is gated by permission levels configured in plugin settings:
 
-- **read-only**: No approval needed for read operations
-- **scoped-write**: Requires user approval for writes to specific paths
-- **full-write**: Requires approval for any write operation
+-   **read-only**: No approval needed for read operations
+-   **scoped-write**: Requires user approval for writes to specific paths
+-   **full-write**: Requires approval for any write operation
 
-Agent tool configuration works in conjunction with these permission levels.
+**MCP Tools**: MCP tools are dynamically registered and follow the same permission model as core tools, with read-only access by default.
 
 ## Model Overrides
 
@@ -276,26 +293,28 @@ Agents can override the default model configuration:
 ---
 name: Fast Responder
 model:
-  providerID: anthropic
-  modelID: claude-3-haiku-20240307
+    providerID: anthropic
+    modelID: claude-3-haiku-20240307
 ---
 ```
 
 ### Provider IDs
 
 Common provider identifiers:
-- `anthropic` - Anthropic (Claude models)
-- `openai` - OpenAI (GPT models)
-- Custom provider IDs from OpenCode Server configuration
+
+-   `anthropic` - Anthropic (Claude models)
+-   `openai` - OpenAI (GPT models)
+-   Custom provider IDs from OpenCode Server configuration
 
 ### Model IDs
 
 Examples of model identifiers:
-- `claude-3-5-sonnet-20241022` - Claude 3.5 Sonnet
-- `claude-3-opus-20240229` - Claude 3 Opus
-- `claude-3-haiku-20240307` - Claude 3 Haiku
-- `gpt-4` - GPT-4
-- `gpt-3.5-turbo` - GPT-3.5 Turbo
+
+-   `claude-3-5-sonnet-20241022` - Claude 3.5 Sonnet
+-   `claude-3-opus-20240229` - Claude 3 Opus
+-   `claude-3-haiku-20240307` - Claude 3 Haiku
+-   `gpt-4` - GPT-4
+-   `gpt-3.5-turbo` - GPT-3.5 Turbo
 
 ## Agent Selection
 
@@ -313,7 +332,7 @@ Agents can be selected in the plugin settings or during conversation:
 The default agent is specified in settings:
 
 ```typescript
-settings.agent = "docs"  // Agent ID
+settings.agent = "docs"; // Agent ID
 ```
 
 ## Best Practices
@@ -330,18 +349,20 @@ You are a research assistant specialized in academic literature review.
 
 ```markdown
 Use this agent when:
-- Conducting literature reviews
-- Summarizing research papers
-- Identifying research gaps
+
+-   Conducting literature reviews
+-   Summarizing research papers
+-   Identifying research gaps
 ```
 
 **Set Boundaries**: Define what the agent should NOT do.
 
 ```markdown
 Do not:
-- Make up citations or references
-- Provide medical advice
-- Generate content outside your expertise
+
+-   Make up citations or references
+-   Provide medical advice
+-   Generate content outside your expertise
 ```
 
 ### Tool Configuration Best Practices
@@ -351,10 +372,10 @@ Do not:
 ```yaml
 # Research agent only needs read access
 tools:
-  "*": false
-  obsidian.search_vault: true
-  obsidian.read_note: true
-  obsidian.get_note_metadata: true
+    "*": false
+    obsidian.search_vault: true
+    obsidian.read_note: true
+    obsidian.get_note_metadata: true
 ```
 
 **Write-Enabled Agents**: Be explicit about write permissions.
@@ -362,10 +383,10 @@ tools:
 ```yaml
 # Documentation agent needs write access
 tools:
-  "*": false
-  obsidian.read_note: true
-  obsidian.create_note: true
-  obsidian.update_note: true
+    "*": false
+    obsidian.read_note: true
+    obsidian.create_note: true
+    obsidian.update_note: true
 ```
 
 ### Skill Organization
@@ -384,14 +405,16 @@ tools:
 ### Naming Conventions
 
 **Agent Files**: Use descriptive, lowercase names with hyphens.
-- `docs-writer.md` ✓
-- `research-assistant.md` ✓
-- `DocsWriter.md` ✗
+
+-   `docs-writer.md` ✓
+-   `research-assistant.md` ✓
+-   `DocsWriter.md` ✗
 
 **Agent Names**: Use clear, descriptive display names.
-- "Documentation Writer" ✓
-- "Research Assistant" ✓
-- "Agent 1" ✗
+
+-   "Documentation Writer" ✓
+-   "Research Assistant" ✓
+-   "Agent 1" ✗
 
 ## Examples
 
@@ -403,33 +426,34 @@ name: Documentation Writer
 description: Specialized agent for creating and maintaining documentation
 color: "#38A3EE"
 model:
-  providerID: anthropic
-  modelID: claude-3-5-sonnet-20241022
+    providerID: anthropic
+    modelID: claude-3-5-sonnet-20241022
 tools:
-  "*": false
-  obsidian.read_note: true
-  obsidian.search_vault: true
-  obsidian.create_note: true
-  obsidian.update_note: true
+    "*": false
+    obsidian.read_note: true
+    obsidian.search_vault: true
+    obsidian.create_note: true
+    obsidian.update_note: true
 skills:
-  - markdown-formatting
-  - technical-writing
+    - markdown-formatting
+    - technical-writing
 ---
 
 You are a documentation specialist focused on creating clear, comprehensive documentation.
 
 Your responsibilities:
-- Write clear, concise documentation
-- Follow markdown best practices
-- Maintain consistent formatting
-- Include relevant examples
-- Update existing documentation when needed
+
+-   Write clear, concise documentation
+-   Follow markdown best practices
+-   Maintain consistent formatting
+-   Include relevant examples
+-   Update existing documentation when needed
 
 When writing documentation:
+
 1. Start with a clear overview
 2. Use proper heading hierarchy
 3. Include code examples where appropriate
 4. Add links to related documentation
 5. Keep language simple and accessible
 ```
-

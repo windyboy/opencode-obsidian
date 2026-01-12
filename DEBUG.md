@@ -63,14 +63,17 @@ pnpm run dev
 在控制台中运行：
 
 ```javascript
-// 检查插件是否加载
-app.plugins.plugins["opencode-obsidian"];
-
-// 查看插件实例
-app.plugins.plugins["opencode-obsidian"].openCodeClient;
+const plugin = app.plugins.plugins["opencode-obsidian"];
+console.log("OpenCode Client:", plugin.openCodeClient);
 
 // 检查连接状态
-app.plugins.plugins["opencode-obsidian"].openCodeClient.isConnected;
+console.log("Connection Status:", plugin.openCodeClient.isConnected);
+
+// 查看任务编排器状态
+console.log("Orchestrator:", plugin.agentOrchestrator);
+
+// 查看 MCP 管理器状态
+console.log("MCP Manager:", plugin.mcpManager);
 ```
 
 ## VS Code 调试配置
@@ -114,7 +117,7 @@ console.log("Server URL:", plugin.settings.serverUrl);
 console.log("Is Connected:", plugin.openCodeClient.isConnected);
 
 // 手动连接测试
-plugin.connectToOpenCode();
+plugin.openCodeClient.connect();
 ```
 
 ### 查看插件设置
