@@ -59,7 +59,11 @@ export class OpenCodeObsidianView extends ItemView {
 		container.addClass("opencode-obsidian-view");
 
 		this.renderView();
-		await this.loadConversations();
+		await this.loadConversations(); // 先加载本地会话（但不创建新会话）
+		
+		// 加载会话后立即更新 UI
+		this.updateConversationSelector();
+		this.updateMessages();
 
 		// Register OpenCode Server client callbacks if client is initialized
 		if (this.plugin.opencodeClient) {
@@ -90,8 +94,26 @@ export class OpenCodeObsidianView extends ItemView {
 			// Perform initial health check
 			await this.performHealthCheck();
 
+			// If server is healthy and connected, sync conversations from server
+			if (
+				this.plugin.opencodeClient.isConnected() &&
+				this.lastHealthCheckResult
+			) {
+				await this.syncConversationsFromServer();
+			} else {
+				// 如果服务器未连接或健康检查失败，且没有会话，创建新会话
+				if (this.conversations.length === 0) {
+					await this.createNewConversation();
+				}
+			}
+
 			// Start periodic health check
 			this.startPeriodicHealthCheck();
+		} else {
+			// 如果没有客户端，且没有会话，创建新会话
+			if (this.conversations.length === 0) {
+				await this.createNewConversation();
+			}
 		}
 	}
 
@@ -189,8 +211,6 @@ export class OpenCodeObsidianView extends ItemView {
 			const lastMessage =
 				targetConv.messages[targetConv.messages.length - 1];
 			if (lastMessage && lastMessage.role === "assistant") {
-				// Handle both incremental updates (delta) and full content (part.text)
-				// The SDK may send part.text as full content, not just the delta
 				const currentContent = lastMessage.content;
 				
 				// Filter out user message echo: if assistant message is empty and token matches the last user message, ignore it
@@ -202,27 +222,31 @@ export class OpenCodeObsidianView extends ItemView {
 					}
 				}
 				
-				
 				// If token equals current content, no update needed
 				if (token === currentContent) {
 					return;
 				}
 				
+				// Determine if token is full content or incremental update
 				// If token starts with current content, it's full content - replace it
+				// Otherwise, treat as incremental update and append
 				if (currentContent && token.startsWith(currentContent)) {
-					lastMessage.content = token;
-				} else if (currentContent && token.length >= currentContent.length) {
-					// Token is longer or equal - likely full content, replace
 					lastMessage.content = token;
 				} else {
 					// Incremental update - append
 					lastMessage.content += token;
 				}
-				// Incremental update - only update the message content, not entire view
-				this.updateMessages();
+				
+				// Use incremental update method to update only this message's content
+				// This avoids re-rendering the entire message list
+				this.updateMessageContent(lastMessage.id, lastMessage.content);
 			}
 
 			if (done) {
+				// When streaming is done, ensure final state is correct by updating messages
+				// This ensures any final formatting or structure is properly rendered
+				this.updateMessages();
+				
 				// Only update streaming status if this is the active conversation
 				const activeConv = this.getActiveConversation();
 				if (activeConv && activeConv.sessionId === sessionId) {
@@ -535,33 +559,116 @@ export class OpenCodeObsidianView extends ItemView {
 			return;
 		}
 
-		const selectContainer = container.createDiv(
-			"opencode-obsidian-conversation-select-container",
+		const tabsContainer = container.createDiv(
+			"opencode-obsidian-tabs-container",
 		);
-		const select = selectContainer.createEl("select", {
-			cls: "opencode-obsidian-conversation-select",
-		});
 
+		// Create tabs for each conversation
 		this.conversations.forEach((conv) => {
-			const option = select.createEl("option", {
-				value: conv.id,
-				text: conv.title,
-			});
+			const tab = tabsContainer.createDiv("opencode-obsidian-tab");
+			tab.setAttribute("data-conversation-id", conv.id);
+
 			if (conv.id === this.activeConversationId) {
-				option.selected = true;
+				tab.addClass("active");
 			}
+
+			// Tab title
+			const title = tab.createSpan("opencode-obsidian-tab-title");
+			title.textContent = conv.title;
+			// Add tooltip to show full title when truncated
+			tab.setAttribute("title", conv.title);
+
+			// Double-click to edit title
+			let isEditing = false;
+			title.ondblclick = (e) => {
+				e.stopPropagation();
+				if (isEditing) return;
+				isEditing = true;
+
+				const input = document.createElement("input");
+				input.type = "text";
+				input.value = conv.title;
+				input.className = "opencode-obsidian-tab-title-edit";
+				input.style.width = `${title.offsetWidth}px`;
+				input.style.minWidth = "120px";
+				input.style.maxWidth = "300px";
+
+				// Replace title with input
+				title.style.display = "none";
+				tab.insertBefore(input, title);
+
+				// Focus and select
+				input.focus();
+				input.select();
+
+				// Handle save
+				const saveTitle = async () => {
+					const newTitle = input.value.trim();
+					if (newTitle && newTitle !== conv.title) {
+						await this.renameConversation(conv.id, newTitle);
+					}
+					input.remove();
+					title.style.display = "";
+					isEditing = false;
+				};
+
+				// Handle cancel
+				const cancelEdit = () => {
+					input.remove();
+					title.style.display = "";
+					isEditing = false;
+				};
+
+				input.onblur = () => {
+					setTimeout(saveTitle, 200); // Delay to allow click events
+				};
+
+				input.onkeydown = (e) => {
+					if (e.key === "Enter") {
+						e.preventDefault();
+						e.stopPropagation();
+						void saveTitle();
+					} else if (e.key === "Escape") {
+						e.preventDefault();
+						e.stopPropagation();
+						cancelEdit();
+					}
+				};
+			};
+
+			// Close button (shown on hover)
+			const closeBtn = tab.createSpan("opencode-obsidian-tab-close");
+			closeBtn.textContent = "×";
+			closeBtn.setAttribute("title", "Delete conversation");
+
+			// Prevent event bubbling when clicking close button
+			closeBtn.onclick = (e) => {
+				e.stopPropagation();
+				void this.deleteConversation(conv.id);
+			};
+
+			// Right-click for context menu
+			tab.oncontextmenu = (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.showConversationContextMenu(tab, conv.id, e);
+			};
+
+			// Click tab to switch conversation
+			tab.onclick = () => {
+				if (!isEditing) {
+					void this.switchConversation(conv.id);
+				}
+			};
 		});
 
-		select.onchange = async () => {
-			await this.switchConversation(select.value);
+		// New conversation button
+		const newTab = tabsContainer.createDiv("opencode-obsidian-tab opencode-obsidian-tab-new");
+		newTab.textContent = "+";
+		newTab.setAttribute("title", "New conversation");
+		newTab.onclick = () => {
+			void this.createNewConversation();
 		};
-
-		// Add provider selector for active conversation
-		const activeConv = this.getActiveConversation();
-		if (activeConv) {
-			// TODO: Provider selection should be handled by OpenCode Server
-			// Providers are managed server-side, not in the plugin
-		}
 	}
 
 	private renderMessages(container: HTMLElement) {
@@ -989,7 +1096,13 @@ export class OpenCodeObsidianView extends ItemView {
 			const saved = (await this.plugin.loadData()) as {
 				conversations?: Conversation[];
 				activeConversationId?: string;
+				sessionIds?: string[]; // 保存所有使用过的 sessionId
 			} | null;
+
+			console.debug(
+				"[OpenCodeObsidianView] Loading conversations from local storage:",
+				saved,
+			);
 
 			const conversations = saved?.conversations;
 			if (
@@ -998,10 +1111,12 @@ export class OpenCodeObsidianView extends ItemView {
 				conversations.length > 0
 			) {
 				this.conversations = conversations;
+				console.debug(
+					`[OpenCodeObsidianView] Loaded ${this.conversations.length} conversations from local storage`,
+				);
 				// Restore active conversation if it exists
 				if (this.conversations.length > 0) {
 					// Try to restore the last active conversation, or use the first one
-
 					const lastActiveId = saved?.activeConversationId;
 					if (
 						lastActiveId &&
@@ -1009,19 +1124,25 @@ export class OpenCodeObsidianView extends ItemView {
 						this.conversations.find((c) => c.id === lastActiveId)
 					) {
 						this.activeConversationId = lastActiveId;
+						console.debug(
+							`[OpenCodeObsidianView] Restored active conversation: ${lastActiveId}`,
+						);
 					} else {
 						const firstConv = this.conversations[0];
 						if (firstConv) {
 							this.activeConversationId = firstConv.id;
+							console.debug(
+								`[OpenCodeObsidianView] Set first conversation as active: ${firstConv.id}`,
+							);
 						}
 					}
 				}
 			} else {
-				// No saved conversations, create a default one
-				if (this.conversations.length === 0) {
-					await this.createNewConversation();
-				}
+				console.debug(
+					"[OpenCodeObsidianView] No conversations found in local storage",
+				);
 			}
+			// 不要在这里创建新会话，等待服务器同步
 		} catch (error) {
 			this.plugin.errorHandler.handleError(
 				error,
@@ -1032,10 +1153,11 @@ export class OpenCodeObsidianView extends ItemView {
 				},
 				ErrorSeverity.Warning,
 			);
-			// Fallback: create a default conversation
-			if (this.conversations.length === 0) {
-				await this.createNewConversation();
-			}
+			console.debug(
+				"[OpenCodeObsidianView] Error loading conversations:",
+				error,
+			);
+			// 出错时也不创建新会话
 		}
 	}
 
@@ -1045,10 +1167,17 @@ export class OpenCodeObsidianView extends ItemView {
 				string,
 				unknown
 			> | null;
+
+			// 收集所有 sessionId
+			const sessionIds = this.conversations
+				.map((c) => c.sessionId)
+				.filter((id): id is string => id !== null && id !== undefined);
+
 			const dataToSave = {
 				...(currentData || {}),
 				conversations: this.conversations,
 				activeConversationId: this.activeConversationId,
+				sessionIds: sessionIds, // 保存所有 sessionId
 			};
 			await this.plugin.saveData(dataToSave);
 		} catch (error) {
@@ -1068,7 +1197,7 @@ export class OpenCodeObsidianView extends ItemView {
 		// TODO: Provider selection should be handled by OpenCode Server
 		const conversation: Conversation = {
 			id: `conv-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-			title: `Chat ${new Date().toLocaleString()}`,
+			title: "New Chat",
 			messages: [],
 			createdAt: Date.now(),
 			updatedAt: Date.now(),
@@ -1090,12 +1219,155 @@ export class OpenCodeObsidianView extends ItemView {
 		this.updateMessages();
 	}
 
+	/**
+	 * Rename a conversation
+	 */
+	private async renameConversation(
+		conversationId: string,
+		newTitle: string,
+	): Promise<void> {
+		const conversation = this.conversations.find(
+			(c) => c.id === conversationId,
+		);
+		if (!conversation) return;
+
+		const trimmedTitle = newTitle.trim();
+		if (!trimmedTitle) {
+			new Notice("Title cannot be empty");
+			return;
+		}
+
+		// Limit title length
+		const finalTitle =
+			trimmedTitle.length > 100
+				? trimmedTitle.substring(0, 97) + "..."
+				: trimmedTitle;
+
+		conversation.title = finalTitle;
+		conversation.updatedAt = Date.now();
+
+		// If server supports updating session title, sync it
+		// Note: This would require OpenCode Server API support
+		if (conversation.sessionId && this.plugin.opencodeClient?.isConnected()) {
+			// TODO: If OpenCode Server supports updating session title, do it here
+			// await this.plugin.opencodeClient.updateSessionTitle(conversation.sessionId, finalTitle);
+		}
+
+		await this.saveConversations();
+		this.updateConversationSelector();
+	}
+
+	private async deleteConversation(conversationId: string) {
+		// Find the conversation index
+		const convIndex = this.conversations.findIndex(
+			(c) => c.id === conversationId,
+		);
+		if (convIndex === -1) return;
+
+		const conversation = this.conversations[convIndex];
+		if (!conversation) return;
+
+		// Show confirmation dialog
+		new ConfirmationModal(
+			this.app,
+			"Delete conversation?",
+			`Are you sure you want to delete "${conversation.title}"? This action cannot be undone.`,
+			async () => {
+				const wasActive = conversationId === this.activeConversationId;
+
+				// Remove the conversation
+				this.conversations.splice(convIndex, 1);
+
+				// Handle active conversation
+				if (wasActive) {
+					if (this.conversations.length > 0) {
+						// Switch to another conversation (prefer the one at the same index, or the first one)
+						const newIndex = Math.min(
+							convIndex,
+							this.conversations.length - 1,
+						);
+						this.activeConversationId =
+							this.conversations[newIndex]?.id ?? null;
+					} else {
+						// No conversations left, create a new one
+						this.activeConversationId = null;
+						await this.createNewConversation();
+						return;
+					}
+				}
+
+				await this.saveConversations();
+				this.updateConversationSelector();
+				this.updateMessages();
+			},
+		).open();
+	}
+
 	private getActiveConversation(): Conversation | null {
 		return (
 			this.conversations.find(
 				(c) => c.id === this.activeConversationId,
 			) || null
 		);
+	}
+
+	/**
+	 * Generate a title for a conversation using AI
+	 * Falls back to extracting from first user message if AI generation fails
+	 */
+	private async generateConversationTitle(
+		conversationId: string,
+	): Promise<void> {
+		const conversation = this.conversations.find(
+			(c) => c.id === conversationId,
+		);
+		if (!conversation || conversation.messages.length < 2) {
+			return;
+		}
+
+		// Skip if title is already generated (not default)
+		if (
+			conversation.title !== "New Chat" &&
+			!conversation.title.startsWith("Chat ")
+		) {
+			return;
+		}
+
+		// Skip if no OpenCode Server client
+		if (!this.plugin.opencodeClient?.isConnected()) {
+			// Fallback: extract from first message
+			this.generateTitleFromFirstMessage(conversation);
+			return;
+		}
+
+		// For now, use simple extraction from first user message
+		// AI generation would require a separate API call which might interfere with normal flow
+		// TODO: Implement proper AI title generation when OpenCode Server supports it
+		this.generateTitleFromFirstMessage(conversation);
+	}
+
+	/**
+	 * Generate title from first user message (fallback method)
+	 */
+	private generateTitleFromFirstMessage(conversation: Conversation): void {
+		const firstUserMessage = conversation.messages.find(
+			(m) => m.role === "user",
+		);
+		if (firstUserMessage) {
+			// Extract first line or first 50 characters
+			const content = firstUserMessage.content.trim();
+			const firstLine = content.split("\n")[0] ?? "";
+			const fallbackTitle = firstLine.substring(0, 50).trim();
+
+			if (fallbackTitle) {
+				conversation.title =
+					fallbackTitle.length > 50
+						? fallbackTitle.substring(0, 47) + "..."
+						: fallbackTitle;
+				void this.saveConversations();
+				this.updateConversationSelector();
+			}
+		}
 	}
 
 	private async sendMessage(content: string): Promise<void> {
@@ -1338,6 +1610,19 @@ export class OpenCodeObsidianView extends ItemView {
 				activeConv.updatedAt = Date.now();
 				await this.saveConversations();
 				this.updateMessages();
+
+				// Trigger title generation if needed
+				// Only generate if there are at least 2 messages and title is still default
+				if (
+					activeConv.messages.length >= 2 &&
+					(activeConv.title === "New Chat" ||
+						activeConv.title.startsWith("Chat "))
+				) {
+					// Use debounce to avoid generating title multiple times
+					setTimeout(() => {
+						void this.generateConversationTitle(activeConv.id);
+					}, 1000);
+				}
 			}
 		}
 	}
@@ -1674,29 +1959,323 @@ export class OpenCodeObsidianView extends ItemView {
 		}
 	}
 
+	/**
+	 * Incrementally update a single message's content without re-rendering the entire message list.
+	 * This is used during streaming to update only the message being streamed.
+	 */
 	private updateMessageContent(messageId: string, content: string) {
 		const messageEl = this.containerEl.querySelector(
 			`[data-message-id="${messageId}"]`,
 		) as HTMLElement;
-		if (messageEl) {
-			const contentEl = messageEl.querySelector(
-				".opencode-obsidian-message-content",
-			) as HTMLElement;
-			if (contentEl) {
-				// Clear existing content
-				contentEl.empty();
-				// Render new content
-				this.renderMessageContent(contentEl, content);
-				// Auto-scroll to bottom
-				const messagesContainer = this.containerEl.querySelector(
-					".opencode-obsidian-messages",
-				) as HTMLElement;
-				if (messagesContainer) {
-					messagesContainer.scrollTop =
-						messagesContainer.scrollHeight;
+		if (!messageEl) {
+			// Message element doesn't exist yet, fallback to full update
+			// This can happen if the message was just created
+			this.updateMessages();
+			return;
+		}
+
+		const contentEl = messageEl.querySelector(
+			".opencode-obsidian-message-content",
+		) as HTMLElement;
+		if (!contentEl) {
+			// Content element doesn't exist, fallback to full update
+			this.updateMessages();
+			return;
+		}
+
+		// Clear existing content and render new content
+		// During streaming, this will update the message as tokens arrive
+		contentEl.empty();
+		this.renderMessageContent(contentEl, content);
+
+		// Auto-scroll to bottom to keep the latest content visible
+		const messagesContainer = this.containerEl.querySelector(
+			".opencode-obsidian-messages",
+		) as HTMLElement;
+		if (messagesContainer) {
+			// Use requestAnimationFrame to ensure smooth scrolling during rapid updates
+			requestAnimationFrame(() => {
+				messagesContainer.scrollTop = messagesContainer.scrollHeight;
+			});
+		}
+	}
+
+	/**
+	 * Export conversation to Markdown file
+	 */
+	private async exportConversation(conversationId: string): Promise<void> {
+		const conversation = this.conversations.find(
+			(c) => c.id === conversationId,
+		);
+		if (!conversation) {
+			new Notice("Conversation not found");
+			return;
+		}
+
+		try {
+			// Format conversation as Markdown
+			const lines: string[] = [];
+
+			// Header
+			lines.push(`# ${conversation.title}`);
+			lines.push("");
+			lines.push(`**Created:** ${new Date(conversation.createdAt).toLocaleString()}`);
+			lines.push(`**Last Updated:** ${new Date(conversation.updatedAt).toLocaleString()}`);
+			if (conversation.sessionId) {
+				lines.push(`**Session ID:** ${conversation.sessionId}`);
+			}
+			lines.push("");
+			lines.push("---");
+			lines.push("");
+
+			// Messages
+			lines.push("## Messages");
+			lines.push("");
+
+			for (const message of conversation.messages) {
+				const timestamp = new Date(message.timestamp).toLocaleString();
+				lines.push(`### ${message.role === "user" ? "User" : "Assistant"} - ${timestamp}`);
+				lines.push("");
+				lines.push(message.content);
+				lines.push("");
+
+				// Add images if present
+				if (message.images && message.images.length > 0) {
+					for (const img of message.images) {
+						lines.push(`![${img.name || "Image"}](${img.data.substring(0, 50)}...)`);
+						lines.push("");
+					}
 				}
 			}
+
+			const markdownContent = lines.join("\n");
+
+			// Generate filename
+			const sanitizedTitle = conversation.title
+				.replace(/[<>:"/\\|?*]/g, "_")
+				.substring(0, 50);
+			const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+			const filename = `${sanitizedTitle}-${timestamp}.md`;
+
+			// Save to vault
+			const exportPath = `Exports/${filename}`;
+			await this.app.vault.createFolder("Exports").catch(() => {
+				// Folder might already exist
+			});
+
+			await this.app.vault.create(exportPath, markdownContent);
+
+			new Notice(`Conversation exported to ${exportPath}`);
+		} catch (error) {
+			this.plugin.errorHandler.handleError(
+				error,
+				{
+					module: "OpenCodeObsidianView",
+					function: "exportConversation",
+					operation: "Exporting conversation",
+				},
+				ErrorSeverity.Warning,
+			);
+			const errorMessage =
+				error instanceof Error ? error.message : "Unknown error";
+			new Notice(`Failed to export conversation: ${errorMessage}`);
 		}
+	}
+
+	/**
+	 * Sync conversations from OpenCode Server
+	 * Note: This requires OpenCode Server to support listing sessions
+	 */
+	private async syncConversationsFromServer(): Promise<void> {
+		if (!this.plugin.opencodeClient?.isConnected()) {
+			// 如果服务器未连接，且没有会话，创建新会话
+			if (this.conversations.length === 0) {
+				await this.createNewConversation();
+			}
+			return;
+		}
+
+		try {
+			// 1. 从本地存储获取所有保存的 sessionId
+			const saved = (await this.plugin.loadData()) as {
+				sessionIds?: string[];
+			} | null;
+
+			const savedSessionIds = saved?.sessionIds || [];
+			const existingSessionIds = new Set(
+				this.conversations
+					.map((c) => c.sessionId)
+					.filter((id): id is string => id !== null && id !== undefined),
+			);
+
+			// 2. 尝试从服务器恢复所有保存的 sessionId
+			const restoredConversations: Conversation[] = [];
+
+			for (const sessionId of savedSessionIds) {
+				// 如果这个 sessionId 已经在 conversations 中，跳过
+				if (existingSessionIds.has(sessionId)) {
+					continue;
+				}
+
+				try {
+					// 尝试从服务器获取会话
+					const exists = await this.plugin.opencodeClient.ensureSession(
+						sessionId,
+					);
+					if (exists) {
+						// 会话存在，创建本地会话对象
+						const restoredConv: Conversation = {
+							id: `conv-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+							title: `Restored Session`,
+							messages: [], // 消息历史需要从服务器获取（如果 API 支持）
+							createdAt: Date.now(),
+							updatedAt: Date.now(),
+							sessionId: sessionId,
+						};
+						restoredConversations.push(restoredConv);
+						console.debug(
+							`[OpenCodeObsidianView] Restored session ${sessionId} from server`,
+						);
+					}
+				} catch (error) {
+					// 会话不存在或无法访问，跳过
+					console.debug(
+						`[OpenCodeObsidianView] Could not restore session ${sessionId}:`,
+						error,
+					);
+				}
+			}
+
+			// 3. 将恢复的会话添加到列表
+			if (restoredConversations.length > 0) {
+				this.conversations.unshift(...restoredConversations);
+				// 如果没有活跃会话，设置第一个恢复的会话为活跃
+				if (!this.activeConversationId && this.conversations.length > 0) {
+					this.activeConversationId = this.conversations[0]?.id ?? null;
+				}
+				await this.saveConversations();
+				this.updateConversationSelector();
+				this.updateMessages();
+			}
+
+			// 4. 验证现有会话是否仍然存在
+			for (const conv of this.conversations) {
+				if (conv.sessionId) {
+					try {
+						const exists = await this.plugin.opencodeClient.ensureSession(
+							conv.sessionId,
+						);
+						if (!exists) {
+							console.debug(
+								`[OpenCodeObsidianView] Session ${conv.sessionId} no longer exists on server`,
+							);
+						}
+					} catch (error) {
+						console.debug(
+							`[OpenCodeObsidianView] Could not verify session ${conv.sessionId}:`,
+							error,
+						);
+					}
+				}
+			}
+
+			// 5. 如果同步后还是没有会话，创建新会话
+			if (this.conversations.length === 0) {
+				await this.createNewConversation();
+			}
+
+			console.debug(
+				`[OpenCodeObsidianView] Conversation sync completed. Total: ${this.conversations.length}`,
+			);
+		} catch (error) {
+			this.plugin.errorHandler.handleError(
+				error,
+				{
+					module: "OpenCodeObsidianView",
+					function: "syncConversationsFromServer",
+					operation: "Syncing conversations from server",
+				},
+				ErrorSeverity.Warning,
+			);
+			// 如果同步失败，且没有会话，创建新会话
+			if (this.conversations.length === 0) {
+				await this.createNewConversation();
+			}
+		}
+	}
+
+	/**
+	 * Show context menu for conversation tab
+	 */
+	private showConversationContextMenu(
+		tab: HTMLElement,
+		conversationId: string,
+		event: MouseEvent,
+	): void {
+		// Remove existing menu if any
+		const existingMenu = document.querySelector(
+			".opencode-obsidian-context-menu",
+		);
+		if (existingMenu) {
+			existingMenu.remove();
+		}
+
+		const conversation = this.conversations.find(
+			(c) => c.id === conversationId,
+		);
+		if (!conversation) return;
+
+		const menu = document.createElement("div");
+		menu.className = "opencode-obsidian-context-menu";
+		menu.style.position = "fixed";
+		menu.style.left = `${event.clientX}px`;
+		menu.style.top = `${event.clientY}px`;
+		menu.style.zIndex = "10000";
+
+		// Rename option
+		const renameItem = menu.createDiv("opencode-obsidian-context-menu-item");
+		renameItem.textContent = "Rename";
+		renameItem.onclick = async () => {
+			menu.remove();
+			// Trigger edit mode by simulating double-click
+			const titleEl = tab.querySelector(
+				".opencode-obsidian-tab-title",
+			) as HTMLElement;
+			if (titleEl) {
+				titleEl.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+			}
+		};
+
+		// Export option
+		const exportItem = menu.createDiv("opencode-obsidian-context-menu-item");
+		exportItem.textContent = "Export";
+		exportItem.onclick = () => {
+			menu.remove();
+			void this.exportConversation(conversationId);
+		};
+
+		// Delete option
+		const deleteItem = menu.createDiv("opencode-obsidian-context-menu-item");
+		deleteItem.textContent = "Delete";
+		deleteItem.addClass("opencode-obsidian-context-menu-item-danger");
+		deleteItem.onclick = () => {
+			menu.remove();
+			void this.deleteConversation(conversationId);
+		};
+
+		document.body.appendChild(menu);
+
+		// Close menu when clicking outside
+		const closeMenu = (e: MouseEvent) => {
+			if (!menu.contains(e.target as Node)) {
+				menu.remove();
+				document.removeEventListener("click", closeMenu);
+			}
+		};
+
+		setTimeout(() => {
+			document.addEventListener("click", closeMenu);
+		}, 0);
 	}
 
 	// TODO: Model display methods removed - models are managed by OpenCode Server
