@@ -24,3 +24,6 @@ data.json
 
 # reference repo
 ref/
+
+# Cursor IDE
+.cursor/debug.log

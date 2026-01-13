@@ -138,35 +138,31 @@ The `OpenCodeObsidianPlugin` class extends Obsidian's `Plugin` class and serves 
 
 **Responsibility**: HTTP + SSE communication with OpenCode Server runtime
 
--   **OpenCodeServerClient**: Manages HTTP requests and SSE event streaming
-    -   HTTP request handling for session/message operations
-    -   SSE connection management with auto-reconnect (background event loop)
-    -   Session management (start, message, abort)
-    -   Stream token/thinking/progress handling via SSE
-    -   `createClient` helper mirrors opencode-web SDK client creation
+-   **OpenCodeServerClient**: Obsidian wrapper for `@opencode-ai/sdk/client`
+    -   Session management (create, get, abort)
+    -   Message sending with streaming support
+    -   SSE event stream handling with auto-reconnect
+    -   Obsidian `requestUrl` API adapter for custom fetch
+    -   Event callback system for UI integration
 
 **Key Features**:
 
--   HTTP + SSE connection with reconnection logic
--   `connect()` is non-blocking; it starts the SSE loop and returns immediately
--   HTTP API for client → server (POST /session, /session/{id}/message, /session/{id}/abort)
--   SSE events for server → client (message.part.updated, session.status, session.error, session.idle)
--   Tool execution coordination with Obsidian tools
--   Permission modal integration for write operations
--   Callback-based event system (to be replaced with event bus)
+-   Based on official `@opencode-ai/sdk/client` SDK
+-   Non-blocking `connect()` - starts SSE loop in background
+-   Automatic reconnection with exponential backoff
+-   Local session caching to reduce server requests
+-   Support for both Node.js and SDK event streams
+-   Comprehensive error handling with user-friendly messages
 
-**HTTP API Endpoints**:
+**API Methods**:
 
--   POST /session - Start a new session
--   POST /session/{id}/message - Send a message to a session
--   POST /session/{id}/abort - Interrupt/stop a session
+-   Connection: `connect()`, `disconnect()`, `getConnectionState()`, `isConnected()`
+-   Sessions: `createSession()`, `startSession()`, `ensureSession()`, `abortSession()`
+-   Messages: `sendMessage()`, `sendSessionMessage()`
+-   Events: `onStreamToken()`, `onStreamThinking()`, `onError()`, `onProgressUpdate()`, `onSessionEnd()`
+-   Health: `healthCheck()`
 
-**SSE Events**:
-
--   message.part.updated - Stream text/reasoning content
--   session.status - Session status updates
--   session.error - Session errors
--   session.idle - Session ended
+**See Also**: `docs/CLIENT.md` for detailed usage and API documentation
 
 #### 8. Agent Orchestrator (`src/orchestrator/agent-orchestrator.ts`)
 

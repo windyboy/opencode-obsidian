@@ -1,4 +1,4 @@
-import {
+﻿import {
 	ItemView,
 	WorkspaceLeaf,
 	Notice,
@@ -169,9 +169,6 @@ export class OpenCodeObsidianView extends ItemView {
 
 		// Stream token callback - append tokens to the current assistant message
 		this.plugin.opencodeClient.onStreamToken((sessionId, token, done) => {
-			// #region agent log
-			fetch('http://127.0.0.1:7244/ingest/cee3721f-acd3-48cd-bf4e-9190e480d32e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'opencode-obsidian-view.ts:171',message:'onStreamToken: callback invoked',data:{sessionId,tokenLength:token.length,tokenPreview:token.substring(0,200),done},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-			// #endregion
 			// Route by sessionId, not just active conversation
 			const targetConv =
 				this.findConversationBySessionId(sessionId) ||
@@ -191,9 +188,6 @@ export class OpenCodeObsidianView extends ItemView {
 			// Find the last assistant message and update content
 			const lastMessage =
 				targetConv.messages[targetConv.messages.length - 1];
-			// #region agent log
-			fetch('http://127.0.0.1:7244/ingest/cee3721f-acd3-48cd-bf4e-9190e480d32e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'opencode-obsidian-view.ts:189',message:'onStreamToken: found last message',data:{sessionId,hasLastMessage:!!lastMessage,lastMessageRole:lastMessage?.role,lastMessageContentLength:lastMessage?.content?.length,lastMessageContentPreview:lastMessage?.content?.substring(0,100),messagesCount:targetConv.messages.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-			// #endregion
 			if (lastMessage && lastMessage.role === "assistant") {
 				// Handle both incremental updates (delta) and full content (part.text)
 				// The SDK may send part.text as full content, not just the delta
@@ -204,16 +198,10 @@ export class OpenCodeObsidianView extends ItemView {
 				if (!currentContent && targetConv.messages.length >= 2) {
 					const lastUserMessage = targetConv.messages[targetConv.messages.length - 2];
 					if (lastUserMessage && lastUserMessage.role === "user" && token === lastUserMessage.content) {
-						// #region agent log
-						fetch('http://127.0.0.1:7244/ingest/cee3721f-acd3-48cd-bf4e-9190e480d32e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'opencode-obsidian-view.ts:196',message:'onStreamToken: ignoring user message echo',data:{sessionId,tokenLength:token.length,tokenPreview:token.substring(0,100),userMessageContent:lastUserMessage.content},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
-						// #endregion
 						return;
 					}
 				}
 				
-				// #region agent log
-				fetch('http://127.0.0.1:7244/ingest/cee3721f-acd3-48cd-bf4e-9190e480d32e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'opencode-obsidian-view.ts:204',message:'onStreamToken: before content update',data:{sessionId,currentContentLength:currentContent.length,currentContentPreview:currentContent.substring(0,100),tokenLength:token.length,tokenPreview:token.substring(0,100),tokenEqualsCurrent:token === currentContent,tokenStartsWithCurrent:currentContent && token.startsWith(currentContent),tokenLonger:currentContent && token.length >= currentContent.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-				// #endregion
 				
 				// If token equals current content, no update needed
 				if (token === currentContent) {
@@ -230,9 +218,6 @@ export class OpenCodeObsidianView extends ItemView {
 					// Incremental update - append
 					lastMessage.content += token;
 				}
-				// #region agent log
-				fetch('http://127.0.0.1:7244/ingest/cee3721f-acd3-48cd-bf4e-9190e480d32e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'opencode-obsidian-view.ts:219',message:'onStreamToken: after content update',data:{sessionId,newContentLength:lastMessage.content.length,newContentPreview:lastMessage.content.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-				// #endregion
 				// Incremental update - only update the message content, not entire view
 				this.updateMessages();
 			}
@@ -1131,9 +1116,6 @@ export class OpenCodeObsidianView extends ItemView {
 			content,
 			timestamp: Date.now(),
 		};
-		// #region agent log
-		fetch('http://127.0.0.1:7244/ingest/cee3721f-acd3-48cd-bf4e-9190e480d32e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'opencode-obsidian-view.ts:1103',message:'sendMessage: adding user message',data:{contentLength:content.length,contentPreview:content.substring(0,200),sessionId:activeConv.sessionId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
-		// #endregion
 		activeConv.messages.push(userMessage);
 
 		// Create assistant message placeholder

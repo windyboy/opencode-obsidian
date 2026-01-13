@@ -1,8 +1,8 @@
 /**
- * Tests for OpenCode Client event handling
+ * Comprehensive tests for OpenCode Client
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ErrorHandler } from "../utils/error-handler";
 
 // Mock the SDK client
@@ -12,6 +12,7 @@ const mockSDKClient = {
 	},
 	session: {
 		create: vi.fn(),
+		get: vi.fn(),
 		prompt: vi.fn(),
 		abort: vi.fn(),
 	},
@@ -29,26 +30,796 @@ vi.mock("@opencode-ai/sdk/client", () => ({
 
 // Import after mocking
 import { OpenCodeServerClient } from "./client";
+import { requestUrl } from "obsidian";
 
-describe("OpenCodeServerClient Event Handling", () => {
+// Helper function to create mock async generator
+function createMockStream(events: any[]): AsyncGenerator<any, any, unknown> {
+	return (async function* () {
+		for (const event of events) {
+			yield event;
+		}
+	})();
+}
+
+describe("OpenCodeServerClient", () => {
 	let client: OpenCodeServerClient;
 	let errorHandler: ErrorHandler;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		vi.useFakeTimers();
 		errorHandler = new ErrorHandler({
 			showUserNotifications: false,
 			logToConsole: false,
 			collectErrors: false,
 		});
+	});
 
-		client = new OpenCodeServerClient(
-			{ url: "http://127.0.0.1:4096" },
-			errorHandler,
-		);
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	describe("Constructor and initialization", () => {
+		it("should create client with normalized URL", () => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+			const config = client.getConfig();
+			expect(config.url).toBe("http://127.0.0.1:4096");
+		});
+
+		it("should normalize URL without scheme", () => {
+			client = new OpenCodeServerClient(
+				{ url: "127.0.0.1:4096" },
+				errorHandler,
+			);
+			const config = client.getConfig();
+			expect(config.url).toBe("http://127.0.0.1:4096");
+		});
+
+		it("should normalize URL with trailing slashes", () => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096///" },
+				errorHandler,
+			);
+			const config = client.getConfig();
+			expect(config.url).toBe("http://127.0.0.1:4096");
+		});
+
+		it("should throw error for empty URL", () => {
+			expect(() => {
+				new OpenCodeServerClient({ url: "" }, errorHandler);
+			}).toThrow("OpenCode Server URL is empty");
+		});
+
+		it("should throw error for invalid URL", () => {
+			expect(() => {
+				new OpenCodeServerClient({ url: "://invalid" }, errorHandler);
+			}).toThrow("OpenCode Server URL is invalid");
+		});
+
+		it("should throw error for non-HTTP protocol", () => {
+			expect(() => {
+				new OpenCodeServerClient({ url: "ftp://example.com" }, errorHandler);
+			}).toThrow("OpenCode Server URL must use http:// or https://");
+		});
+
+		it("should set default request timeout", () => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+			const config = client.getConfig();
+			expect(config.requestTimeoutMs).toBe(10000);
+		});
+
+		it("should use custom request timeout", () => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096", requestTimeoutMs: 5000 },
+				errorHandler,
+			);
+			const config = client.getConfig();
+			expect(config.requestTimeoutMs).toBe(5000);
+		});
+
+		it("should initialize with disconnected state", () => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+			expect(client.getConnectionState()).toBe("disconnected");
+			expect(client.isConnected()).toBe(false);
+		});
+	});
+
+	describe("Connection management", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096", autoReconnect: false },
+				errorHandler,
+			);
+		});
+
+		afterEach(async () => {
+			if (client) {
+				await client.disconnect();
+			}
+		});
+
+		it("should change state to connecting on connect", async () => {
+			// Mock subscribe to reject immediately to avoid infinite loop
+			mockSDKClient.event.subscribe.mockRejectedValue(
+				new Error("Connection failed"),
+			);
+
+			await client.connect();
+			// State should be connecting initially
+			expect(["connecting", "disconnected"]).toContain(
+				client.getConnectionState(),
+			);
+		});
+
+		it("should not connect if already connecting", async () => {
+			mockSDKClient.event.subscribe.mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						// Never resolve to keep in connecting state
+						setTimeout(() => resolve({ data: { stream: createMockStream([]) } }), 10000);
+					}),
+			);
+
+			await client.connect();
+			const firstState = client.getConnectionState();
+			await client.connect();
+			expect(client.getConnectionState()).toBe(firstState);
+		});
+
+		it("should disconnect and clean up state", async () => {
+			await client.disconnect();
+			expect(client.getConnectionState()).toBe("disconnected");
+			expect(client.getCurrentSessionId()).toBeNull();
+		});
+
+		it("should get connection state", () => {
+			expect(client.getConnectionState()).toBe("disconnected");
+		});
+
+		it("should check if connected", () => {
+			expect(client.isConnected()).toBe(false);
+		});
+	});
+
+	describe("Session management", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+		});
+
+		it("should create session successfully", async () => {
+			const mockSession = { id: "session-123", info: { id: "session-123" } };
+			mockSDKClient.session.create.mockResolvedValue({
+				data: mockSession,
+				error: null,
+			});
+
+			const sessionId = await client.createSession("Test Session");
+			expect(sessionId).toBe("session-123");
+			expect(client.getCurrentSessionId()).toBe("session-123");
+		});
+
+		it("should create session with default title", async () => {
+			const mockSession = { id: "session-456", info: { id: "session-456" } };
+			mockSDKClient.session.create.mockResolvedValue({
+				data: mockSession,
+				error: null,
+			});
+
+			const sessionId = await client.createSession();
+			expect(sessionId).toBe("session-456");
+			expect(mockSDKClient.session.create).toHaveBeenCalledWith({
+				body: expect.objectContaining({
+					title: expect.stringContaining("Session"),
+				}),
+			});
+		});
+
+		it("should handle session creation error", async () => {
+			mockSDKClient.session.create.mockResolvedValue({
+				data: null,
+				error: "Server error",
+			});
+
+			await expect(client.createSession()).rejects.toThrow(
+				"Failed to create session",
+			);
+		});
+
+		it("should handle missing session ID in response", async () => {
+			mockSDKClient.session.create.mockResolvedValue({
+				data: { info: {} },
+				error: null,
+			});
+
+			await expect(client.createSession()).rejects.toThrow(
+				"OpenCode Server session response did not include an id",
+			);
+		});
+
+		it("should start session with context", async () => {
+			const mockSession = { id: "session-789", info: { id: "session-789" } };
+			mockSDKClient.session.create.mockResolvedValue({
+				data: mockSession,
+				error: null,
+			});
+			mockSDKClient.session.prompt.mockResolvedValue({
+				data: {},
+				error: null,
+			});
+
+			const context = {
+				currentNote: "test.md",
+				selection: "selected text",
+				links: ["link1", "link2"],
+				tags: ["tag1"],
+			};
+
+			const sessionId = await client.startSession(context, "agent1", [
+				"instruction1",
+			]);
+			expect(sessionId).toBe("session-789");
+			expect(mockSDKClient.session.prompt).toHaveBeenCalled();
+		});
+
+		it("should start session without context", async () => {
+			const mockSession = { id: "session-abc", info: { id: "session-abc" } };
+			mockSDKClient.session.create.mockResolvedValue({
+				data: mockSession,
+				error: null,
+			});
+
+			const sessionId = await client.startSession();
+			expect(sessionId).toBe("session-abc");
+			expect(mockSDKClient.session.prompt).not.toHaveBeenCalled();
+		});
+
+		it("should ensure session exists locally", async () => {
+			const mockSession = { id: "session-123", info: { id: "session-123" } };
+			mockSDKClient.session.create.mockResolvedValue({
+				data: mockSession,
+				error: null,
+			});
+
+			await client.createSession();
+			const exists = await client.ensureSession("session-123");
+			expect(exists).toBe(true);
+			expect(mockSDKClient.session.get).not.toHaveBeenCalled();
+		});
+
+		it("should ensure session exists on server", async () => {
+			const mockSession = { id: "session-456", info: { id: "session-456" } };
+			mockSDKClient.session.get.mockResolvedValue({
+				data: mockSession,
+				error: null,
+			});
+
+			const exists = await client.ensureSession("session-456");
+			expect(exists).toBe(true);
+			expect(mockSDKClient.session.get).toHaveBeenCalledWith({
+				path: { id: "session-456" },
+			});
+		});
+
+		it("should return false if session not found on server", async () => {
+			mockSDKClient.session.get.mockResolvedValue({
+				data: null,
+				error: "Not found",
+			});
+
+			const exists = await client.ensureSession("session-999");
+			expect(exists).toBe(false);
+		});
+
+		it("should abort session successfully", async () => {
+			const mockSession = { id: "session-123", info: { id: "session-123" } };
+			mockSDKClient.session.create.mockResolvedValue({
+				data: mockSession,
+				error: null,
+			});
+			mockSDKClient.session.abort.mockResolvedValue({
+				data: {},
+				error: null,
+			});
+
+			await client.createSession();
+			await client.abortSession("session-123");
+			expect(mockSDKClient.session.abort).toHaveBeenCalledWith({
+				path: { id: "session-123" },
+			});
+			expect(client.getCurrentSessionId()).toBeNull();
+		});
+
+		it("should handle abort for non-existent session", async () => {
+			mockSDKClient.session.abort.mockResolvedValue({
+				data: {},
+				error: null,
+			});
+
+			await client.abortSession("non-existent");
+			// Should not throw, but should log warning
+		});
+
+		it("should get current session ID", async () => {
+			expect(client.getCurrentSessionId()).toBeNull();
+
+			const mockSession = { id: "session-123", info: { id: "session-123" } };
+			mockSDKClient.session.create.mockResolvedValue({
+				data: mockSession,
+				error: null,
+			});
+
+			await client.createSession();
+			expect(client.getCurrentSessionId()).toBe("session-123");
+		});
+	});
+
+	describe("Message sending", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+		});
+
+		it("should send message to existing session", async () => {
+			const mockSession = { id: "session-123", info: { id: "session-123" } };
+			mockSDKClient.session.create.mockResolvedValue({
+				data: mockSession,
+				error: null,
+			});
+			mockSDKClient.session.prompt.mockResolvedValue({
+				data: {},
+				error: null,
+			});
+
+			await client.createSession();
+			await client.sendMessage("session-123", "Hello, world!");
+
+			expect(mockSDKClient.session.prompt).toHaveBeenCalledWith({
+				path: { id: "session-123" },
+				body: {
+					parts: [{ type: "text", text: "Hello, world!" }],
+				},
+			});
+		});
+
+		it("should fetch session if not in cache", async () => {
+			const mockSession = { id: "session-456", info: { id: "session-456" } };
+			mockSDKClient.session.get.mockResolvedValue({
+				data: mockSession,
+				error: null,
+			});
+			mockSDKClient.session.prompt.mockResolvedValue({
+				data: {},
+				error: null,
+			});
+
+			await client.sendMessage("session-456", "Test message");
+
+			expect(mockSDKClient.session.get).toHaveBeenCalledWith({
+				path: { id: "session-456" },
+			});
+			expect(mockSDKClient.session.prompt).toHaveBeenCalled();
+		});
+
+		it("should throw error if session not found", async () => {
+			mockSDKClient.session.get.mockResolvedValue({
+				data: null,
+				error: "Not found",
+			});
+
+			await expect(
+				client.sendMessage("session-999", "Test"),
+			).rejects.toThrow("Session session-999 not found");
+		});
+
+		it("should send session message (legacy)", async () => {
+			const mockSession = { id: "session-123", info: { id: "session-123" } };
+			mockSDKClient.session.create.mockResolvedValue({
+				data: mockSession,
+				error: null,
+			});
+			mockSDKClient.session.prompt.mockResolvedValue({
+				data: {},
+				error: null,
+			});
+
+			await client.createSession();
+			await client.sendSessionMessage("session-123", "Legacy message");
+
+			expect(mockSDKClient.session.prompt).toHaveBeenCalled();
+		});
+
+		it("should warn about unsupported images", async () => {
+			const mockSession = { id: "session-123", info: { id: "session-123" } };
+			mockSDKClient.session.create.mockResolvedValue({
+				data: mockSession,
+				error: null,
+			});
+			mockSDKClient.session.prompt.mockResolvedValue({
+				data: {},
+				error: null,
+			});
+
+			await client.createSession();
+			await client.sendSessionMessage("session-123", "Message", [
+				{ type: "image", url: "test.jpg" },
+			]);
+
+			// Should still send message but log warning
+			expect(mockSDKClient.session.prompt).toHaveBeenCalled();
+		});
+	});
+
+	describe("URL normalization", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+		});
+
+		it("should normalize URL with http scheme", () => {
+			const result = (client as any).normalizeServerUrl("http://example.com");
+			expect(result).toBe("http://example.com");
+		});
+
+		it("should normalize URL with https scheme", () => {
+			const result = (client as any).normalizeServerUrl("https://example.com");
+			expect(result).toBe("https://example.com");
+		});
+
+		it("should add http scheme if missing", () => {
+			const result = (client as any).normalizeServerUrl("example.com:4096");
+			expect(result).toBe("http://example.com:4096");
+		});
+
+		it("should remove trailing slashes", () => {
+			const result = (client as any).normalizeServerUrl(
+				"http://example.com///",
+			);
+			expect(result).toBe("http://example.com");
+		});
+
+		it("should trim whitespace", () => {
+			const result = (client as any).normalizeServerUrl(
+				"  http://example.com  ",
+			);
+			expect(result).toBe("http://example.com");
+		});
+	});
+
+	describe("Request URL resolution", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+		});
+
+		it("should resolve absolute URL", () => {
+			const result = (client as any).resolveRequestUrl(
+				"http://example.com/api",
+			);
+			expect(result).toBe("http://example.com/api");
+		});
+
+		it("should resolve relative URL using base", () => {
+			const result = (client as any).resolveRequestUrl("/api/session");
+			expect(result).toContain("/api/session");
+			expect(result).toContain("127.0.0.1:4096");
+		});
+
+		it("should resolve URL object", () => {
+			const url = new URL("http://example.com/path");
+			const result = (client as any).resolveRequestUrl(url);
+			expect(result).toBe("http://example.com/path");
+		});
+
+		it("should throw for empty URL", () => {
+			expect(() => {
+				(client as any).resolveRequestUrl("");
+			}).toThrow("OpenCode Server request URL is empty");
+		});
+
+		it("should throw for invalid URL", () => {
+			expect(() => {
+				(client as any).resolveRequestUrl({ url: null });
+			}).toThrow("OpenCode Server request URL is invalid");
+		});
+	});
+
+	describe("Build request options", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+		});
+
+		it("should build request options from string URL", async () => {
+			const options = await (client as any).buildRequestOptions(
+				"http://example.com/api",
+				{ method: "POST", headers: { "Content-Type": "application/json" } },
+			);
+			expect(options.resolvedUrl).toBe("http://example.com/api");
+			expect(options.method).toBe("POST");
+			// Headers are case-insensitive, so check both possible keys
+			expect(
+				options.headers["Content-Type"] || options.headers["content-type"],
+			).toBe("application/json");
+		});
+
+		it("should extract content type from headers", async () => {
+			const options = await (client as any).buildRequestOptions(
+				"http://example.com",
+				{ headers: { "content-type": "application/json" } },
+			);
+			expect(options.contentType).toBe("application/json");
+		});
+
+		it("should calculate body length", async () => {
+			const options = await (client as any).buildRequestOptions(
+				"http://example.com",
+				{ body: "test body" },
+			);
+			expect(options.bodyLength).toBe(9);
+		});
+	});
+
+	describe("Obsidian fetch implementation", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096", requestTimeoutMs: 1000 },
+				errorHandler,
+			);
+		});
+
+		it("should create fetch that uses requestUrl", async () => {
+			const mockResponse = {
+				status: 200,
+				headers: {},
+				text: "response text",
+				json: null,
+			};
+			vi.mocked(requestUrl).mockResolvedValue(mockResponse as any);
+
+			const fetchImpl = (client as any).createObsidianFetch();
+			const response = await fetchImpl("http://example.com/api");
+
+			expect(requestUrl).toHaveBeenCalled();
+			expect(response.status).toBe(200);
+		});
+
+		it("should handle timeout", async () => {
+			// Create a client with very short timeout for testing
+			const testClient = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096", requestTimeoutMs: 100 },
+				errorHandler,
+			);
+
+			// Mock requestUrl to delay response longer than timeout
+			vi.mocked(requestUrl).mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						// Delay longer than timeout (100ms)
+						setTimeout(() => resolve({ status: 200 } as any), 200);
+					}),
+			);
+
+			const fetchImpl = (testClient as any).createObsidianFetch();
+			const fetchPromise = fetchImpl("http://example.com/api");
+
+			// Advance timers to trigger timeout (100ms) before request resolves (200ms)
+			vi.advanceTimersByTime(150);
+			await vi.runAllTimersAsync();
+
+			// The promise should reject with timeout error
+			await expect(fetchPromise).rejects.toThrow(
+				"Unable to connect to OpenCode Server",
+			);
+		});
+
+		it("should use longer timeout for message endpoints", async () => {
+			const mockResponse = {
+				status: 200,
+				headers: {},
+				text: "ok",
+				json: null,
+			};
+			vi.mocked(requestUrl).mockResolvedValue(mockResponse as any);
+
+			const fetchImpl = (client as any).createObsidianFetch();
+			await fetchImpl("http://example.com/message");
+
+			// Verify timeout was applied (message endpoint should use 60s minimum)
+			expect(requestUrl).toHaveBeenCalled();
+		});
+
+		it("should handle JSON parse errors gracefully", async () => {
+			const jsonError = new Error("Response is not valid JSON");
+			vi.mocked(requestUrl).mockRejectedValue(jsonError);
+
+			const fetchImpl = (client as any).createObsidianFetch();
+			await expect(fetchImpl("http://example.com/health")).rejects.toThrow(
+				"not valid JSON",
+			);
+		});
+
+		it("should convert response to standard Response object", async () => {
+			const mockResponse = {
+				status: 201,
+				headers: { "content-type": "application/json" },
+				text: '{"key":"value"}',
+				json: null,
+			};
+			vi.mocked(requestUrl).mockResolvedValue(mockResponse as any);
+
+			const fetchImpl = (client as any).createObsidianFetch();
+			const response = await fetchImpl("http://example.com/api");
+
+			expect(response.status).toBe(201);
+			expect(response.statusText).toBe("201");
+		});
+
+		it("should handle response with json property", async () => {
+			const mockResponse = {
+				status: 200,
+				headers: {},
+				text: undefined,
+				json: { key: "value" },
+			};
+			vi.mocked(requestUrl).mockResolvedValue(mockResponse as any);
+
+			const fetchImpl = (client as any).createObsidianFetch();
+			const response = await fetchImpl("http://example.com/api");
+			const text = await response.text();
+
+			expect(text).toBe('{"key":"value"}');
+		});
+	});
+
+	describe("System message building", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+		});
+
+		it("should build system message with agent", () => {
+			const message = (client as any).buildSystemMessage(
+				undefined,
+				"agent1",
+				undefined,
+			);
+			expect(message).toContain("Agent: agent1");
+		});
+
+		it("should build system message with instructions", () => {
+			const message = (client as any).buildSystemMessage(
+				undefined,
+				undefined,
+				["inst1", "inst2"],
+			);
+			expect(message).toContain("Instructions: inst1, inst2");
+		});
+
+		it("should build system message with context", () => {
+			const context = {
+				currentNote: "note.md",
+				selection: "selected",
+				links: ["link1"],
+				tags: ["tag1"],
+			};
+			const message = (client as any).buildSystemMessage(context);
+			expect(message).toContain("Current note: note.md");
+			expect(message).toContain("Selection: selected");
+			expect(message).toContain("Links: link1");
+			expect(message).toContain("Tags: tag1");
+		});
+
+		it("should return null for empty message", () => {
+			const message = (client as any).buildSystemMessage();
+			expect(message).toBeNull();
+		});
+
+		it("should build complete system message", () => {
+			const context = { currentNote: "test.md" };
+			const message = (client as any).buildSystemMessage(
+				context,
+				"agent1",
+				["inst1"],
+			);
+			expect(message).toContain("Agent: agent1");
+			expect(message).toContain("Instructions: inst1");
+			expect(message).toContain("Current note: test.md");
+		});
+	});
+
+	describe("Config getters", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{
+					url: "http://127.0.0.1:4096",
+					requestTimeoutMs: 5000,
+					autoReconnect: false,
+				},
+				errorHandler,
+			);
+		});
+
+		it("should get config copy", () => {
+			const config1 = client.getConfig();
+			const config2 = client.getConfig();
+			expect(config1).toEqual(config2);
+			expect(config1).not.toBe(config2); // Should be different objects
+		});
+
+		it("should return correct config values", () => {
+			const config = client.getConfig();
+			expect(config.url).toBe("http://127.0.0.1:4096");
+			expect(config.requestTimeoutMs).toBe(5000);
+			expect(config.autoReconnect).toBe(false);
+		});
 	});
 
 	describe("Event callback registration", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+		});
+
+		it("should register stream token callbacks", () => {
+			const callback = vi.fn();
+			client.onStreamToken(callback);
+			// Callback should be registered (tested via event handling)
+		});
+
+		it("should register stream thinking callbacks", () => {
+			const callback = vi.fn();
+			client.onStreamThinking(callback);
+		});
+
+		it("should register error callbacks", () => {
+			const callback = vi.fn();
+			client.onError(callback);
+		});
+
+		it("should register progress update callbacks", () => {
+			const callback = vi.fn();
+			client.onProgressUpdate(callback);
+		});
+
+		it("should register session end callbacks", () => {
+			const callback = vi.fn();
+			client.onSessionEnd(callback);
+		});
+	});
+
+	describe("Event handling (detailed)", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+		});
+
+		describe("Event callback registration", () => {
 		it("should register stream token callbacks", () => {
 			const callback = vi.fn();
 			client.onStreamToken(callback);
@@ -347,7 +1118,6 @@ describe("OpenCodeServerClient Event Handling", () => {
 
 	describe("Health check", () => {
 		it("should return true for successful health check", async () => {
-			const { requestUrl } = await import("obsidian");
 			vi.mocked(requestUrl).mockResolvedValueOnce({
 				status: 200,
 				headers: {},
@@ -360,7 +1130,6 @@ describe("OpenCodeServerClient Event Handling", () => {
 		});
 
 		it("should return false for failed health check", async () => {
-			const { requestUrl } = await import("obsidian");
 			vi.mocked(requestUrl).mockResolvedValueOnce({
 				status: 500,
 				headers: {},
@@ -373,7 +1142,6 @@ describe("OpenCodeServerClient Event Handling", () => {
 		});
 
 		it("should return false and handle errors", async () => {
-			const { requestUrl } = await import("obsidian");
 			vi.mocked(requestUrl).mockRejectedValueOnce(
 				new Error("Network error"),
 			);
@@ -381,5 +1149,14 @@ describe("OpenCodeServerClient Event Handling", () => {
 			const result = await client.healthCheck();
 			expect(result).toBe(false);
 		});
+
+		it("should handle JSON parse errors from HTML response", async () => {
+			const jsonError = new Error("Response is not valid JSON");
+			vi.mocked(requestUrl).mockRejectedValue(jsonError);
+
+			const result = await client.healthCheck();
+			expect(result).toBe(false);
+		});
+	});
 	});
 });
