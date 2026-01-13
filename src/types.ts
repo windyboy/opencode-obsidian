@@ -1,25 +1,4 @@
 /**
- * Compatible provider configuration (managed by OpenCode Server)
- * Kept for type compatibility, but providers are configured server-side
- * 
- * @interface CompatibleProvider
- */
-export interface CompatibleProvider {
-  /** Unique identifier for the provider */
-  id: string
-  /** Display name for the provider */
-  name: string
-  /** API key for authentication (stored securely in Obsidian settings) */
-  apiKey: string
-  /** Base URL for the provider's API endpoint */
-  baseURL: string
-  /** API compatibility type - determines which API format to use */
-  apiType: 'openai-compatible' | 'anthropic-compatible'
-  /** Optional default model ID for this provider */
-  defaultModel?: string
-}
-
-/**
  * Skill definition
  * Skills are reusable prompt components that can be referenced by agents
  * 

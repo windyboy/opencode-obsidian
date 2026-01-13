@@ -75,16 +75,12 @@ Notes:
 -   `src/main.ts` — plugin entrypoint, lifecycle, settings load/save, client + tool wiring
 -   `src/opencode-obsidian-view.ts` — UI layer (chat view, streaming updates)
 -   `src/settings.ts` — settings UI and validation
+-   `src/types.ts` — TypeScript type definitions
 -   `src/opencode-server/` — HTTP + SSE client for OpenCode Server integration
--   `src/orchestrator/` — agent loop state machine and task orchestration
--   `src/context/` — context management, retrieval strategies, token estimation
--   `src/session/` — session lifecycle management and persistence
--   `src/todo/` — task planning, orchestration, and progress tracking
--   `src/mcp/` — Model Context Protocol integration
 -   `src/tools/obsidian/` — tool registry/executor, permission manager, audit logging
 -   `src/utils/` — error handling, validation, constants, debounce/throttle
 -   `__mocks__/obsidian.ts` — Obsidian API mock for tests
--   `docs/` — project docs (architecture, refactoring notes)
+-   `docs/` — project docs (architecture, agent configuration, tool documentation)
 
 ## Tooling + formatting expectations
 

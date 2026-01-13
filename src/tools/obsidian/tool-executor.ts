@@ -2,7 +2,6 @@ import type { App, Vault, MetadataCache, TAbstractFile, TFile, TFolder } from 'o
 import { TFile as TFileClass } from 'obsidian'
 import { PermissionManager } from './permission-manager'
 import { AuditLogger } from './audit-logger'
-// ToolPermission imported but not used directly
 
 /**
  * Type guard to check if abstract file is a TFile

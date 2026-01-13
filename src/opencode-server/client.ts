@@ -11,7 +11,7 @@ import type {
 
 export type OpenCodeClient = ReturnType<typeof createOpencodeClient>;
 
-export function createClient(
+function createClient(
 	baseUrl: string,
 	fetchImpl?: typeof fetch,
 ): OpenCodeClient {

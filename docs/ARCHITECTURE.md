@@ -32,74 +32,7 @@ The `OpenCodeObsidianPlugin` class extends Obsidian's `Plugin` class and serves 
 
 ### Core Modules
 
-#### 1. Provider Management (`src/provider-manager.ts`)
-
-**Responsibility**: Manage AI provider clients and model fetching
-
--   **ProviderManager**: Centralized management of multiple AI providers
-    -   Client initialization and caching
-    -   Model fetching with throttling and caching
-    -   Provider switching
-    -   Factory method for client creation (eliminates duplication)
-
-**Key Features**:
-
--   LRU-based model list caching (30s duration)
--   Throttling for model fetching (2s minimum interval)
--   Support for built-in providers (Anthropic, OpenAI, Google, ZenMux) and compatible providers
-
-#### 2. AI Client (`src/embedded-ai-client.ts`)
-
-**Responsibility**: Direct interaction with AI provider APIs
-
--   **EmbeddedAIClient**: Unified client interface for all AI providers
-    -   Streaming response handling
-    -   Session management with LRU cache
-    -   Type-safe event handling for Anthropic SDK
-    -   Support for multiple providers via unified interface
-
-**Key Features**:
-
--   LRU session cache (max 50 sessions, 30min idle timeout)
--   Periodic cleanup of inactive sessions (5min interval)
--   Type-safe Anthropic stream event handling
--   Modular event handlers for maintainability
-
-#### 3. Agent Resolution (`src/agent/agent-resolver.ts`)
-
-**Responsibility**: Resolve and merge agent configurations
-
--   **AgentResolver**: Encapsulates agent lookup, skill merging, and instruction integration
-    -   Agent configuration lookup
-    -   Skill merging into prompts
-    -   Instruction integration from config loader
-    -   Model and tool override handling
-
-**Key Features**:
-
--   Clean separation of agent resolution logic
--   Skill merging with formatted sections
--   Instruction integration from cached config loader
-
-#### 4. Configuration Loading (`src/config-loader.ts`)
-
-**Responsibility**: Load and parse configuration files from vault
-
--   **ConfigLoader**: Manages configuration file loading and parsing
-    -   Priority-based config file lookup
-    -   Agent and skill file loading from `.opencode/` directory
-    -   Instruction file loading with glob pattern support
-    -   Security validations (file path, size, JSON structure)
-
-**Key Features**:
-
--   Configuration file priority array (no nested if-else)
--   js-yaml for robust YAML frontmatter parsing
--   File path validation (prevents path traversal)
--   File size limits (config: 1MB, agents/skills: 5MB, instructions: 10MB)
--   JSON structure validation (depth, complexity, string length)
-
-#### 5. Error Handling (`src/utils/error-handler.ts`)
+#### 1. Error Handling (`src/utils/error-handler.ts`)
 
 **Responsibility**: Unified error handling across the application
 
@@ -116,7 +49,7 @@ The `OpenCodeObsidianPlugin` class extends Obsidian's `Plugin` class and serves 
 -   Configurable notification callbacks
 -   Optional error collection for debugging
 
-#### 6. Input Validation (`src/utils/validators.ts`)
+#### 2. Input Validation (`src/utils/validators.ts`)
 
 **Responsibility**: Validate configuration, agent, and provider inputs
 
@@ -134,7 +67,7 @@ The `OpenCodeObsidianPlugin` class extends Obsidian's `Plugin` class and serves 
 -   Model format validation
 -   Provider ID format validation
 
-#### 7. OpenCode Server Client (`src/opencode-server/client.ts`)
+#### 3. OpenCode Server Client (`src/opencode-server/client.ts`)
 
 **Responsibility**: HTTP + SSE communication with OpenCode Server runtime
 
@@ -162,79 +95,47 @@ The `OpenCodeObsidianPlugin` class extends Obsidian's `Plugin` class and serves 
 -   Events: `onStreamToken()`, `onStreamThinking()`, `onError()`, `onProgressUpdate()`, `onSessionEnd()`
 -   Health: `healthCheck()`
 
-**See Also**: `docs/CLIENT.md` for detailed usage and API documentation
+#### 4. Obsidian Tool System (`src/tools/obsidian/`)
 
-#### 8. Agent Orchestrator (`src/orchestrator/agent-orchestrator.ts`)
+**Responsibility**: Tool execution, permission management, and audit logging
 
-**Responsibility**: Manage Agent Loop state machine
-
--   **AgentOrchestrator**: Coordinates task planning and execution
-    -   State machine: Planning → Executing → Validating → Retrying → Completed
-    -   Context retrieval for planning and execution
-    -   Step execution tracking
-    -   Retry logic with configurable attempts
-
-**Current State**:
-
--   ⚠️ **Known Issue**: Currently a placeholder implementation
-    -   Does not wait for server responses before completing steps
-    -   Needs event-driven state machine integration
-    -   Should consume SessionEventBus events to advance states
-
-**Future Architecture**:
-
--   Will subscribe to SessionEventBus for server events
--   State transitions driven by domain events
--   Unified TaskPlan source with TodoManager
-
-#### 9. Task/TODO Management (`src/todo/todo-manager.ts`)
-
-**Responsibility**: Extract and manage TODOs from conversations, task planning
-
--   **TodoManager**: Manages TODO extraction and task plans
-    -   Extracts TODOs from conversation messages
-    -   Creates and manages TaskPlan structures
-    -   Task progress tracking and checkpoint management
-    -   Persistence to vault storage
+-   **ObsidianToolRegistry**: Tool registration and routing
+    -   Registers core Obsidian tools
+    -   Validates tool input schemas using Zod
+    -   Routes tool calls to appropriate executor
+-   **ObsidianToolExecutor**: Tool execution with permission checks
+    -   Executes tool operations (read/write/create/update)
+    -   Checks permissions using PermissionManager
+    -   Records audit logs via AuditLogger
+    -   Handles permission requests via PermissionModal
+-   **PermissionManager**: Permission management
+    -   Three-level permission model (read-only, scoped-write, full-write)
+    -   Path-based permission scopes (allowed/denied patterns)
+    -   File size and extension validation
+-   **AuditLogger**: Audit logging for all tool operations
+    -   Logs all tool executions with timestamps
+    -   Records permission decisions
+    -   Stores logs in `.opencode/audit/` directory
 
 **Key Features**:
 
--   Automatic TODO extraction from messages
--   Task plan creation and parsing from LLM output
--   Step result tracking
--   Checkpoint support for rollback capability
--   Auto-save to `.opencode/todos` directory
+-   6 core Obsidian tools (search_vault, read_note, list_notes, get_note_metadata, create_note, update_note)
+-   Permission-based tool execution with user approval for write operations
+-   Comprehensive audit logging for security and debugging
+-   Type-safe tool input validation with Zod schemas
 
-**Current Issue**:
+**Available Tools**:
 
--   ⚠️ **Known Issue**: Parallel implementation with AgentOrchestrator
-    -   Both maintain TaskPlan concepts independently
-    -   Should be unified source of truth for plans
-    -   Orchestrator should use TodoManager for plan persistence
-
-#### 10. Context Management (`src/context/context-manager.ts`)
-
-**Responsibility**: Context retrieval, token estimation, and budget allocation
-
--   **ContextManager**: Manages conversation context
-    -   Token estimation for input/output
-    -   Context retrieval using RetrievalStrategy
-    -   Budget allocation for context tokens
-    -   Preemptive compaction when context full
-
-**Key Features**:
-
--   Multiple retrieval strategies (VaultRetrievalStrategy)
--   Priority-based context selection
--   Budget allocation for token limits
--   Integration with ContextBudgetAllocator
-
-**Current Issue**:
-
--   ⚠️ **Known Issue**: Context fusion strategy coupled with Orchestrator
-    -   Orchestrator directly concatenates retrieved contexts into prompts
-    -   Should be extracted into ContextFusionStrategy interface
-    -   Enables pluggable strategies (simple concatenation, structured templates, server-side RAG)
+1. `obsidian.search_vault` - Search notes in vault (read-only)
+2. `obsidian.read_note` - Read note content (read-only)
+3. `obsidian.list_notes` - List notes in folder (read-only)
+4. `obsidian.get_note_metadata` - Get note metadata including frontmatter, tags, links (read-only)
+5. `obsidian.create_note` - Create new note (scoped-write)
+6. `obsidian.update_note` - Update note content with multiple modes (scoped-write)
+    - `replace`: Replace entire content
+    - `append`: Append to end
+    - `prepend`: Prepend to beginning
+    - `insert`: Insert at line number or marker
 
 ## OpenCode Server Integration
 
@@ -323,46 +224,7 @@ The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestratio
 
 **Implementation**: `src/utils/error-handler.ts`
 
-### ADR-2: Agent Resolution Extraction
-
-**Decision**: Extract agent resolution logic into a separate AgentResolver class
-
-**Rationale**:
-
--   Removed 51 lines of nested logic from main.ts
--   Improved testability (unit tests added)
--   Clear separation of concerns
--   Easier to extend with new agent features
-
-**Implementation**: `src/agent/agent-resolver.ts`
-
-### ADR-3: Provider Client Factory Method
-
-**Decision**: Create a centralized `createProviderClient` factory method in ProviderManager
-
-**Rationale**:
-
--   Eliminated 8 instances of duplicate EmbeddedAIClient creation code
--   Single source of truth for client creation
--   Easier to maintain and extend
--   Consistent error handling
-
-**Implementation**: `src/provider-manager.ts`
-
-### ADR-4: LRU Session Cache
-
-**Decision**: Implement LRU cache for session management instead of using external library
-
-**Rationale**:
-
--   Lightweight solution for simple requirements
--   No external dependencies (important for Obsidian plugin size)
--   O(1) access and update operations
--   Sufficient for session management use case
-
-**Implementation**: `src/embedded-ai-client.ts`
-
-### ADR-5: Incremental DOM Updates
+### ADR-2: Incremental DOM Updates
 
 **Decision**: Replace full re-renders with incremental DOM updates
 
@@ -375,7 +237,7 @@ The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestratio
 
 **Implementation**: `src/opencode-obsidian-view.ts`
 
-### ADR-6: Debounce and Throttle Utilities
+### ADR-3: Debounce and Throttle Utilities
 
 **Decision**: Implement custom debounce/throttle utilities instead of using lodash
 
@@ -388,20 +250,7 @@ The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestratio
 
 **Implementation**: `src/utils/debounce-throttle.ts`
 
-### ADR-7: js-yaml Library
-
-**Decision**: Use js-yaml library instead of custom YAML parser
-
-**Rationale**:
-
--   Supports full YAML 1.1 specification
--   Better error handling
--   Handles complex nested structures
--   Security: safe by default (prevents code execution)
-
-**Implementation**: `src/config-loader.ts`
-
-### ADR-8: Configuration Constants File
+### ADR-4: Configuration Constants File
 
 **Decision**: Extract all magic numbers to a central constants file
 
@@ -414,33 +263,7 @@ The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestratio
 
 **Implementation**: `src/utils/constants.ts`
 
-### ADR-9: Security Validations
-
-**Decision**: Add comprehensive security validations for file loading
-
-**Rationale**:
-
--   Prevents path traversal attacks
--   Prevents DoS attacks via large files
--   Prevents DoS attacks via deep JSON structures
--   Protects user data and system resources
-
-**Implementation**: `src/config-loader.ts` with validations
-
-### ADR-10: Type-Safe Event Handling
-
-**Decision**: Define explicit types for Anthropic SDK events instead of using `any`
-
-**Rationale**:
-
--   Better IDE support and autocomplete
--   Catch type errors at compile time
--   Self-documenting code
--   Easier refactoring
-
-**Implementation**: `src/embedded-ai-client.ts` with `AnthropicEventTypes` namespace
-
-### ADR-11: HTTP + SSE Protocol for OpenCode Server
+### ADR-5: HTTP + SSE Protocol for OpenCode Server
 
 **Decision**: Use HTTP + SSE for OpenCode Server communication
 
@@ -456,7 +279,7 @@ The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestratio
 
 **Status**: ✅ Implemented, but needs improvements (see Known Issues)
 
-### ADR-12: Permission System for Tool Execution
+### ADR-6: Permission System for Tool Execution
 
 **Decision**: Implement permission-based tool execution with user approval for write operations
 
@@ -470,21 +293,6 @@ The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestratio
 **Implementation**: `src/tools/obsidian/permission-manager.ts`, `tool-executor.ts`
 
 **Status**: ✅ Implemented, but preview generation bypasses permission checks (see Known Issues)
-
-### ADR-13: Agent Orchestrator State Machine
-
-**Decision**: Implement state machine for agent task orchestration (Planning → Executing → Validating)
-
-**Rationale**:
-
--   Clear task execution flow
--   Supports retry logic
--   Enables progress tracking
--   Separates concerns (planning vs execution)
-
-**Implementation**: `src/orchestrator/agent-orchestrator.ts`
-
-**Status**: ⚠️ Partial implementation - currently placeholder, needs event-driven integration
 
 ## Module Responsibilities
 
@@ -518,20 +326,6 @@ The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestratio
 -   Step execution tracking and retry logic
 -   Integration with TodoManager for task persistence
 
-### Agent Resolver (`src/agent/agent-resolver.ts`)
-
--   Agent lookup and resolution
--   Skill merging into system prompts
--   Instruction integration
--   Model/tool override handling
-
-### Config Loader (`src/config-loader.ts`)
-
--   Configuration file loading with security validations
--   Agent/skill file parsing from `.opencode/` directory
--   Instruction file loading with glob pattern support
--   File path validation and size limits
-
 ### Error Handler (`src/utils/error-handler.ts`)
 
 -   Unified error handling with severity levels
@@ -552,52 +346,7 @@ The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestratio
 -   Size limits and time intervals
 -   Centralized configuration for maintainability
 
-### Hooks (`src/hooks/`)
-
--   Hook registration and execution system
--   Event-driven architecture for extensibility
--   Plugin lifecycle event handling
-
-### Context Management (`src/context/`)
-
--   Token estimation (`token-estimator.ts`)
--   Context retrieval with strategies (`retrieval-strategy.ts`)
--   Budget allocation for context tokens (`context-budget-allocator.ts`)
--   Context compaction (`compaction-manager.ts`)
--   Preemptive compaction when context full
--   Full threshold detection and management
-
-### Session Management (`src/session/`)
-
--   Session storage and persistence (`session-storage.ts`)
--   Session auto-save mechanism (`session-manager.ts`)
--   Session cleanup and TTL management
--   Conversation state management
-
-### Task Management (`src/todo/`)
-
--   Task planning and orchestration (`todo-manager.ts`)
--   Task extraction from conversation messages (`todo-extractor.ts`)
--   Step result tracking and checkpoints
--   Task progress calculation and monitoring
--   Persistence to `.opencode/todos` directory
--   Integration with agent orchestrator for execution
-
-### MCP Integration (`src/mcp/`)
-
--   Model Context Protocol server management (`mcp-manager.ts`)
--   MCP tool and resource integration
--   Dynamic tool registration from MCP servers
--   Unified permission management for MCP tools
--   Stdio transport support for MCP servers
-
 ### Obsidian Tool System (`src/tools/obsidian/`)
-
--   Tool definitions and schemas (Zod validation)
--   Tool execution with permission checks
--   Audit logging for all tool operations
--   Permission management (read-only, scoped-write, full-write)
--   Tool registry and routing for both core and MCP tools
 
 -   Tool definitions and schemas (Zod validation)
 -   Tool execution with permission checks
@@ -660,67 +409,6 @@ sequenceDiagram
 -   ⚠️ Direct callback binding (no event bus)
 -   ⚠️ No sessionId validation in stream callbacks
 -   ⚠️ Concurrent session requests can conflict
-
-### Planned Event-Driven Flow (Future)
-
-```mermaid
-sequenceDiagram
-    participant View as View
-    participant EventBus as SessionEventBus
-    participant Client as OpenCodeServerClient
-    participant Server as OpenCode Server
-    participant Orchestrator as AgentOrchestrator
-    participant TodoManager as TodoManager
-
-    View->>Client: startSession(...)
-    Client->>Server: session.start
-    Server->>Client: session.created
-    Client->>EventBus: publish(SessionCreated, {sessionId})
-    EventBus->>View: TokenReceived event (by sessionId)
-    EventBus->>Orchestrator: SessionCreated event
-
-    Orchestrator->>TodoManager: createPlan(goal)
-    TodoManager-->>Orchestrator: planId
-    Orchestrator->>Client: sendSessionMessage()
-    Client->>Server: session.message
-    Server->>Client: stream.token
-    Client->>EventBus: publish(TokenReceived, {sessionId, token})
-    EventBus->>View: Update UI (routed by sessionId)
-    EventBus->>Orchestrator: Accumulate plan response
-
-    Orchestrator->>TodoManager: updateTaskProgress(planId)
-```
-
-### Message Sending Flow (Embedded AI - Legacy)
-
-1. User types message in view
-2. View calls `plugin.sendPrompt()`
-3. `sendPrompt()` uses `AgentResolver` to resolve agent config
-4. `AgentResolver`:
-    - Looks up agent by ID
-    - Merges skills into system prompt
-    - Merges instructions from config loader
-    - Returns resolved config
-5. `sendPrompt()` calls `ProviderManager.sendPrompt()`
-6. `ProviderManager` gets or creates client for provider
-7. `EmbeddedAIClient.sendPrompt()`:
-    - Creates or retrieves session (LRU cache)
-    - Sends request to AI provider API
-    - Streams responses back
-    - Handles events with type-safe handlers
-8. View receives chunks and updates UI incrementally
-9. Hooks are executed at various points for extensibility
-
-### Configuration Loading Flow
-
-1. Plugin loads settings from Obsidian
-2. If `.opencode/` directory exists:
-    - `ConfigLoader.loadConfig()` loads config.json (with priority lookup)
-    - `ConfigLoader.loadAgents()` loads agent files from `.opencode/agent/`
-    - `ConfigLoader.loadSkills()` loads skill files from `.opencode/skill/`
-    - `ConfigLoader.loadInstructions()` loads instruction files (supports glob patterns)
-3. All loaded data is validated using validators
-4. Data is stored in plugin settings and used by AgentResolver
 
 ### Error Handling Flow
 
@@ -852,22 +540,7 @@ All write operations default to `dryRun=true` to show preview before applying.
 
 **Files**: New `src/session/session-event-bus.ts`, `src/opencode-server/client.ts`, `src/opencode-obsidian-view.ts`
 
-#### 5. Context Fusion Strategy Extraction
-
-**Issue**: Context fusion strategy coupled with orchestration logic.
-
-**Impact**: Hard to change context assembly strategies, limits flexibility.
-
-**Solution**:
-
--   Create `ContextFusionStrategy` interface
--   Implement strategies: `SimpleConcatenationStrategy`, `StructuredTemplateStrategy`
--   Inject strategy into `ContextManager` or use as separate service
--   Enables pluggable strategies (client-side vs server-side RAG)
-
-**Files**: New `src/context/context-fusion-strategy.ts`, `src/orchestrator/agent-orchestrator.ts`
-
-#### 6. Unified Connection Management
+#### 5. Unified Connection Management
 
 **Issue**: Connection management split between `main.ts` and `OpenCodeObsidianView.onOpen()`.
 
@@ -882,82 +555,24 @@ All write operations default to `dryRun=true` to show preview before applying.
 
 **Files**: New `src/session/connection-manager.ts`, `src/main.ts`, `src/opencode-obsidian-view.ts`
 
--   Unified audit logging for both preview and execution
+#### 6. Preview Generation Permission Check
+
+**Issue**: Preview generation (`generatePreview`) in `OpenCodeServerClient` directly reads files, bypassing `PermissionManager`.
+
+**Impact**: Preview and execution use different code paths, inconsistent permission checks.
+
+**Solution**:
+
+-   Move `generatePreview()` to `ObsidianToolExecutor`
+-   Unified permission check path for both preview and execution
+-   Consistent audit logging for preview operations
 
 **Files**: `src/tools/obsidian/tool-executor.ts`, `src/opencode-server/client.ts`
-
-#### 8. Unified TaskPlan Source
-
-**Issue**: `TodoManager` and `AgentOrchestrator` both maintain TaskPlan concepts independently.
-
-**Impact**: Duplicate state, plans can get out of sync.
-
-**Solution**:
-
--   `TodoManager` becomes single source of truth for TaskPlan
--   Orchestrator creates/updates plans via `TodoManager`
--   Orchestrator queries state from `TodoManager`
--   Remove local plan storage from Orchestrator
-
-**Files**: `src/orchestrator/agent-orchestrator.ts`, `src/todo/todo-manager.ts`
-
-#### 9. Context Fusion Strategy Extraction
-
-**Issue**: `AgentOrchestrator` directly concatenates context retrieval results into prompts.
-
-**Impact**: Context fusion strategy coupled with orchestration, hard to change.
-
-**Solution**:
-
--   Create `ContextFusionStrategy` interface
--   Implement strategies: `SimpleConcatenationStrategy`, `StructuredTemplateStrategy`
--   Inject strategy into `ContextManager` or use as separate service
--   Enables pluggable strategies (client-side vs server-side RAG)
-
-**Files**: New `src/context/context-fusion-strategy.ts`, `src/orchestrator/agent-orchestrator.ts`
-
-#### 10. Unified Connection Management
-
-**Issue**: Connection management split between `main.ts` and `OpenCodeObsidianView.onOpen()`.
-
-**Impact**: Unclear ownership, connection state not centrally managed.
-
-**Solution**:
-
--   Create `ConnectionManager` class
--   Plugin initializes and manages connection lifecycle
--   View only displays state and triggers user actions (connect/disconnect buttons)
--   Expose connection state via events or observable
-
-**Files**: New `src/session/connection-manager.ts`, `src/main.ts`, `src/opencode-obsidian-view.ts`
-
-### Implementation Roadmap
-
-**Phase 1 (COMPLETED)**: Critical Infrastructure Updates
-
--   ✅ HTTP Client SDK Migration - Migrated to `@opencode-ai/sdk/client`
--   ✅ Task Orchestration Enhancement - Upgraded TodoManager to full orchestration system
--   ✅ MCP Integration - Implemented complete Model Context Protocol support
-
-**Phase 2 (Current)**: Architecture Refinements
-
--   SessionEventBus for decoupling UI from transport protocol
--   Context fusion strategy extraction for pluggable strategies
--   Unified connection management across components
-
-**Phase 3 (Future)**: Advanced Features
-
--   Enhanced caching strategies for context and tool results
--   Performance monitoring and metrics collection
--   Server-side RAG integration for better scalability
 
 ## Future Considerations
 
 -   **Event-Driven Architecture**: Complete migration to event bus pattern for better decoupling
 -   **Protocol Abstraction**: Support multiple protocols (HTTP/SSE, WebSocket, local inference)
 -   **Offline Mode**: Support local LLM inference without server dependency
--   **MCP Ecosystem**: ✅ COMPLETED - Full Model Context Protocol integration for standardized tool access
--   **LSP Integration**: Language Server Protocol integration for enhanced code intelligence
--   **Enhanced Caching**: Multi-level caching for context, models, and tool results
+-   **Enhanced Caching**: Multi-level caching for tool results
 -   **Performance Monitoring**: Metrics collection and performance dashboards
--   **Server-Side RAG**: Move context retrieval to server for better scalability and performance

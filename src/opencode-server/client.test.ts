@@ -610,14 +610,14 @@ describe("OpenCodeServerClient", () => {
 				errorHandler,
 			);
 
-			// Mock requestUrl to delay response longer than timeout
-			vi.mocked(requestUrl).mockImplementation(
-				() =>
-					new Promise((resolve) => {
-						// Delay longer than timeout (100ms)
-						setTimeout(() => resolve({ status: 200 } as any), 200);
-					}),
-			);
+		// Mock requestUrl to delay response longer than timeout
+		vi.mocked(requestUrl).mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					// Delay longer than timeout (100ms)
+					setTimeout(() => resolve({ status: 200 } as any), 200);
+				}) as any,
+		);
 
 			const fetchImpl = (testClient as any).createObsidianFetch();
 			const fetchPromise = fetchImpl("http://example.com/api");

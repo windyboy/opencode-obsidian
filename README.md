@@ -23,11 +23,7 @@ OpenCode Obsidian is an Obsidian plugin that provides a sophisticated chat inter
 -   **Multiple Sessions**: Manage multiple conversation sessions with auto-save and persistence
 -   **OpenCode Server Integration**: HTTP + SSE connection for agent orchestration and tool execution
 -   **Tool Execution**: 6 core Obsidian tools with permission-based security (read-only, scoped-write, full-write)
--   **Custom Agents & Skills**: Create specialized agents with YAML frontmatter and reusable skills
--   **Configuration System**: Load agents, skills, and instructions from `.opencode/` directory
--   **Context Management**: Advanced context retrieval, token estimation, and budget allocation
--   **Task Orchestration**: Automatic task planning, execution tracking, and progress monitoring
--   **MCP Integration**: Support for Model Context Protocol servers and tools
+-   **Custom Agents & Skills**: Configure specialized agents and skills (managed by OpenCode Server)
 -   **Settings Panel**: Comprehensive settings for server connection, permissions, and agent configuration
 -   **Error Handling**: Unified error handling system with severity levels and user-friendly notifications
 -   **Performance Optimized**: LRU caching, debounced settings, throttled API calls
@@ -123,10 +119,6 @@ Configure the following settings in the plugin settings panel:
     -   `scoped-write`: Requires user approval for writes to specific paths
     -   `full-write`: Requires approval for any write operation
 -   **Permission Scopes**: Configure allowed/denied paths, file size limits, and extensions
--   **Context Management**: Configure context window thresholds and token limits
--   **Task Orchestration**: Configure task planning, execution tracking, and progress monitoring
--   **MCP Integration**: Configure Model Context Protocol servers and tools
--   **Instructions**: Add instruction files or glob patterns to merge into system prompts
 
 ### Advanced Configuration
 
@@ -229,35 +221,18 @@ opencode-obsidian/
 │   ├── opencode-obsidian-view.ts    # Chat view component with incremental DOM updates
 │   ├── settings.ts                  # Settings panel UI
 │   ├── types.ts                     # TypeScript type definitions
-│   ├── config-loader.ts             # Configuration file loading with security validations
-│   ├── agent/
-│   │   └── agent-resolver.ts        # Agent configuration resolution and skill merging
 │   ├── opencode-server/
 │   │   ├── client.ts                # SDK client helper + Obsidian wrapper (OpenCodeServerClient)
-│   │   └── protocol.ts              # Protocol message definitions
-│   ├── orchestrator/
-│   │   └── agent-orchestrator.ts    # Agent loop state machine and task orchestration
-│   ├── hooks/
-│   │   ├── hook-registry.ts         # Hook system for extensibility
-│   │   └── *.ts                     # Individual hook implementations
-│   ├── context/
-│   │   ├── context-manager.ts       # Context token management
-│   │   ├── compaction-manager.ts    # Context compaction logic
-│   │   └── token-estimator.ts       # Token estimation
-│   ├── session/
-│   │   ├── session-manager.ts       # Session lifecycle management
-│   │   └── session-storage.ts       # Session persistence
-│   ├── todo/
-│   │   ├── todo-manager.ts          # Task planning and orchestration
-│   │   └── todo-extractor.ts        # TODO parsing logic
-│   ├── mcp/
-│   │   ├── mcp-manager.ts           # Model Context Protocol integration
-│   │   └── types.ts                 # MCP type definitions
+│   │   ├── client.test.ts           # Client unit tests
+│   │   └── types.ts                 # Protocol message definitions
 │   ├── tools/
 │   │   └── obsidian/                # Obsidian tool system
 │   │       ├── tool-executor.ts     # Tool execution with permissions
 │   │       ├── tool-registry.ts     # Tool registration and routing
 │   │       ├── permission-manager.ts # Permission management
+│   │       ├── permission-modal.ts  # Permission request UI
+│   │       ├── permission-types.ts  # Permission type definitions
+│   │       ├── audit-logger.ts      # Audit logging for tool operations
 │   │       └── types.ts             # Tool type definitions
 │   └── utils/
 │       ├── error-handler.ts         # Unified error handling system
@@ -266,8 +241,10 @@ opencode-obsidian/
 │       └── debounce-throttle.ts     # Debounce/throttle utilities
 ├── docs/
 │   ├── ARCHITECTURE.md              # Architecture Decision Records
-│   └── AGENTS.md                    # Agent documentation
-├── CLAUDE.md                        # Claude Code development guide
+│   ├── AGENTS.md                    # Agent configuration documentation
+│   └── OPENCODE-SERVER-PLUGIN.md    # Tool documentation
+├── __mocks__/
+│   └── obsidian.ts                  # Obsidian API mock for tests
 ├── styles.css                       # Styles (automatically loaded by Obsidian)
 ├── manifest.json                    # Plugin manifest
 ├── versions.json                    # Version compatibility mapping
@@ -302,17 +279,17 @@ A GitHub Action is preconfigured to automatically lint every commit on all branc
 
 ### Testing
 
-This project uses [Vitest](https://vitest.dev/) for unit testing. Core modules are tested including error handling, agent resolution, and validation logic.
+This project uses [Vitest](https://vitest.dev/) for unit testing. Core modules are tested including error handling and validation logic.
 
 ```bash
 # Run tests once
-pnpm test
+pnpm vitest run
 
 # Run tests in watch mode
-pnpm test:watch
+pnpm vitest
 
-# Run tests with UI
-pnpm test:ui
+# Run tests with UI (if installed)
+pnpm vitest --ui
 ```
 
 ### Type Checking
@@ -413,13 +390,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture decis
 ### API Documentation
 
 -   **ErrorHandler**: Unified error handling system (`src/utils/error-handler.ts`)
--   **AgentResolver**: Agent configuration resolution (`src/agent/agent-resolver.ts`)
--   **ConfigLoader**: Configuration file loading (`src/config-loader.ts`)
--   **OpenCodeClient / OpenCodeServerClient**: SDK client helper and Obsidian wrapper for OpenCode Server (`src/opencode-server/client.ts`)
--   **AgentOrchestrator**: Agent loop state machine and task orchestration (`src/orchestrator/agent-orchestrator.ts`)
--   **ToolExecutor**: Tool execution with permissions (`src/tools/obsidian/tool-executor.ts`)
+-   **OpenCodeServerClient**: SDK client helper and Obsidian wrapper for OpenCode Server (`src/opencode-server/client.ts`)
+-   **ObsidianToolRegistry**: Tool registration and routing (`src/tools/obsidian/tool-registry.ts`)
+-   **ObsidianToolExecutor**: Tool execution with permissions (`src/tools/obsidian/tool-executor.ts`)
 -   **PermissionManager**: Permission management (`src/tools/obsidian/permission-manager.ts`)
--   **MCPManager**: Model Context Protocol integration (`src/mcp/mcp-manager.ts`)
+-   **AuditLogger**: Audit logging for tool operations (`src/tools/obsidian/audit-logger.ts`)
 
 All public interfaces and classes include comprehensive JSDoc comments. See source files for detailed API documentation.
 
