@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, Notice, requestUrl } from "obsidian";
+import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import type OpenCodeObsidianPlugin from "./main";
 
 export class OpenCodeObsidianSettingTab extends PluginSettingTab {
@@ -133,52 +133,35 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 							return;
 						}
 
-						const testConnection = async (
-							httpUrl: string,
-							timeoutMs: number,
-						): Promise<void> => {
-							const controller = new AbortController();
-							const timeoutId = setTimeout(
-								() => controller.abort(),
-								timeoutMs,
-							);
-							try {
-								// Try health check endpoint first
-								try {
-									const healthResponse = await requestUrl({
-										url: `${httpUrl}/health`,
-										method: "GET",
-										headers: {
-											Accept: "application/json",
-										},
-									});
-
-									if (
-										healthResponse.status >= 200 &&
-										healthResponse.status < 300
-									) {
-										return; // Success
-									}
-								} catch (healthError) {
-									// Health endpoint not available, try basic connectivity
-								}
-
-								// Fallback to basic connectivity test
-								await requestUrl({
-									url: httpUrl,
-									method: "GET",
-									headers: {
-										Accept: "*/*",
-									},
-								});
-							} finally {
-								clearTimeout(timeoutId);
-							}
-						};
-
 						try {
-							await testConnection(url, 5000);
-							new Notice("Connection successful");
+							// Use existing client or create temporary client
+							let client = this.plugin.opencodeClient;
+							const currentClientUrl = client?.getConfig()?.url;
+							const normalizedCurrentUrl =
+								currentClientUrl?.trim().replace(/\/+$/, "") ||
+								"";
+							const normalizedNewUrl = url.trim().replace(/\/+$/, "");
+
+							if (!client || normalizedCurrentUrl !== normalizedNewUrl) {
+								// Create temporary client for health check
+								const { OpenCodeServerClient } = await import(
+									"./opencode-server/client"
+								);
+								client = new OpenCodeServerClient(
+									serverConfig,
+									this.plugin.errorHandler,
+								);
+							}
+
+							const isHealthy = await client.healthCheck();
+
+							if (isHealthy) {
+								new Notice("Connection successful");
+							} else {
+								new Notice(
+									"Connection failed: Server health check failed",
+								);
+							}
 						} catch (error) {
 							console.error(
 								"[OpenCodeSettings] Connection test failed:",

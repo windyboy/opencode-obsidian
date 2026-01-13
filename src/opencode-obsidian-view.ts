@@ -9,6 +9,7 @@ import {
 	App,
 } from "obsidian";
 import type OpenCodeObsidianPlugin from "./main";
+import { ErrorSeverity } from "./utils/error-handler";
 import type {
 	Conversation,
 	Message,
@@ -31,6 +32,8 @@ export class OpenCodeObsidianView extends ItemView {
 	private activeConversationId: string | null = null;
 	private isStreaming = false;
 	private currentAbortController: AbortController | null = null;
+	private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
+	private lastHealthCheckResult: boolean | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: OpenCodeObsidianPlugin) {
 		super(leaf);
@@ -70,15 +73,80 @@ export class OpenCodeObsidianView extends ItemView {
 						"[OpenCodeObsidianView] Connected to OpenCode Server",
 					);
 				} catch (error) {
-					console.error(
-						"[OpenCodeObsidianView] Failed to connect to OpenCode Server:",
+					this.plugin.errorHandler.handleError(
 						error,
+						{
+							module: "OpenCodeObsidianView",
+							function: "onOpen",
+							operation: "Connecting to OpenCode Server",
+						},
 					);
 					const errorMessage =
 						error instanceof Error ? error.message : String(error);
 					new Notice(`Connection failed: ${errorMessage}`);
 				}
 			}
+
+			// Perform initial health check
+			await this.performHealthCheck();
+
+			// Start periodic health check
+			this.startPeriodicHealthCheck();
+		}
+	}
+
+	/**
+	 * Perform health check on OpenCode Server
+	 */
+	private async performHealthCheck(): Promise<void> {
+		if (!this.plugin.opencodeClient) {
+			new Notice("OpenCode Server client not initialized");
+			return;
+		}
+
+		try {
+			const isHealthy = await this.plugin.opencodeClient.healthCheck();
+			this.lastHealthCheckResult = isHealthy;
+
+			if (isHealthy) {
+				new Notice("Server is healthy");
+			} else {
+				new Notice("Server health check failed");
+			}
+
+			// Update header display
+			this.updateHeader();
+		} catch (error) {
+			this.lastHealthCheckResult = false;
+			const errorMessage =
+				error instanceof Error ? error.message : String(error);
+			new Notice(`Health check failed: ${errorMessage}`);
+			this.updateHeader();
+		}
+	}
+
+	/**
+	 * Start periodic health check
+	 */
+	private startPeriodicHealthCheck(): void {
+		// Clear existing timer
+		this.stopPeriodicHealthCheck();
+
+		// Check every 30 seconds (configurable)
+		this.healthCheckInterval = setInterval(() => {
+			if (this.plugin.opencodeClient?.isConnected()) {
+				void this.performHealthCheck();
+			}
+		}, 30000);
+	}
+
+	/**
+	 * Stop periodic health check
+	 */
+	private stopPeriodicHealthCheck(): void {
+		if (this.healthCheckInterval) {
+			clearInterval(this.healthCheckInterval);
+			this.healthCheckInterval = null;
 		}
 	}
 
@@ -101,6 +169,9 @@ export class OpenCodeObsidianView extends ItemView {
 
 		// Stream token callback - append tokens to the current assistant message
 		this.plugin.opencodeClient.onStreamToken((sessionId, token, done) => {
+			// #region agent log
+			fetch('http://127.0.0.1:7244/ingest/cee3721f-acd3-48cd-bf4e-9190e480d32e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'opencode-obsidian-view.ts:171',message:'onStreamToken: callback invoked',data:{sessionId,tokenLength:token.length,tokenPreview:token.substring(0,200),done},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+			// #endregion
 			// Route by sessionId, not just active conversation
 			const targetConv =
 				this.findConversationBySessionId(sessionId) ||
@@ -120,10 +191,29 @@ export class OpenCodeObsidianView extends ItemView {
 			// Find the last assistant message and update content
 			const lastMessage =
 				targetConv.messages[targetConv.messages.length - 1];
+			// #region agent log
+			fetch('http://127.0.0.1:7244/ingest/cee3721f-acd3-48cd-bf4e-9190e480d32e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'opencode-obsidian-view.ts:189',message:'onStreamToken: found last message',data:{sessionId,hasLastMessage:!!lastMessage,lastMessageRole:lastMessage?.role,lastMessageContentLength:lastMessage?.content?.length,lastMessageContentPreview:lastMessage?.content?.substring(0,100),messagesCount:targetConv.messages.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+			// #endregion
 			if (lastMessage && lastMessage.role === "assistant") {
 				// Handle both incremental updates (delta) and full content (part.text)
 				// The SDK may send part.text as full content, not just the delta
 				const currentContent = lastMessage.content;
+				
+				// Filter out user message echo: if assistant message is empty and token matches the last user message, ignore it
+				// This happens when the server echoes the user's message in the first stream event
+				if (!currentContent && targetConv.messages.length >= 2) {
+					const lastUserMessage = targetConv.messages[targetConv.messages.length - 2];
+					if (lastUserMessage && lastUserMessage.role === "user" && token === lastUserMessage.content) {
+						// #region agent log
+						fetch('http://127.0.0.1:7244/ingest/cee3721f-acd3-48cd-bf4e-9190e480d32e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'opencode-obsidian-view.ts:196',message:'onStreamToken: ignoring user message echo',data:{sessionId,tokenLength:token.length,tokenPreview:token.substring(0,100),userMessageContent:lastUserMessage.content},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+						// #endregion
+						return;
+					}
+				}
+				
+				// #region agent log
+				fetch('http://127.0.0.1:7244/ingest/cee3721f-acd3-48cd-bf4e-9190e480d32e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'opencode-obsidian-view.ts:204',message:'onStreamToken: before content update',data:{sessionId,currentContentLength:currentContent.length,currentContentPreview:currentContent.substring(0,100),tokenLength:token.length,tokenPreview:token.substring(0,100),tokenEqualsCurrent:token === currentContent,tokenStartsWithCurrent:currentContent && token.startsWith(currentContent),tokenLonger:currentContent && token.length >= currentContent.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+				// #endregion
 				
 				// If token equals current content, no update needed
 				if (token === currentContent) {
@@ -140,6 +230,9 @@ export class OpenCodeObsidianView extends ItemView {
 					// Incremental update - append
 					lastMessage.content += token;
 				}
+				// #region agent log
+				fetch('http://127.0.0.1:7244/ingest/cee3721f-acd3-48cd-bf4e-9190e480d32e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'opencode-obsidian-view.ts:219',message:'onStreamToken: after content update',data:{sessionId,newContentLength:lastMessage.content.length,newContentPreview:lastMessage.content.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
+				// #endregion
 				// Incremental update - only update the message content, not entire view
 				this.updateMessages();
 			}
@@ -274,6 +367,9 @@ export class OpenCodeObsidianView extends ItemView {
 		if (this.currentAbortController) {
 			this.currentAbortController.abort();
 		}
+
+		// Stop periodic health check
+		this.stopPeriodicHealthCheck();
 	}
 
 	private renderView() {
@@ -403,22 +499,36 @@ export class OpenCodeObsidianView extends ItemView {
 		container.empty();
 
 		const statusEl = container.createDiv("opencode-obsidian-status");
-		// TODO: Get connection status from OpenCode Server client
-		const isConnected = this.plugin.settings.opencodeServer?.url
-			? true
-			: false;
 
-		if (!isConnected) {
+		// Use actual health check result
+		const isConnected =
+			this.plugin.opencodeClient?.isConnected() ?? false;
+		const isHealthy = this.lastHealthCheckResult ?? false;
+
+		if (!this.plugin.settings.opencodeServer?.url) {
 			statusEl.addClass("disconnected");
-			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			statusEl.textContent = "● not connected to OpenCode server.";
-		} else {
+			statusEl.textContent = "● Server URL not configured";
+		} else if (!isConnected) {
+			statusEl.addClass("disconnected");
+			statusEl.textContent = "● Not connected";
+		} else if (isHealthy) {
 			statusEl.addClass("connected");
-			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			statusEl.textContent = "● connected to OpenCode server.";
+			statusEl.textContent = "● Connected and healthy";
+		} else {
+			statusEl.addClass("disconnected");
+			statusEl.textContent = "● Connected but unhealthy";
 		}
 
 		const controls = container.createDiv("opencode-obsidian-controls");
+
+		// Check connection button
+		const checkConnBtn = controls.createEl("button", {
+			text: "Check connection",
+			cls: "mod-small",
+		});
+		checkConnBtn.onclick = () => {
+			void this.performHealthCheck();
+		};
 
 		// New conversation button
 		const newConvBtn = controls.createEl("button", {
@@ -651,7 +761,15 @@ export class OpenCodeObsidianView extends ItemView {
 					copyBtn.textContent = "Copy";
 				}, 2000);
 			} catch (error) {
-				console.error("Failed to copy code:", error);
+				this.plugin.errorHandler.handleError(
+					error,
+					{
+						module: "OpenCodeObsidianView",
+						function: "addCodeActions",
+						operation: "Copying code to clipboard",
+					},
+					ErrorSeverity.Warning,
+				);
 				new Notice("Failed to copy code");
 			}
 		};
@@ -674,7 +792,15 @@ export class OpenCodeObsidianView extends ItemView {
 				await navigator.clipboard.writeText(message.content);
 				new Notice("Message copied to clipboard");
 			} catch (error) {
-				console.error("Failed to copy message:", error);
+				this.plugin.errorHandler.handleError(
+					error,
+					{
+						module: "OpenCodeObsidianView",
+						function: "addMessageActions",
+						operation: "Copying message to clipboard",
+					},
+					ErrorSeverity.Warning,
+				);
 				new Notice("Failed to copy message");
 			}
 		};
@@ -912,9 +1038,14 @@ export class OpenCodeObsidianView extends ItemView {
 				}
 			}
 		} catch (error) {
-			console.error(
-				"[OpenCode Obsidian] Failed to load conversations:",
+			this.plugin.errorHandler.handleError(
 				error,
+				{
+					module: "OpenCodeObsidianView",
+					function: "loadConversations",
+					operation: "Loading conversations",
+				},
+				ErrorSeverity.Warning,
 			);
 			// Fallback: create a default conversation
 			if (this.conversations.length === 0) {
@@ -936,9 +1067,14 @@ export class OpenCodeObsidianView extends ItemView {
 			};
 			await this.plugin.saveData(dataToSave);
 		} catch (error) {
-			console.error(
-				"[OpenCode Obsidian] Failed to save conversations:",
+			this.plugin.errorHandler.handleError(
 				error,
+				{
+					module: "OpenCodeObsidianView",
+					function: "saveConversations",
+					operation: "Saving conversations",
+				},
+				ErrorSeverity.Warning,
 			);
 		}
 	}
@@ -995,6 +1131,9 @@ export class OpenCodeObsidianView extends ItemView {
 			content,
 			timestamp: Date.now(),
 		};
+		// #region agent log
+		fetch('http://127.0.0.1:7244/ingest/cee3721f-acd3-48cd-bf4e-9190e480d32e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'opencode-obsidian-view.ts:1103',message:'sendMessage: adding user message',data:{contentLength:content.length,contentPreview:content.substring(0,200),sessionId:activeConv.sessionId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
+		// #endregion
 		activeConv.messages.push(userMessage);
 
 		// Create assistant message placeholder
@@ -1068,9 +1207,14 @@ export class OpenCodeObsidianView extends ItemView {
 						];
 					}
 				} catch (imageError) {
-					console.warn(
-						"[OpenCodeObsidianView] Failed to attach image:",
+					this.plugin.errorHandler.handleError(
 						imageError,
+						{
+							module: "OpenCodeObsidianView",
+							function: "handleFileInput",
+							operation: "Attaching image",
+						},
+						ErrorSeverity.Warning,
 					);
 					// Continue without image if reading fails
 				}
@@ -1123,9 +1267,13 @@ export class OpenCodeObsidianView extends ItemView {
 						sessionError instanceof Error
 							? sessionError.message
 							: "Unknown error";
-					console.error(
-						"[OpenCodeObsidianView] Session start failed:",
+					this.plugin.errorHandler.handleError(
 						sessionError,
+						{
+							module: "OpenCodeObsidianView",
+							function: "sendMessage",
+							operation: "Starting session",
+						},
 					);
 					// Don't wrap if error already contains diagnostic information
 					// (e.g., "Unable to connect" or "Failed to create session")
@@ -1188,9 +1336,13 @@ export class OpenCodeObsidianView extends ItemView {
 				{ sessionId, contentLength: content.length },
 			);
 		} catch (error) {
-			console.error(
-				"[OpenCodeObsidianView] Error sending message:",
+			this.plugin.errorHandler.handleError(
 				error,
+				{
+					module: "OpenCodeObsidianView",
+					function: "sendMessage",
+					operation: "Sending message",
+				},
 			);
 			const errorMessage =
 				error instanceof Error ? error.message : "Unknown error";
@@ -1451,7 +1603,15 @@ export class OpenCodeObsidianView extends ItemView {
 
 					new Notice(`Image attached: ${file.name}`);
 				} catch (error) {
-					console.error("Failed to save image:", error);
+					this.plugin.errorHandler.handleError(
+						error,
+						{
+							module: "OpenCodeObsidianView",
+							function: "handleFileInput",
+							operation: "Saving image",
+						},
+						ErrorSeverity.Warning,
+					);
 					const errorMessage =
 						error instanceof Error
 							? error.message

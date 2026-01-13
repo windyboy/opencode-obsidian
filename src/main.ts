@@ -142,9 +142,45 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 						console.debug(
 							"[OpenCode Obsidian] OpenCode Server client initialized",
 						);
+
+						// Perform initial health check
+						try {
+							const isHealthy = await this.opencodeClient.healthCheck();
+							if (isHealthy) {
+								console.debug(
+									"[OpenCode Obsidian] Initial health check passed",
+								);
+							} else {
+								this.errorHandler.handleError(
+									new Error("Initial health check failed - server may be unavailable"),
+									{
+										module: "OpenCodeObsidianPlugin",
+										function: "onload",
+										operation: "Initial health check",
+									},
+									ErrorSeverity.Warning,
+								);
+							}
+						} catch (error) {
+							this.errorHandler.handleError(
+								error,
+								{
+									module: "OpenCodeObsidianPlugin",
+									function: "onload",
+									operation: "Initial health check",
+								},
+								ErrorSeverity.Warning,
+							);
+						}
 					} else {
-						console.warn(
-							"[OpenCode Obsidian] OpenCode Server URL not configured",
+						this.errorHandler.handleError(
+							new Error("OpenCode Server URL not configured"),
+							{
+								module: "OpenCodeObsidianPlugin",
+								function: "onload",
+								operation: "Initial health check",
+							},
+							ErrorSeverity.Warning,
 						);
 					}
 				}
@@ -197,10 +233,8 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 					ErrorSeverity.Critical,
 				);
 			} else {
-				console.error(
-					"[OpenCode Obsidian] Failed to load plugin:",
-					error,
-				);
+				// Fallback if errorHandler is not initialized
+				console.error("[OpenCode Obsidian] Failed to load plugin:", error);
 				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				new Notice(
 					"Failed to load OpenCode Obsidian plugin. Check console for details.",
