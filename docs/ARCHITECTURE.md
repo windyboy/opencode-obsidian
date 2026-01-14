@@ -292,7 +292,7 @@ The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestratio
 
 **Implementation**: `src/tools/obsidian/permission-manager.ts`, `tool-executor.ts`
 
-**Status**: ✅ Implemented, but preview generation bypasses permission checks (see Known Issues)
+**Status**: ✅ Implemented (preview generation is permission-checked via `ObsidianToolExecutor.generatePreview`)
 
 ## Module Responsibilities
 
@@ -318,13 +318,10 @@ The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestratio
 -   Tool call coordination with Obsidian tools
 -   Permission modal integration for write operations
 
-### Agent Orchestrator (`src/orchestrator/agent-orchestrator.ts`)
+### Session Layer (`src/session/`)
 
--   Agent loop state machine (Planning → Executing → Validating → Retrying → Completed)
--   Task planning and execution coordination
--   Context retrieval for planning and execution
--   Step execution tracking and retry logic
--   Integration with TodoManager for task persistence
+-   `SessionEventBus`: decouples UI from transport callbacks
+-   `ConnectionManager`: centralized connect/reconnect lifecycle and diagnostics
 
 ### Error Handler (`src/utils/error-handler.ts`)
 
@@ -499,33 +496,23 @@ All write operations default to `dryRun=true` to show preview before applying.
 
 **Files**: `src/opencode-server/client.ts`
 
-#### 2. Task Orchestration Enhancement ✅ COMPLETED
+#### 2. Task Orchestration Enhancement (planned)
 
 **Issue**: TodoManager was only a data storage system without orchestration capabilities.
 
-**Solution**: Upgraded to full task orchestration system.
+**Status**: Not implemented in this repository snapshot.
 
--   Task planning and execution tracking
--   Progress monitoring and checkpoint support
--   Integration with agent loop state machine
-
-**Files**: `src/todo/todo-manager.ts`, `src/orchestrator/agent-orchestrator.ts`
-
-#### 3. MCP Integration ✅ COMPLETED
+#### 3. MCP Integration (planned)
 
 **Issue**: MCP integration was placeholder implementation.
 
-**Solution**: Implemented complete Model Context Protocol support.
+**Status**: Not implemented in this repository snapshot.
 
--   MCP server initialization and management
--   Dynamic tool registration from MCP servers
--   Resource management and unified permissions
-
-**Files**: `src/mcp/mcp-manager.ts`, `src/tools/obsidian/tool-registry.ts`
+**Files**: N/A
 
 ### Architecture Improvements (Medium Priority)
 
-#### 4. Session/Event Bus for Decoupling
+#### 4. Session/Event Bus for Decoupling ✅ IMPLEMENTED
 
 **Issue**: View directly binds SSE callbacks, UI knows transport protocol details.
 
@@ -540,7 +527,7 @@ All write operations default to `dryRun=true` to show preview before applying.
 
 **Files**: New `src/session/session-event-bus.ts`, `src/opencode-server/client.ts`, `src/opencode-obsidian-view.ts`
 
-#### 5. Unified Connection Management
+#### 5. Unified Connection Management ✅ IMPLEMENTED
 
 **Issue**: Connection management split between `main.ts` and `OpenCodeObsidianView.onOpen()`.
 
@@ -557,17 +544,17 @@ All write operations default to `dryRun=true` to show preview before applying.
 
 #### 6. Preview Generation Permission Check
 
-**Issue**: Preview generation (`generatePreview`) in `OpenCodeServerClient` directly reads files, bypassing `PermissionManager`.
+**Issue**: Preview generation and execution paths can drift, leading to inconsistent permission checks.
 
 **Impact**: Preview and execution use different code paths, inconsistent permission checks.
 
-**Solution**:
+**Solution** (current):
 
--   Move `generatePreview()` to `ObsidianToolExecutor`
+-   Keep preview generation in `ObsidianToolExecutor.generatePreview()`
 -   Unified permission check path for both preview and execution
 -   Consistent audit logging for preview operations
 
-**Files**: `src/tools/obsidian/tool-executor.ts`, `src/opencode-server/client.ts`
+**Files**: `src/tools/obsidian/tool-executor.ts`, `src/tools/obsidian/tool-registry.ts`
 
 ## Future Considerations
 

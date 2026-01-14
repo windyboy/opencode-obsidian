@@ -15,6 +15,8 @@ import { PermissionManager } from "./tools/obsidian/permission-manager";
 import { AuditLogger } from "./tools/obsidian/audit-logger";
 import { ToolPermission } from "./tools/obsidian/types";
 import type { PermissionScope } from "./tools/obsidian/permission-types";
+import { ConnectionManager } from "./session/connection-manager";
+import { SessionEventBus } from "./session/session-event-bus";
 
 /**
  * Maps string permission level settings to ToolPermission enum values
@@ -73,8 +75,28 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 	settings: OpenCodeObsidianSettings;
 	errorHandler: ErrorHandler;
 	opencodeClient: OpenCodeServerClient | null = null;
+	connectionManager: ConnectionManager | null = null;
+	sessionEventBus = new SessionEventBus();
 	toolRegistry: ObsidianToolRegistry | null = null;
 	permissionManager: PermissionManager | null = null;
+
+	private bindClientCallbacks(client: OpenCodeServerClient): void {
+		client.onStreamToken((sessionId, token, done) => {
+			this.sessionEventBus.emitStreamToken({ sessionId, token, done });
+		});
+		client.onStreamThinking((sessionId, content) => {
+			this.sessionEventBus.emitStreamThinking({ sessionId, content });
+		});
+		client.onProgressUpdate((sessionId, progress) => {
+			this.sessionEventBus.emitProgressUpdate({ sessionId, progress });
+		});
+		client.onSessionEnd((sessionId, reason) => {
+			this.sessionEventBus.emitSessionEnd({ sessionId, reason });
+		});
+		client.onError((error) => {
+			this.sessionEventBus.emitError({ error });
+		});
+	}
 
 	async onload() {
 		console.debug("[OpenCode Obsidian] Plugin loading...");
@@ -138,6 +160,11 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 							this.settings.opencodeServer,
 							this.errorHandler,
 						);
+						this.connectionManager = new ConnectionManager(
+							this.opencodeClient,
+							this.errorHandler,
+						);
+						this.bindClientCallbacks(this.opencodeClient);
 
 						console.debug(
 							"[OpenCode Obsidian] OpenCode Server client initialized",
@@ -251,6 +278,7 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 		if (this.opencodeClient) {
 			void this.opencodeClient.disconnect().then(() => {
 				this.opencodeClient = null;
+				this.connectionManager = null;
 			});
 		}
 
@@ -334,6 +362,7 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 			if (this.opencodeClient) {
 				await this.opencodeClient.disconnect();
 				this.opencodeClient = null;
+				this.connectionManager = null;
 			}
 			
 			// Create new client with updated configuration
@@ -342,6 +371,11 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 					this.settings.opencodeServer,
 					this.errorHandler,
 				);
+				this.connectionManager = new ConnectionManager(
+					this.opencodeClient,
+					this.errorHandler,
+				);
+				this.bindClientCallbacks(this.opencodeClient);
 				console.debug(
 					"[OpenCode Obsidian] OpenCode Server client reinitialized with new URL:",
 					newServerUrl,

@@ -26,6 +26,11 @@ interface UsageInfo {
 	outputTokens?: number;
 }
 
+interface CommandSuggestion {
+	name: string;
+	description?: string;
+}
+
 export class OpenCodeObsidianView extends ItemView {
 	plugin: OpenCodeObsidianPlugin;
 	private conversations: Conversation[] = [];
@@ -34,6 +39,9 @@ export class OpenCodeObsidianView extends ItemView {
 	private currentAbortController: AbortController | null = null;
 	private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
 	private lastHealthCheckResult: boolean | null = null;
+	private eventUnsubscribers: Array<() => void> = [];
+	private commandSuggestions: CommandSuggestion[] = [];
+	private commandSuggestionsLoading = false;
 
 	constructor(leaf: WorkspaceLeaf, plugin: OpenCodeObsidianPlugin) {
 		super(leaf);
@@ -65,31 +73,49 @@ export class OpenCodeObsidianView extends ItemView {
 		this.updateConversationSelector();
 		this.updateMessages();
 
-		// Register OpenCode Server client callbacks if client is initialized
-		if (this.plugin.opencodeClient) {
-			this.registerClientCallbacks();
+		this.registerEventBusCallbacks();
 
-			// Connect to server directly
+		// Connect via ConnectionManager (single authority for connection lifecycle)
+		if (this.plugin.connectionManager) {
+			try {
+				await this.plugin.connectionManager.ensureConnected(5000);
+				console.debug(
+					"[OpenCodeObsidianView] Connected to OpenCode Server",
+				);
+			} catch (error) {
+				this.plugin.errorHandler.handleError(
+					error,
+					{
+						module: "OpenCodeObsidianView",
+						function: "onOpen",
+						operation: "Connecting to OpenCode Server",
+					},
+					ErrorSeverity.Warning,
+				);
+				const errorMessage =
+					error instanceof Error ? error.message : String(error);
+				new Notice(`Connection failed: ${errorMessage}`);
+			}
+		} else if (this.plugin.opencodeClient) {
+			// Fallback for older initialization paths
 			if (!this.plugin.opencodeClient.isConnected()) {
 				try {
 					await this.plugin.opencodeClient.connect();
-					console.debug(
-						"[OpenCodeObsidianView] Connected to OpenCode Server",
-					);
 				} catch (error) {
 					this.plugin.errorHandler.handleError(
 						error,
 						{
 							module: "OpenCodeObsidianView",
 							function: "onOpen",
-							operation: "Connecting to OpenCode Server",
+							operation: "Connecting to OpenCode Server (fallback)",
 						},
+						ErrorSeverity.Warning,
 					);
-					const errorMessage =
-						error instanceof Error ? error.message : String(error);
-					new Notice(`Connection failed: ${errorMessage}`);
 				}
 			}
+		}
+
+		if (this.plugin.opencodeClient) {
 
 			// Perform initial health check
 			await this.performHealthCheck();
@@ -172,6 +198,52 @@ export class OpenCodeObsidianView extends ItemView {
 		}
 	}
 
+	private async ensureCommandSuggestions(): Promise<void> {
+		if (!this.plugin.opencodeClient) {
+			return;
+		}
+		if (this.commandSuggestionsLoading || this.commandSuggestions.length > 0) {
+			return;
+		}
+		this.commandSuggestionsLoading = true;
+		try {
+			this.commandSuggestions = await this.plugin.opencodeClient.listCommands();
+		} catch (error) {
+			this.plugin.errorHandler.handleError(
+				error,
+				{
+					module: "OpenCodeObsidianView",
+					function: "ensureCommandSuggestions",
+					operation: "Loading command suggestions",
+				},
+				ErrorSeverity.Warning,
+			);
+		} finally {
+			this.commandSuggestionsLoading = false;
+		}
+	}
+
+	private parseSlashCommand(content: string): { command: string; args: string } | null {
+		const trimmed = content.trim();
+		if (!trimmed.startsWith("/")) {
+			return null;
+		}
+		const withoutSlash = trimmed.slice(1);
+		if (!withoutSlash) {
+			return null;
+		}
+		const firstSpaceIndex = withoutSlash.search(/\s/);
+		if (firstSpaceIndex === -1) {
+			return { command: withoutSlash, args: "" };
+		}
+		const command = withoutSlash.slice(0, firstSpaceIndex);
+		const args = withoutSlash.slice(firstSpaceIndex).trimStart();
+		if (!command) {
+			return null;
+		}
+		return { command, args };
+	}
+
 	/**
 	 * Find conversation by sessionId
 	 */
@@ -184,13 +256,25 @@ export class OpenCodeObsidianView extends ItemView {
 	}
 
 	/**
-	 * Register callbacks for OpenCode Server client events
+	 * Register callbacks for OpenCode Server session events.
+	 * Events are forwarded by the plugin (single subscription point).
 	 */
-	private registerClientCallbacks(): void {
-		if (!this.plugin.opencodeClient) return;
+	private registerEventBusCallbacks(): void {
+		// Avoid double-registration when view re-opens.
+		for (const unsub of this.eventUnsubscribers) {
+			try {
+				unsub();
+			} catch {
+				// ignore
+			}
+		}
+		this.eventUnsubscribers = [];
+
+		const bus = this.plugin.sessionEventBus;
 
 		// Stream token callback - append tokens to the current assistant message
-		this.plugin.opencodeClient.onStreamToken((sessionId, token, done) => {
+		this.eventUnsubscribers.push(
+			bus.onStreamToken(({ sessionId, token, done }) => {
 			// Route by sessionId, not just active conversation
 			const targetConv =
 				this.findConversationBySessionId(sessionId) ||
@@ -256,10 +340,12 @@ export class OpenCodeObsidianView extends ItemView {
 				targetConv.updatedAt = Date.now();
 				void this.saveConversations();
 			}
-		});
+			}),
+		);
 
 		// Stream thinking callback
-		this.plugin.opencodeClient.onStreamThinking((sessionId, content) => {
+		this.eventUnsubscribers.push(
+			bus.onStreamThinking(({ sessionId, content }) => {
 			// Route by sessionId
 			const targetConv =
 				this.findConversationBySessionId(sessionId) ||
@@ -283,10 +369,12 @@ export class OpenCodeObsidianView extends ItemView {
 					lastMessage,
 				);
 			}
-		});
+			}),
+		);
 
 		// Error callback - check if error has sessionId, otherwise fallback to activeConv
-		this.plugin.opencodeClient.onError((error) => {
+		this.eventUnsubscribers.push(
+			bus.onError(({ error }) => {
 			// Try to extract sessionId from error if available
 			let targetConv: Conversation | null = null;
 			const errorWithSessionId = error as { sessionId?: string };
@@ -316,10 +404,12 @@ export class OpenCodeObsidianView extends ItemView {
 				this.isStreaming = false;
 				this.updateStreamingStatus(false);
 			}
-		});
+			}),
+		);
 
 		// Progress update callback
-		this.plugin.opencodeClient.onProgressUpdate((sessionId, progress) => {
+		this.eventUnsubscribers.push(
+			bus.onProgressUpdate(({ sessionId, progress }) => {
 			// Route by sessionId
 			const targetConv =
 				this.findConversationBySessionId(sessionId) ||
@@ -348,10 +438,12 @@ export class OpenCodeObsidianView extends ItemView {
 					lastMessage,
 				);
 			}
-		});
+			}),
+		);
 
 		// Session end callback
-		this.plugin.opencodeClient.onSessionEnd((sessionId, reason) => {
+		this.eventUnsubscribers.push(
+			bus.onSessionEnd(({ sessionId, reason }) => {
 			// Route by sessionId
 			const targetConv = this.findConversationBySessionId(sessionId);
 			if (targetConv && targetConv.sessionId === sessionId) {
@@ -368,7 +460,8 @@ export class OpenCodeObsidianView extends ItemView {
 			if (reason === "error") {
 				new Notice("Session ended due to error");
 			}
-		});
+			}),
+		);
 	}
 
 	async onClose() {
@@ -376,6 +469,15 @@ export class OpenCodeObsidianView extends ItemView {
 		if (this.currentAbortController) {
 			this.currentAbortController.abort();
 		}
+
+		for (const unsub of this.eventUnsubscribers) {
+			try {
+				unsub();
+			} catch {
+				// ignore
+			}
+		}
+		this.eventUnsubscribers = [];
 
 		// Stop periodic health check
 		this.stopPeriodicHealthCheck();
@@ -510,13 +612,18 @@ export class OpenCodeObsidianView extends ItemView {
 		const statusEl = container.createDiv("opencode-obsidian-status");
 
 		// Use actual health check result
-		const isConnected =
-			this.plugin.opencodeClient?.isConnected() ?? false;
+		const connectionState =
+			this.plugin.connectionManager?.getDiagnostics().state ??
+			(this.plugin.opencodeClient?.getConnectionState() ?? "disconnected");
+		const isConnected = connectionState === "connected";
 		const isHealthy = this.lastHealthCheckResult ?? false;
 
 		if (!this.plugin.settings.opencodeServer?.url) {
 			statusEl.addClass("disconnected");
 			statusEl.textContent = "● Server URL not configured";
+		} else if (connectionState === "error") {
+			statusEl.addClass("disconnected");
+			statusEl.textContent = "● Connection error";
 		} else if (!isConnected) {
 			statusEl.addClass("disconnected");
 			statusEl.textContent = "● Not connected";
@@ -985,6 +1092,13 @@ export class OpenCodeObsidianView extends ItemView {
 			},
 		});
 
+		const suggestionContainer = inputContainer.createDiv(
+			"opencode-obsidian-command-suggestions",
+		);
+		const suggestionList = suggestionContainer.createDiv(
+			"opencode-obsidian-command-suggestions-list",
+		);
+
 		// Input status bar
 		const statusBar = inputContainer.createDiv(
 			"opencode-obsidian-input-status",
@@ -1005,7 +1119,112 @@ export class OpenCodeObsidianView extends ItemView {
 			}
 		};
 
-		textarea.oninput = updateCharCount;
+		let currentSuggestions: CommandSuggestion[] = [];
+		let selectedSuggestionIndex = -1;
+
+		const hideSuggestions = () => {
+			suggestionContainer.removeClass("is-visible");
+			currentSuggestions = [];
+			selectedSuggestionIndex = -1;
+		};
+
+		const applySuggestion = (suggestion: CommandSuggestion) => {
+			const value = textarea.value;
+			const trimmed = value.startsWith("/") ? value.slice(1) : value;
+			const firstSpaceIndex = trimmed.search(/\s/);
+			const rest =
+				firstSpaceIndex === -1 ? "" : trimmed.slice(firstSpaceIndex);
+			textarea.value = `/${suggestion.name}${rest || " "}`;
+			hideSuggestions();
+			textarea.focus();
+			updateCharCount();
+			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
+			textarea.style.height = "auto";
+			textarea.style.height = Math.min(textarea.scrollHeight, 200) + "px";
+		};
+
+		const renderSuggestions = (suggestions: CommandSuggestion[]) => {
+			suggestionList.empty();
+			currentSuggestions = suggestions;
+			selectedSuggestionIndex = suggestions.length > 0 ? 0 : -1;
+			if (suggestions.length === 0) {
+				hideSuggestions();
+				return;
+			}
+			suggestionContainer.addClass("is-visible");
+			suggestions.forEach((suggestion, index) => {
+				const item = suggestionList.createDiv(
+					"opencode-obsidian-command-suggestion",
+				);
+				if (index === selectedSuggestionIndex) {
+					item.addClass("is-selected");
+				}
+				const nameEl = item.createSpan(
+					"opencode-obsidian-command-suggestion-name",
+				);
+				nameEl.textContent = `/${suggestion.name}`;
+				if (suggestion.description) {
+					const descEl = item.createSpan(
+						"opencode-obsidian-command-suggestion-description",
+					);
+					descEl.textContent = suggestion.description;
+				}
+				item.onclick = () => applySuggestion(suggestion);
+			});
+		};
+
+		const showStatusSuggestion = (text: string) => {
+			suggestionList.empty();
+			const item = suggestionList.createDiv(
+				"opencode-obsidian-command-suggestion opencode-obsidian-command-suggestion-empty",
+			);
+			item.textContent = text;
+			suggestionContainer.addClass("is-visible");
+			currentSuggestions = [];
+			selectedSuggestionIndex = -1;
+		};
+
+		const updateCommandSuggestions = async () => {
+			const value = textarea.value;
+			if (!value.startsWith("/")) {
+				hideSuggestions();
+				return;
+			}
+			if (!this.plugin.opencodeClient) {
+				showStatusSuggestion("Server not connected.");
+				return;
+			}
+			if (this.commandSuggestions.length === 0) {
+				if (!this.commandSuggestionsLoading) {
+					showStatusSuggestion("Loading commands...");
+				}
+				await this.ensureCommandSuggestions();
+			}
+			const query = value.slice(1).split(/\s+/)[0]?.toLowerCase() ?? "";
+			const matches = this.commandSuggestions.filter((suggestion) =>
+				query ? suggestion.name.toLowerCase().startsWith(query) : true,
+			);
+			const limited = matches.slice(0, 8);
+			if (limited.length === 0) {
+				if (query) {
+					showStatusSuggestion("No matching commands.");
+				} else {
+					hideSuggestions();
+				}
+				return;
+			}
+			renderSuggestions(limited);
+		};
+
+		const handleInputChange = () => {
+			updateCharCount();
+			void updateCommandSuggestions();
+			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
+			textarea.style.height = "auto";
+			textarea.style.height = Math.min(textarea.scrollHeight, 200) + "px";
+		};
+
+		textarea.oninput = handleInputChange;
 		updateCharCount();
 
 		const buttonContainer = inputContainer.createDiv(
@@ -1075,19 +1294,62 @@ export class OpenCodeObsidianView extends ItemView {
 
 		// Handle Enter key (Shift+Enter for new line)
 		textarea.onkeydown = (e) => {
+			if (suggestionContainer.hasClass("is-visible")) {
+				if (e.key === "ArrowDown") {
+					e.preventDefault();
+					if (currentSuggestions.length > 0) {
+						selectedSuggestionIndex =
+							(selectedSuggestionIndex + 1) % currentSuggestions.length;
+						renderSuggestions(currentSuggestions);
+					}
+					return;
+				}
+				if (e.key === "ArrowUp") {
+					e.preventDefault();
+					if (currentSuggestions.length > 0) {
+						selectedSuggestionIndex =
+							(selectedSuggestionIndex - 1 + currentSuggestions.length) %
+							currentSuggestions.length;
+						renderSuggestions(currentSuggestions);
+					}
+					return;
+				}
+				if (e.key === "Tab") {
+					const suggestion = currentSuggestions[selectedSuggestionIndex];
+					if (selectedSuggestionIndex >= 0 && suggestion) {
+						e.preventDefault();
+						applySuggestion(suggestion);
+						return;
+					}
+				}
+				if (e.key === "Escape") {
+					e.preventDefault();
+					hideSuggestions();
+					return;
+				}
+				if (
+					e.key === "Enter" &&
+					!e.shiftKey &&
+					selectedSuggestionIndex >= 0
+				) {
+					const suggestion = currentSuggestions[selectedSuggestionIndex];
+					if (suggestion) {
+						e.preventDefault();
+						applySuggestion(suggestion);
+						return;
+					}
+				}
+			}
 			if (e.key === "Enter" && !e.shiftKey) {
 				e.preventDefault();
 				sendBtn.click();
 			}
 		};
 
-		// Auto-resize textarea
-		textarea.oninput = () => {
-			updateCharCount();
-			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-			textarea.style.height = "auto";
-
-			textarea.style.height = Math.min(textarea.scrollHeight, 200) + "px";
+		textarea.onblur = () => {
+			setTimeout(() => {
+				hideSuggestions();
+			}, 150);
 		};
 	}
 
@@ -1380,6 +1642,10 @@ export class OpenCodeObsidianView extends ItemView {
 			await this.sendMessage(content);
 			return;
 		}
+		if (content.trim().startsWith("/") && !this.parseSlashCommand(content)) {
+			new Notice("Enter a command after /.");
+			return;
+		}
 
 		// Add user message
 		const userMessage: Message = {
@@ -1398,6 +1664,7 @@ export class OpenCodeObsidianView extends ItemView {
 			timestamp: Date.now(),
 		};
 		activeConv.messages.push(assistantMessage);
+		const slashCommand = this.parseSlashCommand(content);
 
 		this.isStreaming = true;
 		this.currentAbortController = new AbortController();
@@ -1413,22 +1680,21 @@ export class OpenCodeObsidianView extends ItemView {
 				);
 			}
 
-			// Ensure client is connected
-			if (!this.plugin.opencodeClient.isConnected()) {
-				try {
-					await this.plugin.opencodeClient.connect();
-				} catch (error) {
-					throw new Error(
-						`Failed to connect to OpenCode Server: ${error instanceof Error ? error.message : "Unknown error"}`,
-					);
-				}
+			// Ensure client is connected (waits for SSE to be established)
+			if (this.plugin.connectionManager) {
+				await this.plugin.connectionManager.ensureConnected(10000);
+			} else if (!this.plugin.opencodeClient.isConnected()) {
+				await this.plugin.opencodeClient.connect();
 			}
 
 			// Check if there's a pending image path to attach
 			const imagePath = activeConv.pendingImagePath;
 			let images: ImageAttachment[] | undefined;
 
-			if (imagePath) {
+			if (imagePath && slashCommand) {
+				new Notice("Attachments are not supported for commands.");
+				activeConv.pendingImagePath = undefined;
+			} else if (imagePath) {
 				// Read image file and convert to base64
 				try {
 					const imageFile =
@@ -1494,17 +1760,6 @@ export class OpenCodeObsidianView extends ItemView {
 			if (!sessionId) {
 				// Start a new session
 				try {
-					// Ensure connection is established
-					if (!this.plugin.opencodeClient.isConnected()) {
-						console.debug(
-							"[OpenCodeObsidianView] Not connected, connecting...",
-						);
-						await this.plugin.opencodeClient.connect();
-						console.debug(
-							"[OpenCodeObsidianView] Connected to OpenCode Server",
-						);
-					}
-
 					sessionId = await this.plugin.opencodeClient.startSession(
 						sessionContext,
 						this.plugin.settings.agent,
@@ -1556,17 +1811,35 @@ export class OpenCodeObsidianView extends ItemView {
 				}
 			}
 
-			// Send message to OpenCode Server
+			// Send message or command to OpenCode Server
 			try {
-				await this.plugin.opencodeClient.sendSessionMessage(
-					sessionId,
-					content,
-					images,
-				);
+				if (slashCommand) {
+					const commandResponse =
+						await this.plugin.opencodeClient.sendSessionCommand(
+							sessionId,
+							slashCommand.command,
+							slashCommand.args,
+							this.plugin.settings.agent,
+						);
+					assistantMessage.content =
+						commandResponse ?? "Command executed.";
+					this.isStreaming = false;
+					this.updateStreamingStatus(false);
+					this.updateMessages();
+				} else {
+					await this.plugin.opencodeClient.sendSessionMessage(
+						sessionId,
+						content,
+						images,
+					);
+				}
 			} catch (sendError) {
 				const errorText =
 					sendError instanceof Error ? sendError.message : "";
-				if (errorText.includes("Session") && errorText.includes("not found")) {
+				if (
+					errorText.includes("Session") &&
+					errorText.includes("not found")
+				) {
 					activeConv.sessionId = null;
 					const refreshedSessionId =
 						await this.plugin.opencodeClient.startSession(
@@ -1575,11 +1848,26 @@ export class OpenCodeObsidianView extends ItemView {
 							this.plugin.settings.instructions,
 						);
 					activeConv.sessionId = refreshedSessionId;
-					await this.plugin.opencodeClient.sendSessionMessage(
-						refreshedSessionId,
-						content,
-						images,
-					);
+					if (slashCommand) {
+						const commandResponse =
+							await this.plugin.opencodeClient.sendSessionCommand(
+								refreshedSessionId,
+								slashCommand.command,
+								slashCommand.args,
+								this.plugin.settings.agent,
+							);
+						assistantMessage.content =
+							commandResponse ?? "Command executed.";
+						this.isStreaming = false;
+						this.updateStreamingStatus(false);
+						this.updateMessages();
+					} else {
+						await this.plugin.opencodeClient.sendSessionMessage(
+							refreshedSessionId,
+							content,
+							images,
+						);
+					}
 				} else {
 					throw sendError;
 				}
@@ -1802,9 +2090,39 @@ export class OpenCodeObsidianView extends ItemView {
 			this.currentAbortController.abort();
 			this.currentAbortController = null;
 		}
+		this.abortActiveSession();
 		this.isStreaming = false;
 		// Only update input area to reflect streaming stopped
 		this.updateStreamingStatus(false);
+	}
+
+	private abortActiveSession(): void {
+		const activeConv = this.getActiveConversation();
+		const sessionId = activeConv?.sessionId ?? null;
+		const client = this.plugin.opencodeClient;
+		if (!sessionId || !client) {
+			return;
+		}
+
+		void (async () => {
+			try {
+				await client.abortSession(sessionId);
+				if (activeConv) {
+					activeConv.sessionId = null;
+				}
+			} catch (error) {
+				this.plugin.errorHandler.handleError(
+					error,
+					{
+						module: "OpenCodeObsidianView",
+						function: "abortActiveSession",
+						operation: "Aborting session",
+						metadata: { sessionId },
+					},
+					ErrorSeverity.Warning,
+				);
+			}
+		})();
 	}
 
 	private async regenerateResponse(message: Message) {

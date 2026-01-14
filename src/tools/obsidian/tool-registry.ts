@@ -201,28 +201,9 @@ export class ObsidianToolRegistry {
           throw error
         }
 
-        // For update_note, try to get preview by executing with dryRun=true
-        let preview: PermissionRequest['preview'] | undefined
-        if (toolName === 'obsidian.update_note') {
-          try {
-            // Create a modified args with dryRun=true to get preview
-            const modifiedArgs = { ...args as Record<string, unknown>, dryRun: true }
-            const previewResult = await this.execute(toolName, modifiedArgs, sessionId, callId, false) as { preview?: { originalContent?: string; newContent?: string; addedLines?: number; removedLines?: number } }
-            
-            if (previewResult?.preview) {
-              const updateArgs = args as ObsidianUpdateNoteInput
-              preview = {
-                originalContent: previewResult.preview.originalContent ?? '',
-                newContent: previewResult.preview.newContent ?? '',
-                mode: updateArgs.mode,
-                addedLines: previewResult.preview.addedLines,
-                removedLines: previewResult.preview.removedLines
-              }
-            }
-          } catch {
-            // If preview fails, continue without preview
-          }
-        }
+        // Generate preview (permission-checked) before requesting approval.
+        // If preview generation is denied by scope, fail fast and do not show modal.
+        const preview = await this.generatePreview(toolName, args, sessionId, callId)
 
         // Request permission from user
         const permissionRequest: PermissionRequest = {

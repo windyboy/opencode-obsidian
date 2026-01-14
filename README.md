@@ -9,18 +9,15 @@ OpenCode Obsidian is an Obsidian plugin that provides a sophisticated chat inter
 -   Chat with AI directly from Obsidian with real-time streaming responses
 -   Connect to OpenCode Server for agent orchestration and tool execution
 -   Execute Obsidian tools with permission-based security (read/write notes, search vault, etc.)
--   Attach images to conversations for multimodal interactions
--   Manage multiple conversation sessions with auto-save
+-   Manage multiple conversations with auto-save (single active session at a time)
 -   Use custom agents and skills for specialized tasks
--   Configure advanced context management and task orchestration
--   Access MCP (Model Context Protocol) servers for extended functionality
 
 ## Features
 
 -   **Chat Interface**: Clean, intuitive chat UI with incremental DOM updates for smooth performance
+-   **Slash commands**: Run `/command` shortcuts with server-provided suggestions
 -   **Real-time Streaming**: See AI responses stream in real-time with token-by-token updates
--   **Image Support**: Attach images to conversations for multimodal AI interactions
--   **Multiple Sessions**: Manage multiple conversation sessions with auto-save and persistence
+-   **Multiple Conversations**: Manage multiple conversations with auto-save and persistence (only one active OpenCode session/generation at a time)
 -   **OpenCode Server Integration**: HTTP + SSE connection for agent orchestration and tool execution
 -   **Tool Execution**: 6 core Obsidian tools with permission-based security (read-only, scoped-write, full-write)
 -   **Custom Agents & Skills**: Configure specialized agents and skills (managed by OpenCode Server)
@@ -195,13 +192,13 @@ When reviewing code, focus on:
 
 1. Click the 📎 button in the input area
 2. Select an image file or drag and drop
-3. The image will be attached to your next message
+3. The image will be saved into the vault. Forwarding image parts to OpenCode Server is currently planned.
 
 ### Managing Conversations
 
 -   Click "New Chat" to start a new conversation
 -   Use the conversation selector to switch between conversations
--   Each conversation maintains its own session and context
+-   Each conversation persists locally; only one OpenCode session runs at a time
 
 ### Connection Status
 
@@ -225,6 +222,10 @@ opencode-obsidian/
 │   │   ├── client.ts                # SDK client helper + Obsidian wrapper (OpenCodeServerClient)
 │   │   ├── client.test.ts           # Client unit tests
 │   │   └── types.ts                 # Protocol message definitions
+│   ├── session/
+│   │   ├── connection-manager.ts     # Centralized connection + reconnect lifecycle
+│   │   ├── connection-manager.test.ts # ConnectionManager unit tests
+│   │   └── session-event-bus.ts      # Domain event bus for streaming/session events
 │   ├── tools/
 │   │   └── obsidian/                # Obsidian tool system
 │   │       ├── tool-executor.ts     # Tool execution with permissions
@@ -332,6 +333,7 @@ To bump the plugin version:
 -   Ensure the vault has write permissions
 -   Check that the `05_Attachments` folder exists (created automatically)
 -   Verify image file size is under 10MB
+-   Note: Sending images to OpenCode Server is currently not supported
 
 ### Configuration not loading
 

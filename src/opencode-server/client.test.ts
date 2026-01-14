@@ -188,6 +188,40 @@ describe("OpenCodeServerClient", () => {
 		it("should check if connected", () => {
 			expect(client.isConnected()).toBe(false);
 		});
+
+		it("should enter error state after max reconnect attempts", async () => {
+			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+			client = new OpenCodeServerClient(
+				{
+					url: "http://127.0.0.1:4096",
+					autoReconnect: true,
+					reconnectDelay: 1000,
+					reconnectMaxAttempts: 2,
+				},
+				errorHandler,
+			);
+
+			const reconnectAttempts: Array<{ attempt: number; nextDelayMs: number }> =
+				[];
+			client.onReconnectAttempt((info) => {
+				reconnectAttempts.push({
+					attempt: info.attempt,
+					nextDelayMs: info.nextDelayMs,
+				});
+			});
+
+			mockSDKClient.event.subscribe.mockRejectedValue(new Error("fail"));
+
+			await client.connect();
+			await vi.advanceTimersByTimeAsync(1000);
+			await vi.runAllTimersAsync();
+
+			expect(client.getConnectionState()).toBe("error");
+			expect(client.getLastConnectionError()).toBeInstanceOf(Error);
+			expect(reconnectAttempts.length).toBeGreaterThan(0);
+
+			randomSpy.mockRestore();
+		});
 	});
 
 	describe("Session management", () => {
@@ -368,7 +402,7 @@ describe("OpenCodeServerClient", () => {
 	describe("Message sending", () => {
 		beforeEach(() => {
 			client = new OpenCodeServerClient(
-				{ url: "http://127.0.0.1:4096" },
+				{ url: "http://127.0.0.1:4096", autoReconnect: false },
 				errorHandler,
 			);
 		});
@@ -460,6 +494,41 @@ describe("OpenCodeServerClient", () => {
 
 			// Should still send message but log warning
 			expect(mockSDKClient.session.prompt).toHaveBeenCalled();
+		});
+
+		it("should block concurrent prompts until session is idle", async () => {
+			mockSDKClient.session.get.mockResolvedValue({
+				data: { id: "session-123", info: { id: "session-123" } },
+				error: null,
+			});
+			mockSDKClient.session.prompt.mockResolvedValue({
+				data: {},
+				error: null,
+			});
+
+			await client.sendMessage("session-123", "Hello");
+			await expect(
+				client.sendMessage("session-123", "Again"),
+			).rejects.toThrow("already in progress");
+
+			mockSDKClient.event.subscribe.mockResolvedValue({
+				data: {
+					stream: createMockStream([
+						{
+							type: "session.idle",
+							properties: { sessionId: "session-123" },
+						},
+					]),
+				},
+				error: null,
+			});
+
+			await client.connect();
+			await vi.runAllTimersAsync();
+
+			await expect(
+				client.sendMessage("session-123", "Again"),
+			).resolves.toBeUndefined();
 		});
 	});
 
@@ -621,15 +690,16 @@ describe("OpenCodeServerClient", () => {
 
 			const fetchImpl = (testClient as any).createObsidianFetch();
 			const fetchPromise = fetchImpl("http://example.com/api");
+			const assertion = expect(fetchPromise).rejects.toThrow(
+				"Unable to connect to OpenCode Server",
+			);
 
 			// Advance timers to trigger timeout (100ms) before request resolves (200ms)
 			vi.advanceTimersByTime(150);
 			await vi.runAllTimersAsync();
 
 			// The promise should reject with timeout error
-			await expect(fetchPromise).rejects.toThrow(
-				"Unable to connect to OpenCode Server",
-			);
+			await assertion;
 		});
 
 		it("should use longer timeout for message endpoints", async () => {

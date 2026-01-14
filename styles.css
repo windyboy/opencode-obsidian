@@ -616,6 +616,54 @@
   box-shadow: 0 0 0 3px var(--color-accent-1), 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+.opencode-obsidian-command-suggestions {
+  display: none;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.opencode-obsidian-command-suggestions.is-visible {
+  display: block;
+}
+
+.opencode-obsidian-command-suggestions-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.opencode-obsidian-command-suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.opencode-obsidian-command-suggestion.is-selected,
+.opencode-obsidian-command-suggestion:hover {
+  background: var(--background-modifier-hover);
+}
+
+.opencode-obsidian-command-suggestion-name {
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  color: var(--text-normal);
+}
+
+.opencode-obsidian-command-suggestion-description {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.opencode-obsidian-command-suggestion-empty {
+  cursor: default;
+  color: var(--text-muted);
+}
+
 .opencode-obsidian-input-status {
   display: flex;
   justify-content: space-between;

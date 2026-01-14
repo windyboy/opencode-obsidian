@@ -7,9 +7,18 @@ import type {
 	ConnectionState,
 	SessionContext,
 	ProgressUpdate,
+	ReconnectAttemptInfo,
 } from "./types";
 
 export type OpenCodeClient = ReturnType<typeof createOpencodeClient>;
+
+export interface CommandSummary {
+	name: string;
+	description?: string;
+	template?: string;
+	agent?: string;
+	model?: string;
+}
 
 function createClient(
 	baseUrl: string,
@@ -30,6 +39,7 @@ export class OpenCodeServerClient {
 	private errorHandler: ErrorHandler;
 	private config: OpenCodeServerConfig;
 	private connectionState: ConnectionState = "disconnected";
+	private lastConnectionError: Error | null = null;
 
 	// Event callback arrays
 	private streamTokenCallbacks: Array<
@@ -45,12 +55,21 @@ export class OpenCodeServerClient {
 	private sessionEndCallbacks: Array<
 		(sessionId: string, reason?: string) => void
 	> = [];
+	private connectionStateCallbacks: Array<
+		(state: ConnectionState, info?: { error?: Error | null }) => void
+	> = [];
+	private reconnectAttemptCallbacks: Array<(info: ReconnectAttemptInfo) => void> =
+		[];
 
 	// Session management
 	private currentSessionId: string | null = null;
 	private sessions: Map<string, Session> = new Map();
 	private eventStreamAbort: AbortController | null = null;
 	private lastEventId: string | null = null;
+	private promptInFlightSessionId: string | null = null;
+	private commandListCache:
+		| { commands: CommandSummary[]; fetchedAt: number }
+		| null = null;
 
 	constructor(config: OpenCodeServerConfig, errorHandler: ErrorHandler) {
 		const normalizedUrl = this.normalizeServerUrl(config.url);
@@ -370,6 +389,55 @@ export class OpenCodeServerClient {
 	}
 
 	/**
+	 * Subscribe to connection state changes.
+	 */
+	onConnectionStateChange(
+		callback: (state: ConnectionState, info?: { error?: Error | null }) => void,
+	): void {
+		this.connectionStateCallbacks.push(callback);
+	}
+
+	/**
+	 * Subscribe to reconnect attempt info (next delay, attempt count).
+	 */
+	onReconnectAttempt(callback: (info: ReconnectAttemptInfo) => void): void {
+		this.reconnectAttemptCallbacks.push(callback);
+	}
+
+	getLastConnectionError(): Error | null {
+		return this.lastConnectionError;
+	}
+
+	private setConnectionState(
+		state: ConnectionState,
+		info?: { error?: Error | null },
+	): void {
+		if (state === this.connectionState) {
+			return;
+		}
+		this.connectionState = state;
+		if (info && "error" in info) {
+			this.lastConnectionError = info.error ?? null;
+		}
+		for (const callback of this.connectionStateCallbacks) {
+			try {
+				callback(state, { error: this.lastConnectionError });
+			} catch (error) {
+				this.errorHandler.handleError(
+					error,
+					{
+						module: "OpenCodeClient",
+						function: "setConnectionState",
+						operation: "Notifying connection state listeners",
+						metadata: { state },
+					},
+					ErrorSeverity.Warning,
+				);
+			}
+		}
+	}
+
+	/**
 	 * Get current connection state
 	 */
 	getConnectionState(): ConnectionState {
@@ -467,7 +535,8 @@ export class OpenCodeServerClient {
 			return;
 		}
 
-		this.connectionState = "connecting";
+		this.lastConnectionError = null;
+		this.setConnectionState("connecting", { error: null });
 
 		// Subscribe to SDK client events without blocking the caller.
 		this.startEventLoop();
@@ -479,8 +548,9 @@ export class OpenCodeServerClient {
 	async disconnect(): Promise<void> {
 		this.eventStreamAbort?.abort();
 		this.eventStreamAbort = null;
-		this.connectionState = "disconnected";
+		this.setConnectionState("disconnected", { error: null });
 		this.currentSessionId = null;
+		this.promptInFlightSessionId = null;
 		this.sessions.clear();
 		console.debug("[OpenCodeClient] Disconnected from OpenCode Server");
 	}
@@ -489,6 +559,11 @@ export class OpenCodeServerClient {
 	 * Create a new session
 	 */
 	async createSession(title?: string): Promise<string> {
+		if (this.promptInFlightSessionId) {
+			throw new Error(
+				"Another session operation is already in progress. Only one session can run at a time.",
+			);
+		}
 		try {
 			const response = await this.sdkClient.session.create({
 				body: {
@@ -550,6 +625,11 @@ export class OpenCodeServerClient {
 		agent?: string,
 		instructions?: string[],
 	): Promise<string> {
+		if (this.promptInFlightSessionId) {
+			throw new Error(
+				"A session is already active. Only one session can run at a time.",
+			);
+		}
 		try {
 			// Create session with context information in title
 			const contextInfo = context
@@ -595,6 +675,19 @@ export class OpenCodeServerClient {
 	 * Send a message to a session
 	 */
 	async sendMessage(sessionId: string, content: string): Promise<void> {
+		if (
+			this.promptInFlightSessionId &&
+			this.promptInFlightSessionId !== sessionId
+		) {
+			throw new Error(
+				"A different session is already running. Only one session can run at a time.",
+			);
+		}
+		if (this.promptInFlightSessionId === sessionId) {
+			throw new Error(
+				"A message is already in progress for this session. Please wait for it to finish.",
+			);
+		}
 		try {
 			let session = this.sessions.get(sessionId);
 			if (!session) {
@@ -608,7 +701,8 @@ export class OpenCodeServerClient {
 				this.sessions.set(sessionId, session);
 			}
 
-			
+			this.promptInFlightSessionId = sessionId;
+
 			// session.prompt is a streaming operation - the HTTP request may not return immediately
 			// Results are delivered via SSE event stream, so we use Promise.race with a timeout
 			// to handle cases where the request doesn't resolve quickly
@@ -650,6 +744,9 @@ export class OpenCodeServerClient {
 				throw new Error(`Failed to send message: ${response.error}`);
 			}
 		} catch (error) {
+			if (this.promptInFlightSessionId === sessionId) {
+				this.promptInFlightSessionId = null;
+			}
 			this.errorHandler.handleError(
 				error,
 				{
@@ -709,6 +806,118 @@ export class OpenCodeServerClient {
 	}
 
 	/**
+	 * Send a command to a session.
+	 */
+	async sendSessionCommand(
+		sessionId: string,
+		command: string,
+		argumentsText: string,
+		agent?: string,
+	): Promise<string | null> {
+		if (
+			this.promptInFlightSessionId &&
+			this.promptInFlightSessionId !== sessionId
+		) {
+			throw new Error(
+				"A different session is already running. Only one session can run at a time.",
+			);
+		}
+		if (this.promptInFlightSessionId === sessionId) {
+			throw new Error(
+				"A command is already in progress for this session. Please wait for it to finish.",
+			);
+		}
+		try {
+			this.promptInFlightSessionId = sessionId;
+			const response = await this.sdkClient.session.command({
+				path: { id: sessionId },
+				body: {
+					command,
+					arguments: argumentsText,
+					...(agent ? { agent } : {}),
+				},
+			});
+
+			if (response.error) {
+				throw new Error(`Failed to send command: ${response.error}`);
+			}
+
+			const parts = (response.data as { parts?: Array<{ type?: string; text?: string }> })
+				?.parts;
+			if (!parts || parts.length === 0) {
+				return null;
+			}
+
+			const text = parts
+				.filter((part) => part.type === "text" && part.text)
+				.map((part) => part.text)
+				.join("");
+			return text || null;
+		} catch (error) {
+			this.errorHandler.handleError(
+				error,
+				{
+					module: "OpenCodeClient",
+					function: "sendSessionCommand",
+					operation: "Sending session command",
+					metadata: { sessionId, command },
+				},
+				ErrorSeverity.Error,
+			);
+			throw error;
+		} finally {
+			if (this.promptInFlightSessionId === sessionId) {
+				this.promptInFlightSessionId = null;
+			}
+		}
+	}
+
+	/**
+	 * List available server commands (cached).
+	 */
+	async listCommands(force: boolean = false): Promise<CommandSummary[]> {
+		const cacheTtlMs = 5 * 60 * 1000;
+		const now = Date.now();
+		if (
+			!force &&
+			this.commandListCache &&
+			now - this.commandListCache.fetchedAt < cacheTtlMs
+		) {
+			return this.commandListCache.commands;
+		}
+
+		try {
+			const response = await this.sdkClient.command.list();
+			if (response.error || !response.data) {
+				throw new Error(
+					`Failed to load commands: ${response.error ?? "Unknown error"}`,
+				);
+			}
+
+			const commands = response.data.map((command) => ({
+				name: command.name,
+				description: command.description,
+				template: command.template,
+				agent: command.agent,
+				model: command.model,
+			}));
+			this.commandListCache = { commands, fetchedAt: now };
+			return commands;
+		} catch (error) {
+			this.errorHandler.handleError(
+				error,
+				{
+					module: "OpenCodeClient",
+					function: "listCommands",
+					operation: "Listing commands",
+				},
+				ErrorSeverity.Warning,
+			);
+			return [];
+		}
+	}
+
+	/**
 	 * Abort a session
 	 */
 	async abortSession(sessionId: string): Promise<void> {
@@ -750,6 +959,9 @@ export class OpenCodeServerClient {
 			this.sessions.delete(sessionId);
 			if (this.currentSessionId === sessionId) {
 				this.currentSessionId = null;
+			}
+			if (this.promptInFlightSessionId === sessionId) {
+				this.promptInFlightSessionId = null;
 			}
 		} catch (error) {
 			this.errorHandler.handleError(
@@ -907,13 +1119,13 @@ export class OpenCodeServerClient {
 			while (!signal.aborted) {
 				try {
 					if (attempt > 0) {
-						this.connectionState = "reconnecting";
+						this.setConnectionState("reconnecting");
 					}
 					
 					const stream = await this.createEventStream(signal);
 
 					if (this.connectionState !== "connected") {
-						this.connectionState = "connected";
+						this.setConnectionState("connected");
 						console.debug(
 							"[OpenCodeClient] Connected to OpenCode Server",
 						);
@@ -933,18 +1145,60 @@ export class OpenCodeServerClient {
 						throw error;
 					}
 
-					attempt = Math.min(attempt + 1, maxAttempts);
-					if (maxAttempts !== 0 && attempt >= maxAttempts) {
-						throw error;
+					attempt += 1;
+					const cappedAttempt =
+						maxAttempts === 0 ? attempt : Math.min(attempt, maxAttempts);
+					const delayBase = Math.min(
+						baseDelay * 2 ** (cappedAttempt - 1),
+						maxDelay,
+					);
+					const jitter = Math.floor(
+						Math.random() *
+							Math.max(1, Math.floor(delayBase * 0.25)),
+					);
+					const delay = delayBase + jitter;
+
+					for (const callback of this.reconnectAttemptCallbacks) {
+						try {
+							callback({
+								attempt: cappedAttempt,
+								nextDelayMs: delay,
+								maxAttempts,
+							});
+						} catch (callbackError) {
+							this.errorHandler.handleError(
+								callbackError,
+								{
+									module: "OpenCodeClient",
+									function: "subscribeToEvents",
+									operation:
+										"Notifying reconnect attempt listeners",
+									metadata: {
+										attempt: cappedAttempt,
+										nextDelayMs: delay,
+									},
+								},
+								ErrorSeverity.Warning,
+							);
+						}
 					}
 
-					const delay = Math.min(baseDelay * 2 ** attempt, maxDelay);
+					if (maxAttempts !== 0 && attempt >= maxAttempts) {
+						const err =
+							error instanceof Error ? error : new Error(String(error));
+						this.lastConnectionError = err;
+						this.setConnectionState("error", { error: err });
+						throw err;
+					}
+
 					await this.sleep(delay);
 				}
 			}
 		} catch (error) {
+			const err = error instanceof Error ? error : new Error(String(error));
+			this.lastConnectionError = err;
 			this.errorHandler.handleError(
-				error,
+				err,
 				{
 					module: "OpenCodeClient",
 					function: "subscribeToEvents",
@@ -958,7 +1212,17 @@ export class OpenCodeServerClient {
 
 	private startEventLoop(): void {
 		void this.subscribeToEvents().catch(() => {
-			this.connectionState = "disconnected";
+			if (this.eventStreamAbort?.signal.aborted) {
+				this.setConnectionState("disconnected", { error: null });
+				return;
+			}
+
+			// Preserve error state if it was set; otherwise fall back to disconnected.
+			if (this.connectionState !== "error") {
+				this.setConnectionState("disconnected", {
+					error: this.lastConnectionError,
+				});
+			}
 		});
 	}
 
@@ -1290,6 +1554,9 @@ export class OpenCodeServerClient {
 	 * Handle session.idle events for completion
 	 */
 	private handleSessionIdle(sessionId: string): void {
+		if (this.promptInFlightSessionId === sessionId) {
+			this.promptInFlightSessionId = null;
+		}
 		// Signal completion with empty token and done=true
 		this.streamTokenCallbacks.forEach((callback) => {
 			try {
@@ -1332,6 +1599,9 @@ export class OpenCodeServerClient {
 		this.sessions.delete(sessionId);
 		if (this.currentSessionId === sessionId) {
 			this.currentSessionId = null;
+		}
+		if (this.promptInFlightSessionId === sessionId) {
+			this.promptInFlightSessionId = null;
 		}
 
 		// Notify callbacks

@@ -930,18 +930,11 @@ export class ObsidianToolExecutor {
             false,
             true // Preview is always a dry run
           )
-          
-          console.debug('[ObsidianToolExecutor] Permission denied for preview generation:', permissionResult.reason)
-          return {
-            originalContent: undefined,
-            newContent: updateArgs.content,
-            mode: updateArgs.mode
-            // Note: restricted/reason are intentionally omitted as they're not in PermissionRequest['preview'] type
-            // The absence of originalContent indicates a restricted preview
-          }
+
+          throw new Error(`Permission denied: ${permissionResult.reason}`)
         }
       } catch (error) {
-        // Permission check failed - log and return restricted preview
+        // Permission check failed - log and deny preview.
         await this.createAuditLog(
           toolName,
           sessionId,
@@ -955,12 +948,7 @@ export class ObsidianToolExecutor {
           false,
           true
         )
-        console.warn('[ObsidianToolExecutor] Permission check failed for preview:', error)
-        return {
-          originalContent: undefined,
-          newContent: updateArgs.content,
-          mode: updateArgs.mode
-        }
+        throw error
       }
       
       // Permission allowed - read file and generate preview

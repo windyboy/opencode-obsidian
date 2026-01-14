@@ -22,7 +22,14 @@ export type ConnectionState =
 	| "disconnected"
 	| "connecting"
 	| "connected"
-	| "reconnecting";
+	| "reconnecting"
+	| "error";
+
+export interface ReconnectAttemptInfo {
+	attempt: number;
+	nextDelayMs: number;
+	maxAttempts: number;
+}
 
 /**
  * Session context information for Obsidian
