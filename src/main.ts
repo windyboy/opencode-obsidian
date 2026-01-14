@@ -2,7 +2,7 @@ import { Plugin, Notice } from "obsidian";
 import {
 	OpenCodeObsidianView,
 	VIEW_TYPE_OPENCODE_OBSIDIAN,
-} from "./opencode-obsidian-view";
+} from "./views/opencode-obsidian-view";
 import { OpenCodeObsidianSettingTab } from "./settings";
 import type { OpenCodeObsidianSettings } from "./types";
 import { UI_CONFIG } from "./utils/constants";
@@ -81,21 +81,19 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 	permissionManager: PermissionManager | null = null;
 
 	private bindClientCallbacks(client: OpenCodeServerClient): void {
-		client.onStreamToken((sessionId, token, done) => {
-			this.sessionEventBus.emitStreamToken({ sessionId, token, done });
-		});
-		client.onStreamThinking((sessionId, content) => {
-			this.sessionEventBus.emitStreamThinking({ sessionId, content });
-		});
-		client.onProgressUpdate((sessionId, progress) => {
-			this.sessionEventBus.emitProgressUpdate({ sessionId, progress });
-		});
-		client.onSessionEnd((sessionId, reason) => {
-			this.sessionEventBus.emitSessionEnd({ sessionId, reason });
-		});
-		client.onError((error) => {
-			this.sessionEventBus.emitError({ error });
-		});
+		client.onStreamToken((sessionId, token, done) =>
+			this.sessionEventBus.emitStreamToken({ sessionId, token, done }),
+		);
+		client.onStreamThinking((sessionId, content) =>
+			this.sessionEventBus.emitStreamThinking({ sessionId, content }),
+		);
+		client.onProgressUpdate((sessionId, progress) =>
+			this.sessionEventBus.emitProgressUpdate({ sessionId, progress }),
+		);
+		client.onSessionEnd((sessionId, reason) =>
+			this.sessionEventBus.emitSessionEnd({ sessionId, reason }),
+		);
+		client.onError((error) => this.sessionEventBus.emitError({ error }));
 	}
 
 	async onload() {
@@ -341,13 +339,10 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 		}
 
 		// Check if server URL changed and reinitialize client if needed
-		const oldClientUrl = this.opencodeClient?.getConfig()?.url;
-		const newServerUrl = this.settings.opencodeServer?.url;
-		
-		// Normalize URLs for comparison (both should be normalized, but compare as strings)
-		const normalizedOldUrl = oldClientUrl?.trim().replace(/\/+$/, '') || '';
-		const normalizedNewUrl = newServerUrl?.trim().replace(/\/+$/, '') || '';
-		const urlChanged = normalizedOldUrl !== normalizedNewUrl && newServerUrl;
+		const normalizeUrl = (url?: string) => url?.trim().replace(/\/+$/, "") || "";
+		const oldUrl = normalizeUrl(this.opencodeClient?.getConfig()?.url);
+		const newUrl = normalizeUrl(this.settings.opencodeServer?.url);
+		const urlChanged = oldUrl !== newUrl && newUrl;
 		
 		await this.saveData(this.settings);
 		
@@ -355,7 +350,7 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 		if (urlChanged) {
 			console.debug(
 				"[OpenCode Obsidian] Server URL changed, reinitializing client...",
-				{ oldClientUrl, newServerUrl },
+				{ oldUrl, newUrl },
 			);
 			
 			// Disconnect old client
@@ -378,7 +373,7 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 				this.bindClientCallbacks(this.opencodeClient);
 				console.debug(
 					"[OpenCode Obsidian] OpenCode Server client reinitialized with new URL:",
-					newServerUrl,
+					newUrl,
 				);
 			}
 		}

@@ -12,6 +12,11 @@ This document describes the architecture and key design decisions for the OpenCo
 -   [Data Flow](#data-flow)
 -   [Known Issues and Improvement Plans](#known-issues-and-improvement-plans)
 
+## Related Documentation
+
+-   [Agent Design Document](./AGENT-DESIGN.md) - Detailed design for the Agent system
+-   [Agents User Guide](./AGENTS.md) - User-facing documentation for creating and using agents
+
 ## Overview
 
 The OpenCode Obsidian plugin is built with a modular architecture that separates concerns into distinct modules. The plugin follows TypeScript best practices with strong typing, dependency injection, and clear separation of responsibilities.
