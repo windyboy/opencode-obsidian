@@ -18,22 +18,38 @@ export class HeaderComponent {
 			(this.plugin.opencodeClient?.getConnectionState() ?? "disconnected");
 		const isConnected = connectionState === "connected";
 		const isHealthy = this.getLastHealthCheckResult() ?? false;
+		const lastError = this.plugin.opencodeClient?.getLastConnectionError();
 
 		if (!this.plugin.settings.opencodeServer?.url) {
 			statusEl.addClass("disconnected");
 			statusEl.textContent = "● Server URL not configured";
+			statusEl.setAttribute("title", "Configure OpenCode Server URL in settings");
 		} else if (connectionState === "error") {
 			statusEl.addClass("disconnected");
+			const errorMessage = lastError?.message || "Connection error";
 			statusEl.textContent = "● Connection error";
+			statusEl.setAttribute("title", `Error: ${errorMessage}`);
+		} else if (connectionState === "reconnecting") {
+			statusEl.addClass("reconnecting");
+			statusEl.textContent = "● Reconnecting...";
+			statusEl.setAttribute("title", "Attempting to reconnect to server");
+		} else if (connectionState === "connecting") {
+			statusEl.addClass("connecting");
+			statusEl.textContent = "● Connecting...";
+			statusEl.setAttribute("title", "Connecting to server");
 		} else if (!isConnected) {
 			statusEl.addClass("disconnected");
 			statusEl.textContent = "● Not connected";
+			const errorMessage = lastError?.message || "Not connected to server";
+			statusEl.setAttribute("title", errorMessage);
 		} else if (isHealthy) {
 			statusEl.addClass("connected");
-			statusEl.textContent = "● Connected and healthy";
+			statusEl.textContent = "● Connected";
+			statusEl.setAttribute("title", `Connected to ${this.plugin.settings.opencodeServer.url}`);
 		} else {
 			statusEl.addClass("disconnected");
 			statusEl.textContent = "● Connected but unhealthy";
+			statusEl.setAttribute("title", "Server is responding but health check failed");
 		}
 
 		const controls = container.createDiv("opencode-obsidian-controls");

@@ -3,6 +3,8 @@ import { Notice, App } from "obsidian";
 import { ConfirmationModal } from "../modals/confirmation-modal";
 
 export class ConversationSelectorComponent {
+	private isLoading = false;
+
 	constructor(
 		private getConversations: () => Conversation[],
 		private getActiveConversationId: () => string | null,
@@ -12,6 +14,9 @@ export class ConversationSelectorComponent {
 		private deleteConversation: (id: string) => Promise<void>,
 		private createNewConversation: () => Promise<void>,
 		private exportConversation: (id: string) => Promise<void>,
+		private getIsLoading?: () => boolean,
+		private syncFromServer?: () => Promise<void>,
+		private viewSessionDiff?: (sessionId: string) => Promise<void>,
 	) {}
 
 	private get conversations(): Conversation[] {
@@ -22,19 +27,57 @@ export class ConversationSelectorComponent {
 		return this.getActiveConversationId();
 	}
 
+	/**
+	 * Format timestamp as relative time (e.g., "2 min ago", "1 hour ago")
+	 */
+	private formatRelativeTime(timestamp: number): string {
+		const now = Date.now();
+		const diff = now - timestamp;
+		const seconds = Math.floor(diff / 1000);
+		const minutes = Math.floor(seconds / 60);
+		const hours = Math.floor(minutes / 60);
+		const days = Math.floor(hours / 24);
+
+		if (seconds < 60) {
+			return "just now";
+		} else if (minutes < 60) {
+			return `${minutes} min${minutes !== 1 ? 's' : ''} ago`;
+		} else if (hours < 24) {
+			return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+		} else if (days < 7) {
+			return `${days} day${days !== 1 ? 's' : ''} ago`;
+		} else {
+			// Format as date for older conversations
+			const date = new Date(timestamp);
+			return date.toLocaleDateString();
+		}
+	}
+
 	render(container: HTMLElement): void {
 		container.empty();
 
+		// Check if loading
+		const isLoading = this.getIsLoading?.() ?? false;
+
 		if (this.conversations.length === 0) {
-			container.createDiv(
-				"opencode-obsidian-no-conversations",
-			).textContent = "No conversations yet";
+			const emptyDiv = container.createDiv("opencode-obsidian-no-conversations");
+			if (isLoading) {
+				const spinner = emptyDiv.createSpan("opencode-obsidian-spinner opencode-obsidian-spinner-large");
+				emptyDiv.createSpan({ text: " Loading conversations..." });
+			} else {
+				emptyDiv.textContent = "No conversations yet";
+			}
 			return;
 		}
 
 		const tabsContainer = container.createDiv(
 			"opencode-obsidian-tabs-container",
 		);
+
+		// Add loading indicator if loading
+		if (isLoading) {
+			tabsContainer.addClass("opencode-obsidian-tabs-loading");
+		}
 
 		this.conversations.forEach((conv) => {
 			const tab = tabsContainer.createDiv("opencode-obsidian-tab");
@@ -44,9 +87,28 @@ export class ConversationSelectorComponent {
 				tab.addClass("active");
 			}
 
-			const title = tab.createSpan("opencode-obsidian-tab-title");
+			// Create tab content container
+			const tabContent = tab.createDiv("opencode-obsidian-tab-content");
+
+			// Add session indicator for conversations with active server sessions
+			if (conv.sessionId) {
+				const sessionIndicator = tab.createSpan("opencode-obsidian-tab-session-indicator");
+				sessionIndicator.textContent = "●";
+				sessionIndicator.setAttribute("title", "Synced with server");
+			}
+
+			const title = tabContent.createSpan("opencode-obsidian-tab-title");
 			title.textContent = conv.title;
-			tab.setAttribute("title", conv.title);
+
+			// Add session metadata (message count, last updated)
+			const metadata = tabContent.createDiv("opencode-obsidian-tab-metadata");
+			const messageCount = conv.messages.length;
+			const lastUpdated = this.formatRelativeTime(conv.updatedAt);
+			metadata.textContent = `${messageCount} msg${messageCount !== 1 ? 's' : ''} • ${lastUpdated}`;
+
+			// Update tooltip to include metadata
+			const tooltipText = `${conv.title}\n${messageCount} message${messageCount !== 1 ? 's' : ''} • Last updated ${lastUpdated}`;
+			tab.setAttribute("title", tooltipText);
 
 			let isEditing = false;
 			title.ondblclick = (e) => {
@@ -63,7 +125,7 @@ export class ConversationSelectorComponent {
 				input.style.maxWidth = "300px";
 
 				title.style.display = "none";
-				tab.insertBefore(input, title);
+				tabContent.insertBefore(input, title);
 
 				input.focus();
 				input.select();
@@ -105,20 +167,36 @@ export class ConversationSelectorComponent {
 			closeBtn.textContent = "×";
 			closeBtn.setAttribute("title", "Delete conversation");
 
-			closeBtn.onclick = (e) => {
+			closeBtn.onclick = async (e) => {
 				e.stopPropagation();
-				void this.deleteConversation(conv.id);
+				if (isLoading) return; // Prevent action during loading
+				
+				// Show confirmation modal
+				const hasSession = !!conv.sessionId;
+				const message = hasSession
+					? `Are you sure you want to delete "${conv.title}"? This will also delete the session from the server.`
+					: `Are you sure you want to delete "${conv.title}"?`;
+				
+				new ConfirmationModal(
+					this.app,
+					"Delete conversation",
+					message,
+					async () => {
+						await this.deleteConversation(conv.id);
+					}
+				).open();
 			};
 
 			tab.oncontextmenu = (e) => {
+				if (isLoading) return; // Prevent action during loading
 				e.preventDefault();
 				e.stopPropagation();
 				this.showConversationContextMenu(tab, conv.id, e);
 			};
 
-			tab.onclick = () => {
-				if (!isEditing) {
-					void this.switchConversation(conv.id);
+			tab.onclick = async () => {
+				if (!isEditing && !isLoading) { // Prevent action during loading
+					await this.switchConversation(conv.id);
 				}
 			};
 		});
@@ -126,11 +204,37 @@ export class ConversationSelectorComponent {
 		const newTab = tabsContainer.createDiv(
 			"opencode-obsidian-tab opencode-obsidian-tab-new",
 		);
-		newTab.textContent = "+";
-		newTab.setAttribute("title", "New conversation");
-		newTab.onclick = () => {
-			void this.createNewConversation();
+		if (isLoading) {
+			const spinner = newTab.createSpan("opencode-obsidian-spinner");
+			newTab.addClass("opencode-obsidian-tab-disabled");
+		} else {
+			newTab.textContent = "+";
+		}
+		newTab.setAttribute("title", isLoading ? "Loading..." : "New conversation");
+		newTab.onclick = async () => {
+			if (!isLoading) {
+				await this.createNewConversation();
+			}
 		};
+
+		// Add sync button if syncFromServer callback is provided
+		if (this.syncFromServer) {
+			const syncTab = tabsContainer.createDiv(
+				"opencode-obsidian-tab opencode-obsidian-tab-sync",
+			);
+			if (isLoading) {
+				const spinner = syncTab.createSpan("opencode-obsidian-spinner");
+				syncTab.addClass("opencode-obsidian-tab-disabled");
+			} else {
+				syncTab.innerHTML = "↻";
+			}
+			syncTab.setAttribute("title", isLoading ? "Syncing..." : "Sync from server");
+			syncTab.onclick = async () => {
+				if (!isLoading && this.syncFromServer) {
+					await this.syncFromServer();
+				}
+			};
+		}
 	}
 
 	private showConversationContextMenu(
@@ -176,12 +280,38 @@ export class ConversationSelectorComponent {
 			void this.exportConversation(conversationId);
 		};
 
+		// Add "View changes" option if session has a sessionId and callback is provided
+		if (conversation.sessionId && this.viewSessionDiff) {
+			const viewChangesItem = menu.createDiv("opencode-obsidian-context-menu-item");
+			viewChangesItem.textContent = "View changes";
+			viewChangesItem.onclick = () => {
+				menu.remove();
+				if (conversation.sessionId && this.viewSessionDiff) {
+					void this.viewSessionDiff(conversation.sessionId);
+				}
+			};
+		}
+
 		const deleteItem = menu.createDiv("opencode-obsidian-context-menu-item");
 		deleteItem.textContent = "Delete";
 		deleteItem.addClass("opencode-obsidian-context-menu-item-danger");
 		deleteItem.onclick = () => {
 			menu.remove();
-			void this.deleteConversation(conversationId);
+			
+			// Show confirmation modal
+			const hasSession = !!conversation.sessionId;
+			const message = hasSession
+				? `Are you sure you want to delete "${conversation.title}"? This will also delete the session from the server.`
+				: `Are you sure you want to delete "${conversation.title}"?`;
+			
+			new ConfirmationModal(
+				this.app,
+				"Delete conversation",
+				message,
+				async () => {
+					await this.deleteConversation(conversationId);
+				}
+			).open();
 		};
 
 		document.body.appendChild(menu);

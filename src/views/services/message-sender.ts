@@ -1,5 +1,6 @@
 import type { Message, ImageAttachment, Conversation } from "../../types";
 import type OpenCodeObsidianPlugin from "../../main";
+import type { SessionManager } from "./session-manager";
 import { Notice, TFile, App } from "obsidian";
 import { ErrorSeverity } from "../../utils/error-handler";
 
@@ -47,6 +48,7 @@ export class MessageSender {
 		private showUsageInfo: (usage: UsageInfo) => void,
 		private showToolUse: (toolUse: ToolUse) => void,
 		private showToolResult: (toolResult: ToolResult) => void,
+		private sessionManager?: SessionManager,
 	) {}
 
 	async sendMessage(content: string): Promise<void> {
@@ -152,62 +154,11 @@ export class MessageSender {
 				activeConv.pendingImagePath = undefined;
 			}
 
-			// Get or create session ID
-			const activeFile = this.app.workspace.getActiveFile();
-			const sessionContext = activeFile
-				? {
-						currentNote: activeFile.path,
-						properties:
-							this.app.metadataCache.getFileCache(activeFile)
-								?.frontmatter,
-					}
-				: undefined;
-
+			// Get or create session ID using SessionManager
 			let sessionId = activeConv.sessionId || this.plugin.opencodeClient?.getCurrentSessionId() || null;
 
-			const startNewSession = async (): Promise<string> => {
-				if (!this.plugin.opencodeClient) {
-					throw new Error("OpenCode Server client not initialized");
-				}
-				try {
-					const newSessionId = await this.plugin.opencodeClient.startSession(
-						sessionContext,
-						this.plugin.settings.agent,
-						this.plugin.settings.instructions,
-					);
-					activeConv.sessionId = newSessionId;
-					console.debug("[OpenCodeObsidianView] Started new session:", newSessionId);
-					return newSessionId;
-				} catch (sessionError) {
-					const errorMsg = sessionError instanceof Error ? sessionError.message : "Unknown error";
-					this.plugin.errorHandler.handleError(
-						sessionError,
-						{
-							module: "OpenCodeObsidianView",
-							function: "sendMessage",
-							operation: "Starting session",
-						},
-					);
-					if (
-						errorMsg.includes("Unable to connect") ||
-						errorMsg.includes("Failed to create session") ||
-						errorMsg.includes("Failed to start session")
-					) {
-						throw sessionError;
-					}
-					throw new Error(`Failed to start session: ${errorMsg}`);
-				}
-			};
-
-			if (!sessionId) {
-				sessionId = await startNewSession();
-			} else if (this.plugin.opencodeClient) {
-				const hasSession = await this.plugin.opencodeClient.ensureSession(sessionId);
-				if (!hasSession) {
-					activeConv.sessionId = null;
-					sessionId = await startNewSession();
-				}
-			}
+			// Ensure session exists on server before sending message
+			sessionId = await this.ensureSession(activeConv, sessionId);
 
 			// Send message or command to OpenCode Server
 			if (!this.plugin.opencodeClient) {
@@ -235,10 +186,12 @@ export class MessageSender {
 			try {
 				await sendWithRetry(sessionId);
 			} catch (sendError) {
+				// Handle session not found errors by creating new session and retrying
 				const errorText = sendError instanceof Error ? sendError.message : "";
 				if (errorText.includes("Session") && errorText.includes("not found")) {
+					console.debug("[MessageSender] Session not found, creating new session and retrying");
 					activeConv.sessionId = null;
-					const refreshedSessionId = await startNewSession();
+					const refreshedSessionId = await this.createServerSession(activeConv);
 					await sendWithRetry(refreshedSessionId);
 				} else {
 					throw sendError;
@@ -288,6 +241,92 @@ export class MessageSender {
 		this.isStreaming = value;
 		this.setIsStreaming(value);
 		this.updateStreamingStatus(value);
+	}
+
+	/**
+	 * Ensure session exists on server, creating one if necessary
+	 * Handles session verification and creation with retry logic
+	 */
+	private async ensureSession(
+		conversation: Conversation,
+		sessionId: string | null,
+	): Promise<string> {
+		// If no sessionId, create a new session
+		if (!sessionId) {
+			return await this.createServerSession(conversation);
+		}
+
+		// Verify session exists on server
+		if (this.plugin.opencodeClient) {
+			const hasSession = await this.plugin.opencodeClient.ensureSession(sessionId);
+			if (!hasSession) {
+				// Session not found on server, create new one
+				conversation.sessionId = null;
+				return await this.createServerSession(conversation);
+			}
+		}
+
+		return sessionId;
+	}
+
+	/**
+	 * Create a new session on the server using SessionManager or fallback to client
+	 */
+	private async createServerSession(conversation: Conversation): Promise<string> {
+		if (!this.plugin.opencodeClient) {
+			throw new Error("OpenCode Server client not initialized");
+		}
+
+		try {
+			let newSessionId: string;
+
+			// Use SessionManager if available for proper session management
+			if (this.sessionManager && this.plugin.opencodeClient.isConnected()) {
+				newSessionId = await this.sessionManager.createSession(conversation.title);
+			} else {
+				// Fallback to direct client call for backward compatibility
+				const activeFile = this.app.workspace.getActiveFile();
+				const sessionContext = activeFile
+					? {
+							currentNote: activeFile.path,
+							properties:
+								this.app.metadataCache.getFileCache(activeFile)
+									?.frontmatter,
+						}
+					: undefined;
+
+				newSessionId = await this.plugin.opencodeClient.startSession(
+					sessionContext,
+					this.plugin.settings.agent,
+					this.plugin.settings.instructions,
+				);
+			}
+
+			// Update conversation with new sessionId
+			conversation.sessionId = newSessionId;
+			await this.saveConversations();
+
+			console.debug("[MessageSender] Created new session:", newSessionId);
+			return newSessionId;
+		} catch (sessionError) {
+			const errorMsg = sessionError instanceof Error ? sessionError.message : "Unknown error";
+			this.plugin.errorHandler.handleError(
+				sessionError,
+				{
+					module: "MessageSender",
+					function: "createServerSession",
+					operation: "Creating server session",
+				},
+			);
+			if (
+				errorMsg.includes("Unable to connect") ||
+				errorMsg.includes("Failed to create session") ||
+				errorMsg.includes("Failed to start session")
+			) {
+				throw sessionError;
+			}
+			throw new Error(`Failed to create session: ${errorMsg}`);
+		}
 	}
 
 	async handleResponseChunk(chunk: unknown, message: Message): Promise<void> {

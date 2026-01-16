@@ -1,6 +1,7 @@
-import type { Conversation, Message } from "../../types";
+import type { Conversation, Message, PluginData } from "../../types";
 import type OpenCodeObsidianPlugin from "../../main";
-import { Notice } from "obsidian";
+import type { SessionManager } from "./session-manager";
+import { Notice, type WorkspaceLeaf } from "obsidian";
 import { ErrorSeverity } from "../../utils/error-handler";
 
 export class ConversationManager {
@@ -13,7 +14,17 @@ export class ConversationManager {
 		private saveCallback: () => Promise<void>,
 		private updateConversationSelector: () => void,
 		private updateMessages: () => void,
-	) {}
+		private sessionManager?: SessionManager,
+		private setIsLoading?: (loading: boolean) => void,
+		private leaf?: WorkspaceLeaf,
+	) {
+		// Set up session not found callback to automatically remove sessions from local cache
+		if (this.sessionManager) {
+			this.sessionManager.setOnSessionNotFoundCallback((sessionId) => {
+				this.handleSessionNotFound(sessionId);
+			});
+		}
+	}
 
 	private get conversations(): Conversation[] {
 		return this.getConversations();
@@ -25,11 +36,7 @@ export class ConversationManager {
 
 	async loadConversations(): Promise<void> {
 		try {
-			const saved = (await this.plugin.loadData()) as {
-				conversations?: Conversation[];
-				activeConversationId?: string;
-				sessionIds?: string[];
-			} | null;
+			const saved = (await this.plugin.loadData()) as PluginData | null;
 
 			console.debug(
 				"[OpenCodeObsidianView] Loading conversations from local storage:",
@@ -94,21 +101,19 @@ export class ConversationManager {
 
 	async saveConversations(): Promise<void> {
 		try {
-			const currentData = (await this.plugin.loadData()) as Record<
-				string,
-				unknown
-			> | null;
+			const currentData = (await this.plugin.loadData()) as PluginData | null;
 
-			// 收集所有 sessionId
+			// Collect all sessionIds
 			const sessionIds = this.conversations
 				.map((c) => c.sessionId)
 				.filter((id): id is string => id !== null && id !== undefined);
 
-			const dataToSave = {
+			const dataToSave: PluginData = {
 				...(currentData || {}),
 				conversations: this.conversations,
 				activeConversationId: this.activeConversationId,
 				sessionIds: sessionIds,
+				lastSyncTimestamp: currentData?.lastSyncTimestamp,
 			};
 			await this.plugin.saveData(dataToSave);
 		} catch (error) {
@@ -125,96 +130,202 @@ export class ConversationManager {
 	}
 
 	async createNewConversation(): Promise<void> {
-		const conversation: Conversation = {
-			id: `conv-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-			title: "New Chat",
-			messages: [],
-			createdAt: Date.now(),
-			updatedAt: Date.now(),
-		};
-
-		const newConversations = [...this.conversations];
-		newConversations.unshift(conversation);
-		this.setConversations(newConversations);
-		this.setActiveConversationId(conversation.id);
-		await this.saveConversations();
+		this.setIsLoading?.(true);
 		this.updateConversationSelector();
-		this.updateMessages();
+		try {
+			const conversation: Conversation = {
+				id: `conv-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+				title: "New Chat",
+				messages: [],
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+			};
+
+			// Create session on server if SessionManager is available and client is connected
+			if (this.sessionManager && this.plugin.opencodeClient?.isConnected()) {
+				try {
+					// Use retry method for better reliability
+					const sessionId = await this.sessionManager.createSessionWithRetry(conversation.title);
+					conversation.sessionId = sessionId;
+					new Notice("New conversation created and synced with server");
+				} catch (error) {
+					this.plugin.errorHandler.handleError(
+						error,
+						{
+							module: "ConversationManager",
+							function: "createNewConversation",
+							operation: "Creating server session",
+						},
+						ErrorSeverity.Warning,
+					);
+					// Show retry option to user
+					new Notice("Failed to create server session. Conversation will be local-only.");
+					// Continue with local-only conversation if server session creation fails
+				}
+			} else {
+				new Notice("New conversation created");
+			}
+
+			const newConversations = [...this.conversations];
+			newConversations.unshift(conversation);
+			this.setConversations(newConversations);
+			this.setActiveConversationId(conversation.id);
+			await this.saveConversations();
+			this.updateConversationSelector();
+			this.updateMessages();
+		} finally {
+			this.setIsLoading?.(false);
+			this.updateConversationSelector();
+		}
 	}
 
 	async switchConversation(conversationId: string): Promise<void> {
-		this.setActiveConversationId(conversationId);
-		await this.saveConversations();
+		const conversation = this.conversations.find((c) => c.id === conversationId);
+		if (!conversation) return;
+
+		this.setIsLoading?.(true);
 		this.updateConversationSelector();
-		this.updateMessages();
+		
+		try {
+			this.setActiveConversationId(conversationId);
+			
+			// Save last active session ID to workspace state
+			if (conversation.sessionId && this.leaf) {
+				this.leaf.setEphemeralState({ lastActiveSessionId: conversation.sessionId });
+			}
+			
+			await this.saveConversations();
+			this.updateConversationSelector();
+			this.updateMessages();
+		} finally {
+			this.setIsLoading?.(false);
+			this.updateConversationSelector();
+		}
 	}
 
 	async renameConversation(
 		conversationId: string,
 		newTitle: string,
 	): Promise<void> {
-		const conversation = this.conversations.find(
-			(c) => c.id === conversationId,
-		);
-		if (!conversation) return;
-
-		const trimmedTitle = newTitle.trim();
-		if (!trimmedTitle) {
-			new Notice("Title cannot be empty");
-			return;
-		}
-
-		const finalTitle = trimmedTitle.length > 100 ? `${trimmedTitle.substring(0, 97)}...` : trimmedTitle;
-
-		conversation.title = finalTitle;
-		conversation.updatedAt = Date.now();
-
-		// If server supports updating session title, sync it
-		if (conversation.sessionId && this.plugin.opencodeClient?.isConnected()) {
-			// TODO: If OpenCode Server supports updating session title, do it here
-		}
-
-		await this.saveConversations();
+		this.setIsLoading?.(true);
 		this.updateConversationSelector();
+		try {
+			const conversation = this.conversations.find(
+				(c) => c.id === conversationId,
+			);
+			if (!conversation) return;
+
+			const trimmedTitle = newTitle.trim();
+			if (!trimmedTitle) {
+				new Notice("Title cannot be empty");
+				return;
+			}
+
+			const finalTitle = trimmedTitle.length > 100 ? `${trimmedTitle.substring(0, 97)}...` : trimmedTitle;
+
+			conversation.title = finalTitle;
+			conversation.updatedAt = Date.now();
+
+			// Update session title on server if sessionId exists
+			if (conversation.sessionId && this.sessionManager && this.plugin.opencodeClient?.isConnected()) {
+				try {
+					// Use retry method for better reliability
+					await this.sessionManager.updateSessionTitleWithRetry(conversation.sessionId, finalTitle);
+					new Notice("Conversation renamed and synced with server");
+				} catch (error) {
+					this.plugin.errorHandler.handleError(
+						error,
+						{
+							module: "ConversationManager",
+							function: "renameConversation",
+							operation: "Updating server session title",
+							metadata: { sessionId: conversation.sessionId, title: finalTitle },
+						},
+						ErrorSeverity.Warning,
+					);
+					new Notice("Failed to update session title on server. Local title updated.");
+					// Continue with local update even if server update fails
+				}
+			} else {
+				new Notice("Conversation renamed");
+			}
+
+			await this.saveConversations();
+			this.updateConversationSelector();
+		} finally {
+			this.setIsLoading?.(false);
+			this.updateConversationSelector();
+		}
 	}
 
 	async deleteConversation(conversationId: string): Promise<void> {
-		const convs = this.conversations;
-		const convIndex = convs.findIndex(
-			(c) => c.id === conversationId,
-		);
-		if (convIndex === -1) return;
-
-		const conversation = convs[convIndex];
-		if (!conversation) return;
-
-		const wasActive = conversationId === this.activeConversationId;
-
-		// Remove the conversation
-		const newConversations = [...convs];
-		newConversations.splice(convIndex, 1);
-		this.setConversations(newConversations);
-
-		// Handle active conversation
-		if (wasActive) {
-			if (newConversations.length > 0) {
-				const newIndex = Math.min(
-					convIndex,
-					newConversations.length - 1,
-				);
-				this.setActiveConversationId(
-					newConversations[newIndex]?.id ?? null,
-				);
-			} else {
-				this.setActiveConversationId(null);
-				await this.createNewConversation();
-				return;
-			}
-		}
-
-		await this.saveConversations();
+		this.setIsLoading?.(true);
 		this.updateConversationSelector();
-		this.updateMessages();
+		try {
+			const convs = this.conversations;
+			const convIndex = convs.findIndex(
+				(c) => c.id === conversationId,
+			);
+			if (convIndex === -1) return;
+
+			const conversation = convs[convIndex];
+			if (!conversation) return;
+
+			// Delete session on server if sessionId exists
+			if (conversation.sessionId && this.sessionManager && this.plugin.opencodeClient?.isConnected()) {
+				try {
+					// Use retry method for better reliability
+					await this.sessionManager.deleteSessionWithRetry(conversation.sessionId);
+					new Notice("Conversation deleted and removed from server");
+				} catch (error) {
+					this.plugin.errorHandler.handleError(
+						error,
+						{
+							module: "ConversationManager",
+							function: "deleteConversation",
+							operation: "Deleting server session",
+							metadata: { sessionId: conversation.sessionId },
+						},
+						ErrorSeverity.Warning,
+					);
+					new Notice("Failed to delete session on server. Local conversation will be deleted.");
+					// Continue with local deletion even if server deletion fails
+				}
+			} else {
+				new Notice("Conversation deleted");
+			}
+
+			const wasActive = conversationId === this.activeConversationId;
+
+			// Remove the conversation
+			const newConversations = [...convs];
+			newConversations.splice(convIndex, 1);
+			this.setConversations(newConversations);
+
+			// Handle active conversation
+			if (wasActive) {
+				if (newConversations.length > 0) {
+					const newIndex = Math.min(
+						convIndex,
+						newConversations.length - 1,
+					);
+					this.setActiveConversationId(
+						newConversations[newIndex]?.id ?? null,
+					);
+				} else {
+					this.setActiveConversationId(null);
+					await this.createNewConversation();
+					return;
+				}
+			}
+
+			await this.saveConversations();
+			this.updateConversationSelector();
+			this.updateMessages();
+		} finally {
+			this.setIsLoading?.(false);
+			this.updateConversationSelector();
+		}
 	}
 
 	getActiveConversation(): Conversation | null {
@@ -268,5 +379,74 @@ export class ConversationManager {
 		return (
 			this.conversations.find((c) => c.sessionId === sessionId) || null
 		);
+	}
+
+	/**
+	 * Load message history from server for a conversation with a sessionId
+	 * Populates the conversation's messages array with server data
+	 */
+	async loadSessionMessages(conversationId: string): Promise<void> {
+		const conversation = this.conversations.find(
+			(c) => c.id === conversationId,
+		);
+		if (!conversation) {
+			throw new Error(`Conversation not found: ${conversationId}`);
+		}
+
+		if (!conversation.sessionId) {
+			throw new Error(`Conversation has no sessionId: ${conversationId}`);
+		}
+
+		if (!this.sessionManager) {
+			throw new Error("SessionManager not available");
+		}
+
+		if (!this.plugin.opencodeClient?.isConnected()) {
+			throw new Error("OpenCode client not connected");
+		}
+
+		try {
+			// Use retry method for better reliability
+			const messages = await this.sessionManager.loadSessionMessagesWithRetry(conversation.sessionId);
+			conversation.messages = messages;
+			conversation.updatedAt = Date.now();
+			await this.saveConversations();
+			this.updateMessages();
+		} catch (error) {
+			this.plugin.errorHandler.handleError(
+				error,
+				{
+					module: "ConversationManager",
+					function: "loadSessionMessages",
+					operation: "Loading session messages from server",
+					metadata: { conversationId, sessionId: conversation.sessionId },
+				},
+				ErrorSeverity.Error,
+			);
+			throw error;
+		}
+	}
+
+	/**
+	 * Handle session not found (404) by removing sessionId from conversation
+	 * This is called automatically when a 404 error is encountered
+	 */
+	private async handleSessionNotFound(sessionId: string): Promise<void> {
+		const conversation = this.conversations.find((c) => c.sessionId === sessionId);
+		if (!conversation) {
+			return;
+		}
+
+		console.debug(`[ConversationManager] Removing sessionId ${sessionId} from conversation ${conversation.id} due to 404 error`);
+		
+		// Remove sessionId from conversation (convert to local-only)
+		conversation.sessionId = undefined;
+		conversation.updatedAt = Date.now();
+		
+		await this.saveConversations();
+		this.updateConversationSelector();
+		
+		// Show notice to user
+		new Notice(`Session "${conversation.title}" was not found on server. Converted to local-only conversation.`);
 	}
 }

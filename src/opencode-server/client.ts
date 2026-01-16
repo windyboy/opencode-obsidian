@@ -9,6 +9,7 @@ import type {
 	ProgressUpdate,
 	ReconnectAttemptInfo,
 } from "./types";
+import type { SessionListItem, Message } from "../types";
 
 export type OpenCodeClient = ReturnType<typeof createOpencodeClient>;
 
@@ -69,6 +70,9 @@ export class OpenCodeServerClient {
 	private promptInFlightSessionId: string | null = null;
 	private commandListCache:
 		| { commands: CommandSummary[]; fetchedAt: number }
+		| null = null;
+	private featureCache:
+		| { features: Set<string>; fetchedAt: number }
 		| null = null;
 
 	constructor(config: OpenCodeServerConfig, errorHandler: ErrorHandler) {
@@ -386,6 +390,46 @@ export class OpenCodeServerClient {
 	private isEnhancedError(error: Error): boolean {
 		const errorMessage = error.message || "";
 		return errorMessage.includes("Unable to connect to OpenCode Server");
+	}
+
+	/**
+	 * Extract HTTP status code from error if available
+	 */
+	private getErrorStatusCode(error: any): number | null {
+		// Check various possible locations for status code
+		if (typeof error?.status === "number") {
+			return error.status;
+		}
+		if (typeof error?.statusCode === "number") {
+			return error.statusCode;
+		}
+		if (typeof error?.response?.status === "number") {
+			return error.response.status;
+		}
+		// Try to parse from error message
+		const match = error?.message?.match(/\b(404|500)\b/);
+		if (match) {
+			return parseInt(match[1], 10);
+		}
+		return null;
+	}
+
+	/**
+	 * Create appropriate error for HTTP status codes
+	 */
+	private createHttpError(statusCode: number, operation: string, sessionId?: string): Error {
+		switch (statusCode) {
+			case 404:
+				return new Error(
+					sessionId
+						? `Session ${sessionId} not found`
+						: `Resource not found during ${operation}`,
+				);
+			case 500:
+				return new Error(`Server error during ${operation}. Please try again later.`);
+			default:
+				return new Error(`HTTP ${statusCode} error during ${operation}`);
+		}
 	}
 
 	/**
@@ -979,6 +1023,361 @@ export class OpenCodeServerClient {
 	}
 
 	/**
+	 * List all sessions from the server
+	 */
+	async listSessions(): Promise<SessionListItem[]> {
+		try {
+			const response = await this.sdkClient.session.list();
+
+			if (response.error) {
+				throw new Error(`Failed to list sessions: ${response.error}`);
+			}
+
+			if (!response.data) {
+				throw new Error("OpenCode Server session.list returned no data.");
+			}
+
+			// Transform SDK Session objects to SessionListItem format
+			const sessions: SessionListItem[] = response.data.map((session) => ({
+				id: session.id,
+				title: session.title || `Session ${session.id}`,
+				lastUpdated: session.time.updated,
+				messageCount: 0, // Will be populated by getSessionMessages if needed
+				isActive: session.id === this.currentSessionId,
+			}));
+
+			return sessions;
+		} catch (error) {
+			const statusCode = this.getErrorStatusCode(error);
+			let err: Error;
+
+			if (statusCode === 404 || statusCode === 500) {
+				err = this.createHttpError(statusCode, "listing sessions");
+			} else {
+				err = error instanceof Error ? error : new Error(String(error));
+			}
+
+			const severity = this.isEnhancedError(err)
+				? ErrorSeverity.Warning
+				: ErrorSeverity.Error;
+			this.errorHandler.handleError(
+				err,
+				{
+					module: "OpenCodeClient",
+					function: "listSessions",
+					operation: "Listing sessions",
+					metadata: { statusCode },
+				},
+				severity,
+			);
+			throw err;
+		}
+	}
+
+	/**
+	 * Get messages for a specific session
+	 */
+	async getSessionMessages(sessionId: string): Promise<Message[]> {
+		try {
+			const response = await this.sdkClient.session.messages({
+				path: { id: sessionId },
+			});
+
+			if (response.error) {
+				throw new Error(`Failed to get session messages: ${response.error}`);
+			}
+
+			if (!response.data) {
+				throw new Error("OpenCode Server session.messages returned no data.");
+			}
+
+			// Transform SDK message format to our Message format
+			const messages: Message[] = response.data.map((msg) => {
+				// Extract text content from parts
+				const textParts = msg.parts
+					.filter((part: any) => part.type === "text" && part.text)
+					.map((part: any) => part.text);
+				const content = textParts.join("\n");
+
+				return {
+					id: msg.info.id,
+					role: msg.info.role as "user" | "assistant",
+					content,
+					timestamp: msg.info.time.created,
+				};
+			});
+
+			return messages;
+		} catch (error) {
+			const statusCode = this.getErrorStatusCode(error);
+			let err: Error;
+
+			if (statusCode === 404 || statusCode === 500) {
+				err = this.createHttpError(statusCode, "getting session messages", sessionId);
+			} else {
+				err = error instanceof Error ? error : new Error(String(error));
+			}
+
+			const severity = this.isEnhancedError(err)
+				? ErrorSeverity.Warning
+				: ErrorSeverity.Error;
+			this.errorHandler.handleError(
+				err,
+				{
+					module: "OpenCodeClient",
+					function: "getSessionMessages",
+					operation: "Getting session messages",
+					metadata: { sessionId, statusCode },
+				},
+				severity,
+			);
+			throw err;
+		}
+	}
+
+	/**
+	 * Update session title
+	 */
+	async updateSessionTitle(sessionId: string, title: string): Promise<void> {
+		try {
+			const response = await this.sdkClient.session.update({
+				path: { id: sessionId },
+				body: { title },
+			});
+
+			if (response.error) {
+				throw new Error(`Failed to update session title: ${response.error}`);
+			}
+
+			// Update local session cache if it exists
+			const session = this.sessions.get(sessionId);
+			if (session) {
+				(session as any).title = title;
+			}
+		} catch (error) {
+			const statusCode = this.getErrorStatusCode(error);
+			let err: Error;
+
+			if (statusCode === 404 || statusCode === 500) {
+				err = this.createHttpError(statusCode, "updating session title", sessionId);
+			} else {
+				err = error instanceof Error ? error : new Error(String(error));
+			}
+
+			const severity = this.isEnhancedError(err)
+				? ErrorSeverity.Warning
+				: ErrorSeverity.Error;
+			this.errorHandler.handleError(
+				err,
+				{
+					module: "OpenCodeClient",
+					function: "updateSessionTitle",
+					operation: "Updating session title",
+					metadata: { sessionId, title, statusCode },
+				},
+				severity,
+			);
+			throw err;
+		}
+	}
+
+	/**
+	 * Delete a session from the server
+	 */
+	async deleteSession(sessionId: string): Promise<void> {
+		try {
+			const response = await this.sdkClient.session.delete({
+				path: { id: sessionId },
+			});
+
+			if (response.error) {
+				throw new Error(`Failed to delete session: ${response.error}`);
+			}
+
+			// Clean up local state
+			this.sessions.delete(sessionId);
+			if (this.currentSessionId === sessionId) {
+				this.currentSessionId = null;
+			}
+			if (this.promptInFlightSessionId === sessionId) {
+				this.promptInFlightSessionId = null;
+			}
+		} catch (error) {
+			const statusCode = this.getErrorStatusCode(error);
+			let err: Error;
+
+			if (statusCode === 404 || statusCode === 500) {
+				err = this.createHttpError(statusCode, "deleting session", sessionId);
+				// For 404 errors during delete, clean up local state anyway
+				if (statusCode === 404) {
+					this.sessions.delete(sessionId);
+					if (this.currentSessionId === sessionId) {
+						this.currentSessionId = null;
+					}
+					if (this.promptInFlightSessionId === sessionId) {
+						this.promptInFlightSessionId = null;
+					}
+				}
+			} else {
+				err = error instanceof Error ? error : new Error(String(error));
+			}
+
+			const severity = this.isEnhancedError(err)
+				? ErrorSeverity.Warning
+				: ErrorSeverity.Error;
+			this.errorHandler.handleError(
+				err,
+				{
+					module: "OpenCodeClient",
+					function: "deleteSession",
+					operation: "Deleting session",
+					metadata: { sessionId, statusCode },
+				},
+				severity,
+			);
+			throw err;
+		}
+	}
+
+	/**
+	 * Revert a session to a specific message
+	 * Messages after the specified message will be hidden
+	 */
+	async revertSession(sessionId: string, messageId: string): Promise<void> {
+		try {
+			const response = await this.sdkClient.session.revert({
+				path: { id: sessionId },
+				body: { messageID: messageId },
+			});
+
+			if (response.error) {
+				throw new Error(`Failed to revert session: ${response.error}`);
+			}
+		} catch (error) {
+			const statusCode = this.getErrorStatusCode(error);
+			let err: Error;
+
+			if (statusCode === 404 || statusCode === 500) {
+				err = this.createHttpError(statusCode, "reverting session", sessionId);
+			} else {
+				err = error instanceof Error ? error : new Error(String(error));
+			}
+
+			const severity = this.isEnhancedError(err)
+				? ErrorSeverity.Warning
+				: ErrorSeverity.Error;
+			this.errorHandler.handleError(
+				err,
+				{
+					module: "OpenCodeClient",
+					function: "revertSession",
+					operation: "Reverting session",
+					metadata: { sessionId, messageId, statusCode },
+				},
+				severity,
+			);
+			throw err;
+		}
+	}
+
+	/**
+	 * Unrevert a session to restore all reverted messages
+	 */
+	async unrevertSession(sessionId: string): Promise<void> {
+		try {
+			const response = await this.sdkClient.session.unrevert({
+				path: { id: sessionId },
+			});
+
+			if (response.error) {
+				throw new Error(`Failed to unrevert session: ${response.error}`);
+			}
+		} catch (error) {
+			const statusCode = this.getErrorStatusCode(error);
+			let err: Error;
+
+			if (statusCode === 404 || statusCode === 500) {
+				err = this.createHttpError(statusCode, "unreverting session", sessionId);
+			} else {
+				err = error instanceof Error ? error : new Error(String(error));
+			}
+
+			const severity = this.isEnhancedError(err)
+				? ErrorSeverity.Warning
+				: ErrorSeverity.Error;
+			this.errorHandler.handleError(
+				err,
+				{
+					module: "OpenCodeClient",
+					function: "unrevertSession",
+					operation: "Unreverting session",
+					metadata: { sessionId, statusCode },
+				},
+				severity,
+			);
+			throw err;
+		}
+	}
+
+	/**
+	 * Get file changes (diff) for a session
+	 * Returns all file modifications made during the session
+	 */
+	async getSessionDiff(sessionId: string): Promise<import("../types").SessionDiff> {
+		try {
+			const response = await this.sdkClient.session.diff({
+				path: { id: sessionId },
+			});
+
+			if (response.error) {
+				throw new Error(`Failed to get session diff: ${response.error}`);
+			}
+
+			if (!response.data) {
+				throw new Error("OpenCode Server session.diff returned no data.");
+			}
+
+			// Transform SDK diff format to our SessionDiff format
+			const files = (response.data as any).files || [];
+			const transformedFiles = files.map((file: any) => ({
+				path: file.path || "",
+				added: file.added || [],
+				removed: file.removed || [],
+				language: file.language,
+			}));
+
+			return {
+				sessionId,
+				files: transformedFiles,
+			};
+		} catch (error) {
+			const statusCode = this.getErrorStatusCode(error);
+			let err: Error;
+
+			if (statusCode === 404 || statusCode === 500) {
+				err = this.createHttpError(statusCode, "getting session diff", sessionId);
+			} else {
+				err = error instanceof Error ? error : new Error(String(error));
+			}
+
+			const severity = this.isEnhancedError(err)
+				? ErrorSeverity.Warning
+				: ErrorSeverity.Error;
+			this.errorHandler.handleError(
+				err,
+				{
+					module: "OpenCodeClient",
+					function: "getSessionDiff",
+					operation: "Getting session diff",
+					metadata: { sessionId, statusCode },
+				},
+				severity,
+			);
+			throw err;
+		}
+	}
+
+	/**
 	 * Perform health check on OpenCode Server
 	 */
 	async healthCheck(): Promise<boolean> {
@@ -1062,6 +1461,86 @@ export class OpenCodeServerClient {
 			);
 			return false;
 		}
+	}
+
+	/**
+	 * Detect available features by checking which API endpoints are available
+	 * Results are cached for 5 minutes
+	 */
+	async detectFeatures(): Promise<Set<string>> {
+		const cacheTtlMs = 5 * 60 * 1000; // 5 minutes
+		const now = Date.now();
+
+		// Return cached results if still valid
+		if (
+			this.featureCache &&
+			now - this.featureCache.fetchedAt < cacheTtlMs
+		) {
+			return new Set(this.featureCache.features);
+		}
+
+		const features = new Set<string>();
+
+		// Test core session management endpoints
+		const endpointsToTest = [
+			{ name: "session.list", test: () => this.sdkClient.session.list() },
+			{ name: "session.create", test: () => this.sdkClient.session.create({ body: { title: "test" } }) },
+			{ name: "session.get", test: () => this.sdkClient.session.get({ path: { id: "test" } }) },
+			{ name: "session.update", test: () => this.sdkClient.session.update({ path: { id: "test" }, body: { title: "test" } }) },
+			{ name: "session.delete", test: () => this.sdkClient.session.delete({ path: { id: "test" } }) },
+			{ name: "session.messages", test: () => this.sdkClient.session.messages({ path: { id: "test" } }) },
+		];
+
+		// Test each endpoint
+		for (const endpoint of endpointsToTest) {
+			try {
+				const response = await endpoint.test();
+				// If we get a response (even an error response), the endpoint exists
+				// 404 means the endpoint exists but the resource doesn't
+				// Only mark as unavailable if we get a 404 on the endpoint itself (not the resource)
+				if (response.error) {
+					const statusCode = this.getErrorStatusCode(response.error);
+					// 404 on session.list means the endpoint doesn't exist
+					// 404 on other endpoints with an ID means the resource doesn't exist (endpoint exists)
+					if (statusCode === 404 && endpoint.name === "session.list") {
+						// Endpoint doesn't exist
+						continue;
+					}
+					// For other endpoints, 404 means the test resource doesn't exist, but endpoint is available
+					features.add(endpoint.name);
+				} else {
+					// Success response means endpoint is available
+					features.add(endpoint.name);
+				}
+			} catch (error) {
+				// Check if this is a 404 error (endpoint doesn't exist)
+				const statusCode = this.getErrorStatusCode(error);
+				if (statusCode === 404 && endpoint.name === "session.list") {
+					// Endpoint doesn't exist
+					continue;
+				}
+				// For other endpoints, 404 means the test resource doesn't exist, but endpoint is available
+				if (statusCode === 404) {
+					features.add(endpoint.name);
+				}
+				// Other errors (network, 500, etc.) - assume endpoint might exist but is temporarily unavailable
+				// Don't add to features set
+			}
+		}
+
+		// Cache the results
+		this.featureCache = { features, fetchedAt: now };
+
+		return new Set(features);
+	}
+
+	/**
+	 * Check if a specific feature is available
+	 * Uses cached feature detection results
+	 */
+	async hasFeature(featureName: string): Promise<boolean> {
+		const features = await this.detectFeatures();
+		return features.has(featureName);
 	}
 
 	/**

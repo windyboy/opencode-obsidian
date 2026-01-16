@@ -8,12 +8,27 @@ export class MessageListComponent {
 		messageRenderer: MessageRendererComponent,
 		private getActiveConversation: () => Conversation | null,
 		private onRegenerate?: (message: Message) => void,
+		private getScrollPosition?: (conversationId: string) => number | undefined,
+		private getIsLoading?: () => boolean,
+		private onRevert?: (message: Message) => void,
+		private onUnrevert?: () => void,
 	) {
 		this.messageRenderer = messageRenderer;
 	}
 
 	render(container: HTMLElement): void {
 		container.empty();
+
+		const isLoading = this.getIsLoading?.() ?? false;
+
+		// Show loading overlay if loading
+		if (isLoading) {
+			const overlay = container.createDiv("opencode-obsidian-loading-overlay");
+			const loadingMessage = overlay.createDiv("opencode-obsidian-loading-message");
+			loadingMessage.createSpan("opencode-obsidian-spinner");
+			loadingMessage.createSpan({ text: "Loading conversation..." });
+			return;
+		}
 
 		const activeConv = this.getActiveConversation();
 		if (!activeConv || activeConv.messages.length === 0) {
@@ -23,11 +38,43 @@ export class MessageListComponent {
 			return;
 		}
 
+		// Check if there are any reverted messages
+		const hasRevertedMessages = activeConv.messages.some(m => m.isReverted);
+
 		activeConv.messages.forEach((message) => {
+			// Skip rendering reverted messages
+			if (message.isReverted) {
+				return;
+			}
 			this.renderMessage(container, message);
 		});
 
-		container.scrollTop = container.scrollHeight;
+		// Show indicator if there are reverted messages
+		if (hasRevertedMessages) {
+			const revertedIndicator = container.createDiv("opencode-obsidian-reverted-indicator");
+			revertedIndicator.createSpan({ text: "⚠️ Some messages have been reverted and are hidden" });
+			
+			if (this.onUnrevert) {
+				const unrevertBtn = revertedIndicator.createEl("button", {
+					text: "Unrevert all",
+					cls: "opencode-obsidian-unrevert-button",
+				});
+				unrevertBtn.onclick = () => {
+					void this.onUnrevert?.();
+				};
+			}
+		}
+
+		// Restore scroll position if available
+		const savedScrollPosition = this.getScrollPosition?.(activeConv.id);
+		if (savedScrollPosition !== undefined && savedScrollPosition > 0) {
+			requestAnimationFrame(() => {
+				container.scrollTop = savedScrollPosition;
+			});
+		} else {
+			// Default: scroll to bottom for new conversations
+			container.scrollTop = container.scrollHeight;
+		}
 	}
 
 	private renderMessage(container: HTMLElement, message: Message): void {
@@ -71,7 +118,7 @@ export class MessageListComponent {
 			});
 		}
 
-		this.messageRenderer.addMessageActions(messageEl, message, this.onRegenerate);
+		this.messageRenderer.addMessageActions(messageEl, message, this.onRegenerate, this.onRevert);
 	}
 
 }

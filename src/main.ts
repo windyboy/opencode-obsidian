@@ -242,6 +242,21 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 				},
 			});
 
+			// Add command to create new conversation
+			this.addCommand({
+				id: "new-conversation",
+				name: "New conversation",
+				hotkeys: [{ modifiers: ["Mod"], key: "n" }],
+				callback: () => {
+					const view = this.getActiveView();
+					if (view) {
+						void view.createNewConversation();
+					} else {
+						new Notice("Please open the chat view first");
+					}
+				},
+			});
+
 			// Add settings tab
 			this.addSettingTab(new OpenCodeObsidianSettingTab(this.app, this));
 
@@ -417,5 +432,18 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 			return leaves[0].view as OpenCodeObsidianView;
 		}
 		return null;
+	}
+
+	/**
+	 * Create a new conversation in the active view
+	 * Used by keyboard shortcuts and commands
+	 */
+	async createNewConversationInActiveView(): Promise<void> {
+		const view = this.getActiveView();
+		if (view) {
+			await view.createNewConversation();
+		} else {
+			new Notice("Please open the chat view first");
+		}
 	}
 }

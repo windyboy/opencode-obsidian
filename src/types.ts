@@ -112,6 +112,8 @@ export interface Message {
   timestamp: number
   /** Optional image attachments */
   images?: ImageAttachment[]
+  /** Whether this message has been reverted (hidden from view) */
+  isReverted?: boolean
 }
 
 /**
@@ -154,6 +156,44 @@ export interface Conversation {
 }
 
 /**
+ * Session list item for displaying sessions in the UI
+ * Lightweight representation of a session for list views
+ * 
+ * @interface SessionListItem
+ */
+export interface SessionListItem {
+  /** Unique session identifier */
+  id: string
+  /** Session title/name */
+  title: string
+  /** Timestamp when session was last updated (milliseconds since epoch) */
+  lastUpdated: number
+  /** Number of messages in the session */
+  messageCount: number
+  /** Whether this is the currently active session */
+  isActive: boolean
+}
+
+/**
+ * Plugin data storage schema
+ * Stores conversations, active conversation state, and sync metadata
+ * 
+ * @interface PluginData
+ */
+export interface PluginData {
+  /** Array of all conversations */
+  conversations?: Conversation[]
+  /** Currently active conversation ID */
+  activeConversationId?: string | null
+  /** Array of session IDs for quick lookup */
+  sessionIds?: string[]
+  /** Timestamp of last sync with server (milliseconds since epoch) */
+  lastSyncTimestamp?: number
+  /** Scroll positions per conversation ID */
+  scrollPositions?: Record<string, number>
+}
+
+/**
  * Tool use request from AI assistant
  * 
  * @interface ToolUse
@@ -193,4 +233,34 @@ export interface ModelInfo {
   name?: string
   /** Provider identifier - supports built-in and custom provider IDs */
   providerID: string
+}
+
+/**
+ * File diff information
+ * Represents changes made to a file during a session
+ * 
+ * @interface FileDiff
+ */
+export interface FileDiff {
+  /** File path relative to project root */
+  path: string
+  /** Lines added to the file */
+  added: string[]
+  /** Lines removed from the file */
+  removed: string[]
+  /** Optional language identifier for syntax highlighting */
+  language?: string
+}
+
+/**
+ * Session diff response
+ * Contains all file changes made during a session
+ * 
+ * @interface SessionDiff
+ */
+export interface SessionDiff {
+  /** Session identifier */
+  sessionId: string
+  /** Array of file diffs */
+  files: FileDiff[]
 }

@@ -119,6 +119,7 @@ export class MessageRendererComponent {
 		messageEl: HTMLElement,
 		message: Message,
 		onRegenerate?: (message: Message) => void,
+		onRevert?: (message: Message) => void,
 	): void {
 		const actions = messageEl.createDiv(
 			"opencode-obsidian-message-actions",
@@ -157,6 +158,19 @@ export class MessageRendererComponent {
 
 			regenBtn.onclick = () => {
 				void onRegenerate(message);
+			};
+		}
+
+		// Add revert action for all messages
+		if (onRevert) {
+			const revertBtn = actions.createEl("button", {
+				text: "↩️",
+				cls: "opencode-obsidian-message-action",
+				attr: { title: "Revert to here" },
+			});
+
+			revertBtn.onclick = () => {
+				void onRevert(message);
 			};
 		}
 	}

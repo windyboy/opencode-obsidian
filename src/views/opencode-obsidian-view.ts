@@ -5,11 +5,13 @@ import {
 } from "obsidian";
 import type OpenCodeObsidianPlugin from "../main";
 import { ErrorSeverity } from "../utils/error-handler";
+import { debounceAsync } from "../utils/debounce-throttle";
 import type {
 	Conversation,
 	Message,
 	ToolUse,
 	ToolResult,
+	PluginData,
 } from "../types";
 import { HeaderComponent } from "./components/header";
 import { ConversationSelectorComponent } from "./components/conversation-selector";
@@ -18,9 +20,11 @@ import { MessageRendererComponent } from "./components/message-renderer";
 import { InputAreaComponent } from "./components/input-area";
 import { AttachmentModal } from "./modals/attachment-modal";
 import { ConfirmationModal } from "./modals/confirmation-modal";
+import { DiffViewerModal } from "./modals/diff-viewer-modal";
 import { ConversationManager } from "./services/conversation-manager";
 import { MessageSender } from "./services/message-sender";
 import { ConversationSync } from "./services/conversation-sync";
+import { SessionManager } from "./services/session-manager";
 
 export const VIEW_TYPE_OPENCODE_OBSIDIAN = "opencode-obsidian-view";
 
@@ -40,12 +44,17 @@ export class OpenCodeObsidianView extends ItemView {
 	private conversations: Conversation[] = [];
 	private activeConversationId: string | null = null;
 	private isStreaming = false;
+	private isConversationOperationLoading = false;
 	private currentAbortController: AbortController | null = null;
 	private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
 	private lastHealthCheckResult: boolean | null = null;
 	private eventUnsubscribers: Array<() => void> = [];
 	private commandSuggestions: CommandSuggestion[] = [];
 	private commandSuggestionsLoading = false;
+	private scrollPositions: Record<string, number> = {};
+	private debouncedSaveScrollPosition = debounceAsync(async (conversationId: string, scrollTop: number) => {
+		await this.saveScrollPosition(conversationId, scrollTop);
+	}, 500);
 
 	// Components
 	private headerComponent: HeaderComponent;
@@ -58,6 +67,7 @@ export class OpenCodeObsidianView extends ItemView {
 	private conversationManager: ConversationManager;
 	private messageSender: MessageSender;
 	private conversationSync: ConversationSync;
+	private sessionManager: SessionManager | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: OpenCodeObsidianPlugin) {
 		super(leaf);
@@ -83,6 +93,11 @@ export class OpenCodeObsidianView extends ItemView {
 			() => this.conversationManager.saveConversations(),
 			() => this.updateConversationSelector(),
 			() => this.updateMessages(),
+			undefined, // SessionManager will be set after initialization
+			(loading) => {
+				this.isConversationOperationLoading = loading;
+			},
+			this.leaf, // Pass leaf for workspace state management
 		);
 
 		// Initialize components
@@ -97,6 +112,10 @@ export class OpenCodeObsidianView extends ItemView {
 			this.messageRendererComponent,
 			() => this.conversationManager.getActiveConversation(),
 			(message) => this.messageSender.regenerateResponse(message),
+			(conversationId) => this.scrollPositions[conversationId],
+			() => this.isConversationOperationLoading,
+			(message) => this.revertToMessage(message),
+			() => this.unrevertSession(),
 		);
 
 		this.conversationSelectorComponent = new ConversationSelectorComponent(
@@ -108,6 +127,9 @@ export class OpenCodeObsidianView extends ItemView {
 			(id) => this.conversationManager.deleteConversation(id),
 			() => this.conversationManager.createNewConversation(),
 			(id) => this.exportConversation(id),
+			() => this.isConversationOperationLoading,
+			() => this.syncConversationsFromServer(),
+			(sessionId) => this.viewSessionDiff(sessionId),
 		);
 
 		// Initialize message sender (needed by input area)
@@ -132,6 +154,7 @@ export class OpenCodeObsidianView extends ItemView {
 			(usage) => this.showUsageInfo(usage),
 			(toolUse) => this.showToolUse(toolUse),
 			(toolResult) => this.showToolResult(toolResult),
+			undefined, // SessionManager will be set after initialization
 		);
 
 		// Initialize input area component (needs messageSender)
@@ -148,9 +171,67 @@ export class OpenCodeObsidianView extends ItemView {
 			},
 		);
 
+		// Initialize SessionManager if client is available
+		if (this.plugin.opencodeClient) {
+			this.sessionManager = new SessionManager(
+				this.plugin.opencodeClient,
+				this.plugin.errorHandler,
+			);
+		}
+
+		// Update ConversationManager with SessionManager
+		if (this.sessionManager) {
+			// We need to add a setter method to ConversationManager
+			// For now, we'll recreate it with the SessionManager
+			this.conversationManager = new ConversationManager(
+				this.plugin,
+				() => this.conversations,
+				() => this.activeConversationId,
+				(id) => {
+					this.activeConversationId = id;
+				},
+				(convs) => {
+					this.conversations = convs;
+				},
+				() => this.conversationManager.saveConversations(),
+				() => this.updateConversationSelector(),
+				() => this.updateMessages(),
+				this.sessionManager,
+				(loading) => {
+					this.isConversationOperationLoading = loading;
+				},
+				this.leaf, // Pass leaf for workspace state management
+			);
+
+			// Recreate MessageSender with SessionManager
+			this.messageSender = new MessageSender(
+				this.plugin,
+				this.app,
+				() => this.conversationManager.getActiveConversation(),
+				() => this.conversationManager.createNewConversation(),
+				(content) => this.parseSlashCommand(content),
+				(value) => {
+					this.isStreaming = value;
+				},
+				(controller) => {
+					this.currentAbortController = controller;
+				},
+				() => this.updateMessages(),
+				(value) => this.updateStreamingStatus(value),
+				() => this.conversationManager.saveConversations(),
+				(id) => this.conversationManager.generateConversationTitle(id),
+				(content) => this.showThinkingIndicator(content),
+				(content) => this.showBlockedIndicator(content),
+				(usage) => this.showUsageInfo(usage),
+				(toolUse) => this.showToolUse(toolUse),
+				(toolResult) => this.showToolResult(toolResult),
+				this.sessionManager,
+			);
+		}
 
 		this.conversationSync = new ConversationSync(
 			this.plugin,
+			this.sessionManager,
 			() => this.conversations,
 			() => this.activeConversationId,
 			(id) => {
@@ -187,9 +268,35 @@ export class OpenCodeObsidianView extends ItemView {
 
 		this.renderView();
 		await this.conversationManager.loadConversations();
+		
+		// Load scroll positions from plugin data
+		await this.loadScrollPositions();
+
+		// Restore last active session from workspace state
+		let sessionRestored = false;
+		const ephemeralState = this.leaf.getEphemeralState() as { lastActiveSessionId?: string } | undefined;
+		if (ephemeralState?.lastActiveSessionId && this.sessionManager) {
+			const conversation = this.conversationManager.findConversationBySessionId(ephemeralState.lastActiveSessionId);
+			if (conversation) {
+				await this.conversationManager.switchConversation(conversation.id);
+				sessionRestored = true;
+			}
+		}
+
+		// If session restoration failed or no session was saved, use existing fallback logic
+		if (!sessionRestored && !this.activeConversationId && this.conversations.length > 0) {
+			// Fallback to first conversation
+			const firstConv = this.conversations[0];
+			if (firstConv) {
+				await this.conversationManager.switchConversation(firstConv.id);
+			}
+		}
 
 		this.updateConversationSelector();
 		this.updateMessages();
+		
+		// Attach scroll listener to message container
+		this.attachScrollListener();
 
 		this.registerEventBusCallbacks();
 
@@ -222,11 +329,14 @@ export class OpenCodeObsidianView extends ItemView {
 			
 			if (this.plugin.opencodeClient.isConnected() && this.lastHealthCheckResult) {
 				await this.conversationSync.syncConversationsFromServer();
+				// Start periodic sync after initial sync
+				this.conversationSync.startPeriodicSync();
 			}
 			
 			this.startPeriodicHealthCheck();
 		}
 		
+		// Create new conversation if none exist
 		if (this.conversations.length === 0) {
 			await this.conversationManager.createNewConversation();
 		}
@@ -247,6 +357,7 @@ export class OpenCodeObsidianView extends ItemView {
 		this.eventUnsubscribers = [];
 
 		this.stopPeriodicHealthCheck();
+		this.conversationSync.stopPeriodicSync();
 	}
 
 	private renderView() {
@@ -299,6 +410,92 @@ export class OpenCodeObsidianView extends ItemView {
 			new Notice(`Health check failed: ${errorMessage}`);
 		} finally {
 			this.updateHeader();
+		}
+	}
+
+	private async syncConversationsFromServer(): Promise<void> {
+		if (!this.plugin.opencodeClient?.isConnected()) {
+			new Notice("Not connected to server");
+			return;
+		}
+
+		this.isConversationOperationLoading = true;
+		this.updateConversationSelector();
+
+		try {
+			await this.conversationSync.syncConversationsFromServer();
+			new Notice("Conversations synced from server");
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			new Notice(`Sync failed: ${errorMessage}`);
+		} finally {
+			this.isConversationOperationLoading = false;
+			this.updateConversationSelector();
+		}
+	}
+
+	private async revertToMessage(message: Message): Promise<void> {
+		if (!this.sessionManager) {
+			new Notice("Session manager not available");
+			return;
+		}
+
+		const activeConv = this.conversationManager.getActiveConversation();
+		if (!activeConv || !activeConv.sessionId) {
+			new Notice("No active session to revert");
+			return;
+		}
+
+		try {
+			await this.sessionManager.revertSession(activeConv.sessionId, message.id);
+			
+			// Mark messages after the revert point as reverted
+			const messageIndex = activeConv.messages.findIndex(m => m.id === message.id);
+			if (messageIndex !== -1) {
+				for (let i = messageIndex + 1; i < activeConv.messages.length; i++) {
+					activeConv.messages[i].isReverted = true;
+				}
+			}
+			
+			// Save the updated conversation
+			await this.conversationManager.saveConversations();
+			this.updateMessages();
+			
+			new Notice("Session reverted successfully");
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			new Notice(`Failed to revert session: ${errorMessage}`);
+		}
+	}
+
+	private async unrevertSession(): Promise<void> {
+		if (!this.sessionManager) {
+			new Notice("Session manager not available");
+			return;
+		}
+
+		const activeConv = this.conversationManager.getActiveConversation();
+		if (!activeConv || !activeConv.sessionId) {
+			new Notice("No active session to unrevert");
+			return;
+		}
+
+		try {
+			await this.sessionManager.unrevertSession(activeConv.sessionId);
+			
+			// Mark all messages as not reverted
+			activeConv.messages.forEach(m => {
+				m.isReverted = false;
+			});
+			
+			// Save the updated conversation
+			await this.conversationManager.saveConversations();
+			this.updateMessages();
+			
+			new Notice("Session unreverted successfully");
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			new Notice(`Failed to unrevert session: ${errorMessage}`);
 		}
 	}
 
@@ -611,6 +808,45 @@ export class OpenCodeObsidianView extends ItemView {
 		}
 	}
 
+	/**
+	 * View session diff (file changes) for a session
+	 */
+	private async viewSessionDiff(sessionId: string): Promise<void> {
+		try {
+			// Show loading notice
+			const loadingNotice = new Notice("Loading session changes...", 0);
+
+			// Fetch session diff from server
+			const sessionDiff = await this.plugin.opencodeClient?.getSessionDiff(sessionId);
+
+			// Close loading notice
+			loadingNotice.hide();
+
+			// Check if we got a valid diff
+			if (!sessionDiff) {
+				new Notice("Failed to load session changes: Client not available");
+				return;
+			}
+
+			// Open diff viewer modal
+			new DiffViewerModal(this.app, sessionDiff).open();
+		} catch (error) {
+			this.plugin.errorHandler.handleError(
+				error,
+				{
+					module: "OpenCodeObsidianView",
+					function: "viewSessionDiff",
+					operation: "Viewing session diff",
+					metadata: { sessionId },
+				},
+				ErrorSeverity.Warning,
+			);
+			const errorMessage =
+				error instanceof Error ? error.message : "Unknown error";
+			new Notice(`Failed to load session changes: ${errorMessage}`);
+		}
+	}
+
 	private showAttachmentModal() {
 		new AttachmentModal(this.app, (file: File) => {
 			void (async () => {
@@ -720,5 +956,63 @@ export class OpenCodeObsidianView extends ItemView {
 		if (toolResult.isError) {
 			new Notice(`Tool error: ${toolResult.content}`);
 		}
+	}
+
+	private async loadScrollPositions(): Promise<void> {
+		try {
+			const data = (await this.plugin.loadData()) as PluginData | null;
+			this.scrollPositions = data?.scrollPositions || {};
+		} catch (error) {
+			this.plugin.errorHandler.handleError(
+				error,
+				{
+					module: "OpenCodeObsidianView",
+					function: "loadScrollPositions",
+					operation: "Loading scroll positions",
+				},
+				ErrorSeverity.Warning,
+			);
+		}
+	}
+
+	private async saveScrollPosition(conversationId: string, scrollTop: number): Promise<void> {
+		try {
+			this.scrollPositions[conversationId] = scrollTop;
+			const currentData = (await this.plugin.loadData()) as PluginData | null;
+			const dataToSave: PluginData = {
+				...(currentData || {}),
+				scrollPositions: this.scrollPositions,
+			};
+			await this.plugin.saveData(dataToSave);
+		} catch (error) {
+			this.plugin.errorHandler.handleError(
+				error,
+				{
+					module: "OpenCodeObsidianView",
+					function: "saveScrollPosition",
+					operation: "Saving scroll position",
+				},
+				ErrorSeverity.Warning,
+			);
+		}
+	}
+
+	private attachScrollListener(): void {
+		const messagesContainer = this.containerEl.querySelector(".opencode-obsidian-messages") as HTMLElement;
+		if (!messagesContainer) return;
+
+		messagesContainer.addEventListener("scroll", () => {
+			if (this.activeConversationId) {
+				void this.debouncedSaveScrollPosition(this.activeConversationId, messagesContainer.scrollTop);
+			}
+		});
+	}
+
+	/**
+	 * Public method to create a new conversation
+	 * Used by keyboard shortcuts and commands
+	 */
+	async createNewConversation(): Promise<void> {
+		await this.conversationManager.createNewConversation();
 	}
 }

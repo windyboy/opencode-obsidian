@@ -45,19 +45,19 @@ OpenCode Obsidian is an Obsidian plugin that provides a sophisticated chat inter
 2. Install dependencies:
 
     ```bash
-    pnpm install
+    bun install
     ```
 
 3. Build the plugin:
 
     ```bash
-    pnpm build
+    bun run build
     ```
 
 4. For development with hot reload:
 
     ```bash
-    pnpm dev
+    bun run dev
     ```
 
 5. Link the plugin to your Obsidian vault (optional, for development):
@@ -261,10 +261,10 @@ opencode-obsidian/
 
 ```bash
 # Development build with watch mode
-pnpm dev
+bun run dev
 
 # Production build (includes TypeScript type checking)
-pnpm build
+bun run build
 ```
 
 ### Linting
@@ -273,7 +273,7 @@ This project uses [ESLint](https://eslint.org/) to analyze code and find problem
 
 ```bash
 # Run ESLint
-pnpm lint
+bun run lint
 ```
 
 A GitHub Action is preconfigured to automatically lint every commit on all branches.
@@ -284,20 +284,20 @@ This project uses [Vitest](https://vitest.dev/) for unit testing. Core modules a
 
 ```bash
 # Run tests once
-pnpm vitest run
+bun vitest run
 
 # Run tests in watch mode
-pnpm vitest
+bun vitest
 
 # Run tests with UI (if installed)
-pnpm vitest --ui
+bun vitest --ui
 ```
 
 ### Type Checking
 
 ```bash
 # Run TypeScript type checking
-pnpm check
+bun run check
 ```
 
 ### Version Management
@@ -322,8 +322,8 @@ To bump the plugin version:
 
 ### Plugin not loading
 
--   Ensure all dependencies are installed: `pnpm install`
--   Rebuild the plugin: `pnpm build`
+-   Ensure all dependencies are installed: `bun install`
+-   Rebuild the plugin: `bun run build`
 -   Check Obsidian console for errors:
     -   **macOS**: Press `Cmd + Option + I` or `View → Toggle Developer Tools`
     -   **Windows/Linux**: Press `Ctrl + Shift + I` or `View → Toggle Developer Tools`
@@ -368,7 +368,7 @@ Contributions are welcome! Please follow these guidelines:
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Run `pnpm build`, `pnpm lint`, and `pnpm test` to ensure code quality
+4. Run `bun run build`, `bun run lint`, and `bun test` to ensure code quality
 5. Test thoroughly
 6. Update documentation if needed
 7. Submit a pull request

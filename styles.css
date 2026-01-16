@@ -55,6 +55,7 @@
 .opencode-obsidian-status {
   font-size: 12px;
   font-weight: 500;
+  cursor: help;
 }
 
 .opencode-obsidian-status.connected {
@@ -63,6 +64,14 @@
 
 .opencode-obsidian-status.disconnected {
   color: var(--color-red);
+}
+
+.opencode-obsidian-status.connecting {
+  color: var(--color-blue, #3b82f6);
+}
+
+.opencode-obsidian-status.reconnecting {
+  color: var(--color-orange, #f59e0b);
 }
 
 .opencode-obsidian-controls {
@@ -90,6 +99,11 @@
   overflow-y: hidden;
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
+}
+
+.opencode-obsidian-tabs-container.opencode-obsidian-tabs-loading {
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 .opencode-obsidian-tabs-container::-webkit-scrollbar {
@@ -127,6 +141,40 @@
   min-width: 100px;
   max-width: 350px;
   user-select: none;
+}
+
+.opencode-obsidian-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.opencode-obsidian-tab-session-indicator {
+  font-size: 8px;
+  color: var(--color-green);
+  flex-shrink: 0;
+  line-height: 1;
+  margin-right: 2px;
+}
+
+.opencode-obsidian-tab.active .opencode-obsidian-tab-session-indicator {
+  color: var(--color-accent);
+}
+
+.opencode-obsidian-tab-metadata {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opencode-obsidian-tab.active .opencode-obsidian-tab-metadata {
+  opacity: 0.8;
 }
 
 .opencode-obsidian-tab:hover {
@@ -199,6 +247,37 @@
   background: var(--background-modifier-hover);
   border-color: var(--background-modifier-border-hover);
   color: var(--text-normal);
+}
+
+.opencode-obsidian-tab-sync {
+  min-width: 32px;
+  max-width: 32px;
+  padding: 6px;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 400;
+  color: var(--text-muted);
+  border-style: solid;
+  background: var(--background-primary);
+  display: flex;
+  align-items: center;
+}
+
+.opencode-obsidian-tab-sync:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border-hover);
+  color: var(--color-accent);
+}
+
+.opencode-obsidian-tab-sync:active {
+  transform: rotate(180deg);
+  transition: transform 0.3s ease;
+}
+
+.opencode-obsidian-tab-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* Title editing input */
@@ -523,6 +602,40 @@
 .opencode-obsidian-message-images img {
   border-radius: 4px;
   border: 1px solid var(--background-modifier-border);
+}
+
+.opencode-obsidian-reverted-indicator {
+  padding: 12px 16px;
+  margin: 8px 16px;
+  background: var(--background-modifier-error-hover);
+  border: 1px solid var(--color-orange);
+  border-radius: 6px;
+  color: var(--color-orange);
+  font-size: 12px;
+  text-align: center;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.opencode-obsidian-unrevert-button {
+  padding: 4px 12px;
+  background: var(--color-orange);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.opencode-obsidian-unrevert-button:hover {
+  background: var(--color-orange-hover, var(--color-orange));
+  opacity: 0.9;
+  transform: translateY(-1px);
 }
 
 .opencode-obsidian-input {
@@ -1035,6 +1148,54 @@
   }
 }
 
+/* Loading Spinner */
+.opencode-obsidian-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: opencode-spin 0.8s linear infinite;
+}
+
+.opencode-obsidian-spinner-large {
+  width: 24px;
+  height: 24px;
+  border-width: 3px;
+}
+
+@keyframes opencode-spin {
+  to { transform: rotate(360deg); }
+}
+
+.opencode-obsidian-loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(var(--background-primary-rgb, 255, 255, 255), 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(2px);
+}
+
+.opencode-obsidian-loading-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+  color: var(--text-normal);
+}
+
 /* Settings Page Styles */
 .opencode-setting-url.mod-invalid {
   border-color: var(--text-error) !important;
@@ -1085,4 +1246,161 @@
 
 .opencode-settings-advanced-content.hidden {
   display: none;
+}
+
+/* Diff Viewer Modal Styles */
+.opencode-diff-viewer {
+  min-width: 600px;
+  max-width: 900px;
+}
+
+.opencode-diff-viewer h2 {
+  margin-bottom: 16px;
+  color: var(--text-normal);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.opencode-diff-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 14px;
+}
+
+.opencode-diff-file {
+  margin-bottom: 24px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--background-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.opencode-diff-file-header {
+  padding: 12px 16px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-family: var(--font-monospace);
+  font-size: 13px;
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+.opencode-diff-content {
+  padding: 0;
+}
+
+.opencode-diff-section {
+  margin: 0;
+  position: relative;
+}
+
+.opencode-diff-section-header {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.opencode-diff-section-header.removed {
+  background: rgba(255, 0, 0, 0.05);
+  color: var(--color-red);
+  border-left: 3px solid var(--color-red);
+}
+
+.opencode-diff-section-header.added {
+  background: rgba(0, 255, 0, 0.05);
+  color: var(--color-green);
+  border-left: 3px solid var(--color-green);
+}
+
+.opencode-diff-code {
+  margin: 0;
+  padding: 16px;
+  background: var(--background-primary-alt, var(--background-modifier-hover));
+  border: none;
+  border-radius: 0;
+  position: relative;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.opencode-diff-code.removed {
+  background: rgba(255, 0, 0, 0.03);
+  border-left: 3px solid var(--color-red);
+}
+
+.opencode-diff-code.added {
+  background: rgba(0, 255, 0, 0.03);
+  border-left: 3px solid var(--color-green);
+}
+
+.opencode-diff-code code {
+  background: none;
+  padding: 0;
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  white-space: pre;
+  color: var(--text-normal);
+  line-height: 1.5;
+  border: none;
+}
+
+.opencode-diff-code-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 10;
+}
+
+.opencode-diff-code:hover .opencode-diff-code-actions {
+  opacity: 1;
+}
+
+.opencode-diff-code-copy {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  color: var(--text-normal);
+}
+
+.opencode-diff-code-copy:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.opencode-diff-code-copy:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* Responsive adjustments for diff viewer */
+@media (max-width: 600px) {
+  .opencode-diff-viewer {
+    min-width: auto;
+    max-width: 100%;
+  }
+  
+  .opencode-diff-file-header {
+    font-size: 11px;
+    padding: 10px 12px;
+  }
+  
+  .opencode-diff-code {
+    font-size: 11px;
+    padding: 12px;
+  }
 }
