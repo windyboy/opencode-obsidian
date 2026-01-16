@@ -127,6 +127,28 @@ export function getUserFriendlyErrorMessage(
 }
 
 /**
+ * Extract HTTP status code from error if available
+ */
+export function getErrorStatusCode(error: any): number | null {
+	// Check various possible locations for status code
+	if (typeof error?.status === "number") {
+		return error.status;
+	}
+	if (typeof error?.statusCode === "number") {
+		return error.statusCode;
+	}
+	if (typeof error?.response?.status === "number") {
+		return error.response.status;
+	}
+	// Try to parse from error message
+	const match = error?.message?.match(/\b(404|500|502|503|504)\b/);
+	if (match) {
+		return parseInt(match[1], 10);
+	}
+	return null;
+}
+
+/**
  * Check if an error is retryable
  */
 export function isRetryableError(error: Error | unknown, statusCode: number | null): boolean {

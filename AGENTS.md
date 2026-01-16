@@ -33,7 +33,7 @@ AI-powered chat plugin for Obsidian with:
 **Security:**
 - Always use `PermissionManager` for vault operations
 - Never bypass permission checks
-- Validate user inputs with `src/utils/validators.ts`
+- Validate user inputs with `zod` schemas in tool definitions
 - No secrets in logs
 
 **Error handling:**
@@ -118,7 +118,7 @@ AI-powered chat plugin for Obsidian with:
 **Best practices:**
 - Early returns for guard clauses
 - Use `ErrorHandler` at async boundaries
-- Validate inputs with `src/utils/validators.ts`
+- Validate inputs with `zod` schemas
 - Always use `PermissionManager` for vault operations
 - Use `console.debug` for verbose logs
 
@@ -185,3 +185,4 @@ esbuild with custom plugin for Obsidian default exports:
 2. Fix default export wrapper
 3. Target ES2018
 4. External: obsidian, electron, codemirror, node builtins
+

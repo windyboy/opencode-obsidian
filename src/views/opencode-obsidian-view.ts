@@ -453,7 +453,10 @@ export class OpenCodeObsidianView extends ItemView {
 			const messageIndex = activeConv.messages.findIndex(m => m.id === message.id);
 			if (messageIndex !== -1) {
 				for (let i = messageIndex + 1; i < activeConv.messages.length; i++) {
-					activeConv.messages[i].isReverted = true;
+					const msg = activeConv.messages[i];
+					if (msg) {
+						msg.isReverted = true;
+					}
 				}
 			}
 			

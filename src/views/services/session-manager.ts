@@ -1,7 +1,7 @@
 import type { OpenCodeServerClient } from "../../opencode-server/client";
 import type { SessionListItem, Message, Conversation } from "../../types";
 import { ErrorHandler, ErrorSeverity } from "../../utils/error-handler";
-import { getUserFriendlyErrorMessage, isRetryableError } from "../../utils/error-messages";
+import { getUserFriendlyErrorMessage, isRetryableError, getErrorStatusCode } from "../../utils/error-messages";
 
 /**
  * Cache entry for session list with TTL
@@ -170,7 +170,7 @@ export class SessionManager {
 			this.localOnlyMode = true;
 			
 			// Create user-friendly error
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			const friendlyMessage = getUserFriendlyErrorMessage(error, statusCode, {
 				operation: "listing sessions",
 				serverUrl: this.client.getConfig().url,
@@ -209,7 +209,7 @@ export class SessionManager {
 			return sessionId;
 		} catch (error) {
 			// Create user-friendly error
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			const friendlyMessage = getUserFriendlyErrorMessage(error, statusCode, {
 				operation: "creating session",
 				serverUrl: this.client.getConfig().url,
@@ -243,7 +243,7 @@ export class SessionManager {
 			const messages = await this.client.getSessionMessages(sessionId);
 			return messages;
 		} catch (error) {
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			
 			// Handle 404 errors by notifying callback to remove session from local cache
 			if (statusCode === 404) {
@@ -288,7 +288,7 @@ export class SessionManager {
 			// Invalidate cache after update
 			this.invalidateCache();
 		} catch (error) {
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			
 			// Handle 404 errors by notifying callback to remove session from local cache
 			if (statusCode === 404) {
@@ -334,7 +334,7 @@ export class SessionManager {
 			this.invalidateCache();
 		} catch (error) {
 			// Create user-friendly error
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			const friendlyMessage = getUserFriendlyErrorMessage(error, statusCode, {
 				operation: "deleting session",
 				sessionId,
@@ -368,7 +368,7 @@ export class SessionManager {
 		try {
 			await this.client.revertSession(sessionId, messageId);
 		} catch (error) {
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			
 			// Handle 404 errors by notifying callback to remove session from local cache
 			if (statusCode === 404) {
@@ -410,7 +410,7 @@ export class SessionManager {
 		try {
 			await this.client.unrevertSession(sessionId);
 		} catch (error) {
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			
 			// Handle 404 errors by notifying callback to remove session from local cache
 			if (statusCode === 404) {
@@ -455,27 +455,7 @@ export class SessionManager {
 		this.invalidateCache();
 	}
 
-	/**
-	 * Extract HTTP status code from error if available
-	 */
-	private getErrorStatusCode(error: any): number | null {
-		// Check various possible locations for status code
-		if (typeof error?.status === "number") {
-			return error.status;
-		}
-		if (typeof error?.statusCode === "number") {
-			return error.statusCode;
-		}
-		if (typeof error?.response?.status === "number") {
-			return error.response.status;
-		}
-		// Try to parse from error message
-		const match = error?.message?.match(/\b(404|500|502|503|504)\b/);
-		if (match) {
-			return parseInt(match[1], 10);
-		}
-		return null;
-	}
+	// Using imported getErrorStatusCode from utils/error-messages.ts
 
 	/**
 	 * Sleep for specified milliseconds
@@ -501,7 +481,7 @@ export class SessionManager {
 				return await operation();
 			} catch (error) {
 				lastError = error instanceof Error ? error : new Error(String(error));
-				const statusCode = this.getErrorStatusCode(error);
+				const statusCode = getErrorStatusCode(error);
 
 				// Check if error is retryable
 				if (!isRetryableError(error, statusCode)) {

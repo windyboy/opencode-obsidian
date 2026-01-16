@@ -147,6 +147,60 @@ export class ObsidianToolExecutor {
   }
 
   /**
+   * Execute a tool with automatic audit logging
+   * This helper method reduces code duplication by handling the common audit logging pattern
+   */
+  private async executeWithAuditLog<T>(
+    toolName: string,
+    sessionId: string | undefined,
+    callId: string,
+    input: unknown,
+    operation: 'read' | 'write' | 'create' | 'modify',
+    affectedPath: string | undefined,
+    approved: boolean = false,
+    dryRun: boolean = false,
+    executeFn: () => Promise<T>
+  ): Promise<T> {
+    const startTime = Date.now()
+    
+    try {
+      const result = await executeFn()
+      
+      await this.createAuditLog(
+        toolName,
+        sessionId,
+        callId,
+        input,
+        startTime,
+        operation,
+        result,
+        undefined,
+        affectedPath,
+        approved,
+        dryRun
+      )
+      
+      return result
+    } catch (error) {
+      await this.createAuditLog(
+        toolName,
+        sessionId,
+        callId,
+        input,
+        startTime,
+        operation,
+        undefined,
+        error instanceof Error ? error : new Error(String(error)),
+        affectedPath,
+        approved,
+        dryRun
+      )
+      
+      throw error
+    }
+  }
+
+  /**
    * Search vault for notes matching query
    */
   async searchVault(
@@ -154,11 +208,19 @@ export class ObsidianToolExecutor {
     sessionId?: string,
     callId?: string
   ): Promise<ObsidianSearchVaultOutput> {
-    const startTime = Date.now()
     const effectiveCallId = callId || `call_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
     
-    try {
-      // Get all markdown files
+    return this.executeWithAuditLog(
+      'obsidian.search_vault',
+      sessionId,
+      effectiveCallId,
+      input,
+      'read',
+      undefined, // No specific affected path for search
+      false,
+      false,
+      async () => {
+        // Get all markdown files
       const allFiles = this.vault.getMarkdownFiles()
       const queryLower = input.query.toLowerCase()
       
@@ -220,35 +282,12 @@ export class ObsidianToolExecutor {
       results.sort((a, b) => b.matchCount - a.matchCount)
       const limitedResults = results.slice(0, input.limit || 20)
       
-      const output: ObsidianSearchVaultOutput = {
+      return {
         results: limitedResults,
         totalMatches: results.length
       }
-
-      await this.createAuditLog(
-        'obsidian.search_vault',
-        sessionId,
-        effectiveCallId,
-        input,
-        startTime,
-        'read',
-        output
-      )
-
-      return output
-    } catch (error) {
-      await this.createAuditLog(
-        'obsidian.search_vault',
-        sessionId,
-        effectiveCallId,
-        input,
-        startTime,
-        'read',
-        undefined,
-        error instanceof Error ? error : new Error(String(error))
-      )
-      throw error
-    }
+      }
+    )
   }
 
   /**
@@ -259,50 +298,32 @@ export class ObsidianToolExecutor {
     sessionId?: string,
     callId?: string
   ): Promise<ObsidianReadNoteOutput> {
-    const startTime = Date.now()
     const effectiveCallId = callId || `call_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
     
-    try {
-      // Check read permission
+    return this.executeWithAuditLog(
+      'obsidian.read_note',
+      sessionId,
+      effectiveCallId,
+      input,
+      'read',
+      input.path,
+      false,
+      false,
+      async () => {
+        // Check read permission
       const permission = await this.permissionManager.canRead(input.path)
       if (!permission.allowed) {
-        const error = new Error(`Permission denied: ${permission.reason}`)
-        await this.createAuditLog(
-          'obsidian.read_note',
-          sessionId,
-          effectiveCallId,
-          input,
-          startTime,
-          'read',
-          undefined,
-          error,
-          input.path
-        )
-        throw error
+        throw new Error(`Permission denied: ${permission.reason}`)
       }
 
       const file = this.vault.getAbstractFileByPath(input.path)
       
       if (!isTFile(file)) {
-        const output: ObsidianReadNoteOutput = {
+        return {
           path: input.path,
           content: '',
           exists: false
         }
-        
-        await this.createAuditLog(
-          'obsidian.read_note',
-          sessionId,
-          effectiveCallId,
-          input,
-          startTime,
-          'read',
-          output,
-          undefined,
-          input.path
-        )
-        
-        return output
       }
 
       const content = await this.vault.read(file)
@@ -313,33 +334,9 @@ export class ObsidianToolExecutor {
         exists: true
       }
 
-      await this.createAuditLog(
-        'obsidian.read_note',
-        sessionId,
-        effectiveCallId,
-        input,
-        startTime,
-        'read',
-        output,
-        undefined,
-        input.path
-      )
-
       return output
-    } catch (error) {
-      await this.createAuditLog(
-        'obsidian.read_note',
-        sessionId,
-        effectiveCallId,
-        input,
-        startTime,
-        'read',
-        undefined,
-        error instanceof Error ? error : new Error(String(error)),
-        input.path
-      )
-      throw error
-    }
+      }
+    )
   }
 
   /**
@@ -350,31 +347,27 @@ export class ObsidianToolExecutor {
     sessionId?: string,
     callId?: string
   ): Promise<ObsidianListNotesOutput> {
-    const startTime = Date.now()
     const effectiveCallId = callId || `call_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
     
-    try {
-      const folderPath = input.folder || ''
+    return this.executeWithAuditLog(
+      'obsidian.list_notes',
+      sessionId,
+      effectiveCallId,
+      input,
+      'read',
+      undefined, // No specific affected path for listing
+      false,
+      false,
+      async () => {
+        const folderPath = input.folder || ''
       const folder = folderPath ? this.vault.getAbstractFileByPath(folderPath) : null
       
       if (folderPath && !isTFolder(folder)) {
         // Folder doesn't exist - return empty results
-        const output: ObsidianListNotesOutput = {
+        return {
           files: [],
           totalCount: 0
         }
-        
-        await this.createAuditLog(
-          'obsidian.list_notes',
-          sessionId,
-          effectiveCallId,
-          input,
-          startTime,
-          'read',
-          output
-        )
-        
-        return output
       }
 
       const files: Array<{ path: string; isFolder?: boolean; size?: number; modified?: number }> = []
@@ -411,35 +404,12 @@ export class ObsidianToolExecutor {
       const targetFolder: TFolder | null = folder && isTFolder(folder) ? folder : null
       collectFiles(targetFolder, input.recursive ?? true)
 
-      const output: ObsidianListNotesOutput = {
+      return {
         files,
         totalCount: files.length
       }
-
-      await this.createAuditLog(
-        'obsidian.list_notes',
-        sessionId,
-        effectiveCallId,
-        input,
-        startTime,
-        'read',
-        output
-      )
-
-      return output
-    } catch (error) {
-      await this.createAuditLog(
-        'obsidian.list_notes',
-        sessionId,
-        effectiveCallId,
-        input,
-        startTime,
-        'read',
-        undefined,
-        error instanceof Error ? error : new Error(String(error))
-      )
-      throw error
-    }
+      }
+    )
   }
 
   /**
@@ -450,31 +420,25 @@ export class ObsidianToolExecutor {
     sessionId?: string,
     callId?: string
   ): Promise<ObsidianGetNoteMetadataOutput> {
-    const startTime = Date.now()
     const effectiveCallId = callId || `call_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
     
-    try {
-      const file = this.vault.getAbstractFileByPath(input.path)
+    return this.executeWithAuditLog(
+      'obsidian.get_note_metadata',
+      sessionId,
+      effectiveCallId,
+      input,
+      'read',
+      input.path,
+      false,
+      false,
+      async () => {
+        const file = this.vault.getAbstractFileByPath(input.path)
       
       if (!isTFile(file)) {
-        const output: ObsidianGetNoteMetadataOutput = {
+        return {
           path: input.path,
           exists: false
         }
-        
-        await this.createAuditLog(
-          'obsidian.get_note_metadata',
-          sessionId,
-          effectiveCallId,
-          input,
-          startTime,
-          'read',
-          output,
-          undefined,
-          input.path
-        )
-        
-        return output
       }
 
       const cache = this.metadataCache.getFileCache(file)
@@ -527,7 +491,7 @@ export class ObsidianToolExecutor {
         }
       }
 
-      const output: ObsidianGetNoteMetadataOutput = {
+      return {
         path: input.path,
         exists: true,
         title,
@@ -536,34 +500,8 @@ export class ObsidianToolExecutor {
         links,
         stats
       }
-
-      await this.createAuditLog(
-        'obsidian.get_note_metadata',
-        sessionId,
-        effectiveCallId,
-        input,
-        startTime,
-        'read',
-        output,
-        undefined,
-        input.path
-      )
-
-      return output
-    } catch (error) {
-      await this.createAuditLog(
-        'obsidian.get_note_metadata',
-        sessionId,
-        effectiveCallId,
-        input,
-        startTime,
-        'read',
-        undefined,
-        error instanceof Error ? error : new Error(String(error)),
-        input.path
-      )
-      throw error
-    }
+      }
+    )
   }
 
   /**
@@ -575,27 +513,22 @@ export class ObsidianToolExecutor {
     callId?: string,
     approved: boolean = false
   ): Promise<ObsidianCreateNoteOutput> {
-    const startTime = Date.now()
     const effectiveCallId = callId || `call_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
     
-    try {
-      // Check create permission
+    return this.executeWithAuditLog(
+      'obsidian.create_note',
+      sessionId,
+      effectiveCallId,
+      input,
+      'create',
+      input.path,
+      approved,
+      false,
+      async () => {
+        // Check create permission
       const permission = await this.permissionManager.canCreate(input.path)
       if (!permission.allowed) {
-        const error = new Error(`Permission denied: ${permission.reason}`)
-        await this.createAuditLog(
-          'obsidian.create_note',
-          sessionId,
-          effectiveCallId,
-          input,
-          startTime,
-          'create',
-          undefined,
-          error,
-          input.path,
-          false
-        )
-        throw error
+        throw new Error(`Permission denied: ${permission.reason}`)
       }
 
       // Check if approval is required
@@ -608,20 +541,7 @@ export class ObsidianToolExecutor {
       const existed = isTFile(existingFile)
 
       if (existed && !input.overwrite) {
-        const error = new Error(`File already exists: ${input.path}. Use overwrite=true to replace it.`)
-        await this.createAuditLog(
-          'obsidian.create_note',
-          sessionId,
-          effectiveCallId,
-          input,
-          startTime,
-          'create',
-          undefined,
-          error,
-          input.path,
-          false
-        )
-        throw error
+        throw new Error(`File already exists: ${input.path}. Use overwrite=true to replace it.`)
       }
 
       // Create or overwrite file
@@ -640,48 +560,13 @@ export class ObsidianToolExecutor {
         await this.vault.create(input.path, input.content)
       }
 
-      const output: ObsidianCreateNoteOutput = {
+      return {
         path: input.path,
         created: true,
         existed
       }
-
-      await this.createAuditLog(
-        'obsidian.create_note',
-        sessionId,
-        effectiveCallId,
-        input,
-        startTime,
-        'create',
-        output,
-        undefined,
-        input.path,
-        approved,
-        false
-      )
-
-      return output
-    } catch (error) {
-      // Don't log audit if it's a PermissionPendingError (user needs to approve)
-      if (error instanceof PermissionPendingError) {
-        throw error
       }
-      
-      await this.createAuditLog(
-        'obsidian.create_note',
-        sessionId,
-        effectiveCallId,
-        input,
-        startTime,
-        'create',
-        undefined,
-        error instanceof Error ? error : new Error(String(error)),
-        input.path,
-        approved,
-        false
-      )
-      throw error
-    }
+    )
   }
 
   /**

@@ -1,7 +1,8 @@
-﻿import { createOpencodeClient } from "@opencode-ai/sdk/client";
+import { createOpencodeClient } from "@opencode-ai/sdk/client";
 import type { Session } from "@opencode-ai/sdk/client";
 import { requestUrl } from "obsidian";
 import { ErrorHandler, ErrorSeverity } from "../utils/error-handler";
+import { getErrorStatusCode } from "../utils/error-messages";
 import type {
 	OpenCodeServerConfig,
 	ConnectionState,
@@ -392,27 +393,7 @@ export class OpenCodeServerClient {
 		return errorMessage.includes("Unable to connect to OpenCode Server");
 	}
 
-	/**
-	 * Extract HTTP status code from error if available
-	 */
-	private getErrorStatusCode(error: any): number | null {
-		// Check various possible locations for status code
-		if (typeof error?.status === "number") {
-			return error.status;
-		}
-		if (typeof error?.statusCode === "number") {
-			return error.statusCode;
-		}
-		if (typeof error?.response?.status === "number") {
-			return error.response.status;
-		}
-		// Try to parse from error message
-		const match = error?.message?.match(/\b(404|500)\b/);
-		if (match) {
-			return parseInt(match[1], 10);
-		}
-		return null;
-	}
+	// Using imported getErrorStatusCode from utils/error-messages.ts
 
 	/**
 	 * Create appropriate error for HTTP status codes
@@ -1048,7 +1029,7 @@ export class OpenCodeServerClient {
 
 			return sessions;
 		} catch (error) {
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			let err: Error;
 
 			if (statusCode === 404 || statusCode === 500) {
@@ -1109,7 +1090,7 @@ export class OpenCodeServerClient {
 
 			return messages;
 		} catch (error) {
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			let err: Error;
 
 			if (statusCode === 404 || statusCode === 500) {
@@ -1155,7 +1136,7 @@ export class OpenCodeServerClient {
 				(session as any).title = title;
 			}
 		} catch (error) {
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			let err: Error;
 
 			if (statusCode === 404 || statusCode === 500) {
@@ -1203,7 +1184,7 @@ export class OpenCodeServerClient {
 				this.promptInFlightSessionId = null;
 			}
 		} catch (error) {
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			let err: Error;
 
 			if (statusCode === 404 || statusCode === 500) {
@@ -1254,7 +1235,7 @@ export class OpenCodeServerClient {
 				throw new Error(`Failed to revert session: ${response.error}`);
 			}
 		} catch (error) {
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			let err: Error;
 
 			if (statusCode === 404 || statusCode === 500) {
@@ -1293,7 +1274,7 @@ export class OpenCodeServerClient {
 				throw new Error(`Failed to unrevert session: ${response.error}`);
 			}
 		} catch (error) {
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			let err: Error;
 
 			if (statusCode === 404 || statusCode === 500) {
@@ -1351,7 +1332,7 @@ export class OpenCodeServerClient {
 				files: transformedFiles,
 			};
 		} catch (error) {
-			const statusCode = this.getErrorStatusCode(error);
+			const statusCode = getErrorStatusCode(error);
 			let err: Error;
 
 			if (statusCode === 404 || statusCode === 500) {
@@ -1499,7 +1480,7 @@ export class OpenCodeServerClient {
 				// 404 means the endpoint exists but the resource doesn't
 				// Only mark as unavailable if we get a 404 on the endpoint itself (not the resource)
 				if (response.error) {
-					const statusCode = this.getErrorStatusCode(response.error);
+					const statusCode = getErrorStatusCode(response.error);
 					// 404 on session.list means the endpoint doesn't exist
 					// 404 on other endpoints with an ID means the resource doesn't exist (endpoint exists)
 					if (statusCode === 404 && endpoint.name === "session.list") {
@@ -1514,7 +1495,7 @@ export class OpenCodeServerClient {
 				}
 			} catch (error) {
 				// Check if this is a 404 error (endpoint doesn't exist)
-				const statusCode = this.getErrorStatusCode(error);
+				const statusCode = getErrorStatusCode(error);
 				if (statusCode === 404 && endpoint.name === "session.list") {
 					// Endpoint doesn't exist
 					continue;
