@@ -17,6 +17,7 @@ export class ConversationSelectorComponent {
 		private getIsLoading?: () => boolean,
 		private syncFromServer?: () => Promise<void>,
 		private viewSessionDiff?: (sessionId: string) => Promise<void>,
+		private forkConversation?: (id: string) => Promise<void>,
 	) {}
 
 	private get conversations(): Conversation[] {
@@ -288,6 +289,18 @@ export class ConversationSelectorComponent {
 				menu.remove();
 				if (conversation.sessionId && this.viewSessionDiff) {
 					void this.viewSessionDiff(conversation.sessionId);
+				}
+			};
+		}
+
+		// Add "Fork session" option if session has a sessionId and callback is provided
+		if (conversation.sessionId && this.forkConversation) {
+			const forkItem = menu.createDiv("opencode-obsidian-context-menu-item");
+			forkItem.textContent = "Fork session";
+			forkItem.onclick = () => {
+				menu.remove();
+				if (this.forkConversation) {
+					void this.forkConversation(conversationId);
 				}
 			};
 		}

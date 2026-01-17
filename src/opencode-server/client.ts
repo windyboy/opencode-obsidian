@@ -1301,6 +1301,83 @@ export class OpenCodeServerClient {
 	}
 
 	/**
+	 * Fork a session from a specific message point
+	 * Creates a new session that branches from the parent session
+	 * @param sessionId - ID of the session to fork
+	 * @param messageId - Optional message ID to fork from (defaults to latest)
+	 * @param title - Optional title for the forked session
+	 * @returns Promise<string> - ID of the newly created forked session
+	 */
+	async forkSession(
+		sessionId: string,
+		messageId?: string,
+		title?: string,
+	): Promise<string> {
+		try {
+			const response = await this.sdkClient.session.fork({
+				path: { id: sessionId },
+				body: {
+					...(messageId ? { messageID: messageId } : {}),
+					...(title ? { title } : {}),
+				},
+			});
+
+			if (response.error) {
+				throw new Error(`Failed to fork session: ${response.error}`);
+			}
+
+			if (!response.data) {
+				throw new Error(
+					"OpenCode Server session.fork returned no data.",
+				);
+			}
+
+			// Extract session ID from response
+			const forkedSessionId = this.extractSessionId(response.data);
+			if (!forkedSessionId) {
+				throw new Error(
+					"OpenCode Server fork response did not include a session id.",
+				);
+			}
+
+			// Cache the forked session
+			this.sessions.set(forkedSessionId, response.data);
+
+			return forkedSessionId;
+		} catch (error) {
+			const statusCode = getErrorStatusCode(error);
+			let err: Error;
+
+			if (statusCode === 404) {
+				err = this.createHttpError(
+					statusCode,
+					"forking session",
+					sessionId,
+				);
+			} else if (statusCode === 500) {
+				err = this.createHttpError(statusCode, "forking session");
+			} else {
+				err = error instanceof Error ? error : new Error(String(error));
+			}
+
+			const severity = this.isEnhancedError(err)
+				? ErrorSeverity.Warning
+				: ErrorSeverity.Error;
+			this.errorHandler.handleError(
+				err,
+				{
+					module: "OpenCodeClient",
+					function: "forkSession",
+					operation: "Forking session",
+					metadata: { sessionId, messageId, title, statusCode },
+				},
+				severity,
+			);
+			throw err;
+		}
+	}
+
+	/**
 	 * Get file changes (diff) for a session
 	 * Returns all file modifications made during the session
 	 */

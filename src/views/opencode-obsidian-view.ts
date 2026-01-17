@@ -116,6 +116,7 @@ export class OpenCodeObsidianView extends ItemView {
 			() => this.isConversationOperationLoading,
 			(message) => this.revertToMessage(message),
 			() => this.unrevertSession(),
+			(conversationId, messageId) => this.forkConversation(conversationId, messageId),
 		);
 
 		this.conversationSelectorComponent = new ConversationSelectorComponent(
@@ -130,6 +131,7 @@ export class OpenCodeObsidianView extends ItemView {
 			() => this.isConversationOperationLoading,
 			() => this.syncConversationsFromServer(),
 			(sessionId) => this.viewSessionDiff(sessionId),
+			(id) => this.forkConversation(id),
 		);
 
 		// Initialize message sender (needed by input area)
@@ -499,6 +501,32 @@ export class OpenCodeObsidianView extends ItemView {
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			new Notice(`Failed to unrevert session: ${errorMessage}`);
+		}
+	}
+
+	/**
+	 * Fork a conversation from a specific message point
+	 * @param conversationId - ID of the conversation to fork
+	 * @param messageId - Optional message ID to fork from
+	 */
+	async forkConversation(
+		conversationId: string,
+		messageId?: string,
+	): Promise<void> {
+		if (!this.conversationManager) {
+			new Notice("Conversation manager not available");
+			return;
+		}
+
+		try {
+			await this.conversationManager.forkConversation(
+				conversationId,
+				messageId,
+			);
+		} catch (error) {
+			// Error already logged by ConversationManager
+			// Just show user-friendly notice
+			new Notice("Failed to fork session. Please try again.");
 		}
 	}
 

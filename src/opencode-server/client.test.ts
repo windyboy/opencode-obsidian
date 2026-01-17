@@ -15,6 +15,7 @@ const mockSDKClient = {
 		get: vi.fn(),
 		prompt: vi.fn(),
 		abort: vi.fn(),
+		fork: vi.fn(),
 	},
 };
 
@@ -1063,6 +1064,183 @@ describe("OpenCodeServerClient", () => {
 				"Test",
 				false,
 			);
+		});
+	});
+
+	describe("Session forking", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+		});
+
+		it("should fork session successfully with message ID and title", async () => {
+			const mockForkedSession = {
+				id: "forked-session-123",
+				info: { id: "forked-session-123" },
+			};
+			mockSDKClient.session.fork = vi.fn().mockResolvedValue({
+				data: mockForkedSession,
+				error: null,
+			});
+
+			const forkedSessionId = await client.forkSession(
+				"parent-session-123",
+				"message-456",
+				"Fork of Test Session",
+			);
+
+			expect(forkedSessionId).toBe("forked-session-123");
+			expect(mockSDKClient.session.fork).toHaveBeenCalledWith({
+				path: { id: "parent-session-123" },
+				body: {
+					messageID: "message-456",
+					title: "Fork of Test Session",
+				},
+			});
+		});
+
+		it("should fork session without message ID", async () => {
+			const mockForkedSession = {
+				id: "forked-session-456",
+				info: { id: "forked-session-456" },
+			};
+			mockSDKClient.session.fork = vi.fn().mockResolvedValue({
+				data: mockForkedSession,
+				error: null,
+			});
+
+			const forkedSessionId = await client.forkSession(
+				"parent-session-123",
+				undefined,
+				"Fork Title",
+			);
+
+			expect(forkedSessionId).toBe("forked-session-456");
+			expect(mockSDKClient.session.fork).toHaveBeenCalledWith({
+				path: { id: "parent-session-123" },
+				body: {
+					title: "Fork Title",
+				},
+			});
+		});
+
+		it("should fork session without title", async () => {
+			const mockForkedSession = {
+				id: "forked-session-789",
+				info: { id: "forked-session-789" },
+			};
+			mockSDKClient.session.fork = vi.fn().mockResolvedValue({
+				data: mockForkedSession,
+				error: null,
+			});
+
+			const forkedSessionId = await client.forkSession(
+				"parent-session-123",
+				"message-456",
+			);
+
+			expect(forkedSessionId).toBe("forked-session-789");
+			expect(mockSDKClient.session.fork).toHaveBeenCalledWith({
+				path: { id: "parent-session-123" },
+				body: {
+					messageID: "message-456",
+				},
+			});
+		});
+
+		it("should fork session with neither message ID nor title", async () => {
+			const mockForkedSession = {
+				id: "forked-session-abc",
+				info: { id: "forked-session-abc" },
+			};
+			mockSDKClient.session.fork = vi.fn().mockResolvedValue({
+				data: mockForkedSession,
+				error: null,
+			});
+
+			const forkedSessionId = await client.forkSession("parent-session-123");
+
+			expect(forkedSessionId).toBe("forked-session-abc");
+			expect(mockSDKClient.session.fork).toHaveBeenCalledWith({
+				path: { id: "parent-session-123" },
+				body: {},
+			});
+		});
+
+		it("should cache forked session after successful fork", async () => {
+			const mockForkedSession = {
+				id: "forked-session-123",
+				info: { id: "forked-session-123" },
+			};
+			mockSDKClient.session.fork = vi.fn().mockResolvedValue({
+				data: mockForkedSession,
+				error: null,
+			});
+			mockSDKClient.session.get = vi.fn();
+
+			await client.forkSession("parent-session-123");
+
+			// Verify session is cached by checking ensureSession doesn't call get
+			const exists = await client.ensureSession("forked-session-123");
+			expect(exists).toBe(true);
+			expect(mockSDKClient.session.get).not.toHaveBeenCalled();
+		});
+
+		it("should handle fork error from server", async () => {
+			mockSDKClient.session.fork = vi.fn().mockResolvedValue({
+				data: null,
+				error: "Server error during fork",
+			});
+
+			await expect(
+				client.forkSession("parent-session-123"),
+			).rejects.toThrow("Failed to fork session");
+		});
+
+		it("should handle 404 error when parent session not found", async () => {
+			const error404 = new Error("Not found");
+			(error404 as any).status = 404;
+			mockSDKClient.session.fork = vi.fn().mockRejectedValue(error404);
+
+			await expect(
+				client.forkSession("non-existent-session"),
+			).rejects.toThrow("Session non-existent-session not found");
+		});
+
+		it("should handle 500 error during fork", async () => {
+			const error500 = new Error("Internal server error");
+			(error500 as any).status = 500;
+			mockSDKClient.session.fork = vi.fn().mockRejectedValue(error500);
+
+			await expect(
+				client.forkSession("parent-session-123"),
+			).rejects.toThrow("Server error during forking session");
+		});
+
+		it("should handle missing session ID in fork response", async () => {
+			mockSDKClient.session.fork = vi.fn().mockResolvedValue({
+				data: { info: {} },
+				error: null,
+			});
+
+			await expect(
+				client.forkSession("parent-session-123"),
+			).rejects.toThrow(
+				"OpenCode Server fork response did not include a session id",
+			);
+		});
+
+		it("should handle missing data in fork response", async () => {
+			mockSDKClient.session.fork = vi.fn().mockResolvedValue({
+				data: null,
+				error: null,
+			});
+
+			await expect(
+				client.forkSession("parent-session-123"),
+			).rejects.toThrow("OpenCode Server session.fork returned no data");
 		});
 	});
 

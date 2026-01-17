@@ -602,4 +602,165 @@ describe("SessionManager", () => {
 			expect(errorHandler.handleError).toHaveBeenCalled();
 		});
 	});
+
+	describe("forkSession", () => {
+		beforeEach(() => {
+			// Add forkSession to mock client
+			mockClient.forkSession = vi.fn();
+		});
+
+		it("should fork session and return forked session ID", async () => {
+			const forkedSessionId = "forked-session-123";
+			vi.mocked(mockClient.forkSession).mockResolvedValue(forkedSessionId);
+
+			const result = await sessionManager.forkSession("parent-session-456");
+
+			expect(result).toBe(forkedSessionId);
+			expect(mockClient.forkSession).toHaveBeenCalledWith("parent-session-456", undefined, undefined);
+		});
+
+		it("should fork session with message ID", async () => {
+			const forkedSessionId = "forked-session-123";
+			vi.mocked(mockClient.forkSession).mockResolvedValue(forkedSessionId);
+
+			const result = await sessionManager.forkSession("parent-session-456", "message-789");
+
+			expect(result).toBe(forkedSessionId);
+			expect(mockClient.forkSession).toHaveBeenCalledWith("parent-session-456", "message-789", undefined);
+		});
+
+		it("should fork session with custom title", async () => {
+			const forkedSessionId = "forked-session-123";
+			vi.mocked(mockClient.forkSession).mockResolvedValue(forkedSessionId);
+
+			const result = await sessionManager.forkSession("parent-session-456", undefined, "Custom Fork Title");
+
+			expect(result).toBe(forkedSessionId);
+			expect(mockClient.forkSession).toHaveBeenCalledWith("parent-session-456", undefined, "Custom Fork Title");
+		});
+
+		it("should fork session with both message ID and title", async () => {
+			const forkedSessionId = "forked-session-123";
+			vi.mocked(mockClient.forkSession).mockResolvedValue(forkedSessionId);
+
+			const result = await sessionManager.forkSession("parent-session-456", "message-789", "Custom Fork Title");
+
+			expect(result).toBe(forkedSessionId);
+			expect(mockClient.forkSession).toHaveBeenCalledWith("parent-session-456", "message-789", "Custom Fork Title");
+		});
+
+		it("should invalidate cache after forking session", async () => {
+			const mockSessions: SessionListItem[] = [
+				{
+					id: "session-1",
+					title: "Session 1",
+					lastUpdated: 1000,
+					messageCount: 5,
+					isActive: false,
+				},
+			];
+
+			const forkedSessionId = "forked-session-123";
+			vi.mocked(mockClient.listSessions).mockResolvedValue(mockSessions);
+			vi.mocked(mockClient.forkSession).mockResolvedValue(forkedSessionId);
+
+			// Populate cache
+			await sessionManager.listSessions();
+			expect(mockClient.listSessions).toHaveBeenCalledTimes(1);
+
+			// Fork session
+			await sessionManager.forkSession("parent-session-456");
+
+			// Next listSessions should fetch from server again (cache invalidated)
+			await sessionManager.listSessions();
+			expect(mockClient.listSessions).toHaveBeenCalledTimes(2);
+		});
+
+		it("should throw error in local-only mode", async () => {
+			vi.mocked(mockClient.hasFeature).mockResolvedValue(false);
+			await sessionManager.checkFeatureAvailability();
+
+			await expect(sessionManager.forkSession("parent-session-456")).rejects.toThrow(
+				"Session forking is not available. Server does not support session management.",
+			);
+			expect(mockClient.forkSession).not.toHaveBeenCalled();
+		});
+
+		it("should handle 404 error and call onSessionNotFoundCallback", async () => {
+			const error = Object.assign(new Error("Not found"), { status: 404 });
+			vi.mocked(mockClient.forkSession).mockRejectedValue(error);
+
+			const callback = vi.fn();
+			sessionManager.setOnSessionNotFoundCallback(callback);
+
+			await expect(sessionManager.forkSession("non-existent-session")).rejects.toThrow();
+			expect(callback).toHaveBeenCalledWith("non-existent-session");
+			expect(errorHandler.handleError).toHaveBeenCalled();
+		});
+
+		it("should handle server errors and call error handler", async () => {
+			const error = Object.assign(new Error("Server error"), { status: 500 });
+			vi.mocked(mockClient.forkSession).mockRejectedValue(error);
+
+			await expect(sessionManager.forkSession("parent-session-456")).rejects.toThrow();
+			expect(errorHandler.handleError).toHaveBeenCalledWith(
+				expect.any(Error),
+				expect.objectContaining({
+					module: "SessionManager",
+					function: "forkSession",
+					operation: "Forking session",
+					metadata: expect.objectContaining({
+						sessionId: "parent-session-456",
+					}),
+				}),
+				expect.any(String),
+			);
+		});
+
+		it("should handle network errors", async () => {
+			const error = new Error("Network request failed");
+			vi.mocked(mockClient.forkSession).mockRejectedValue(error);
+
+			await expect(sessionManager.forkSession("parent-session-456")).rejects.toThrow();
+			expect(errorHandler.handleError).toHaveBeenCalled();
+		});
+	});
+
+	describe("forkSessionWithRetry", () => {
+		beforeEach(() => {
+			// Add forkSession to mock client
+			mockClient.forkSession = vi.fn();
+		});
+
+		it("should successfully fork session on first attempt", async () => {
+			const forkedSessionId = "forked-session-123";
+			vi.mocked(mockClient.forkSession).mockResolvedValue(forkedSessionId);
+
+			const result = await sessionManager.forkSessionWithRetry("parent-session-456");
+
+			expect(result).toBe(forkedSessionId);
+			expect(mockClient.forkSession).toHaveBeenCalledTimes(1);
+		});
+
+		it("should not retry on 404 error", async () => {
+			const error = Object.assign(new Error("Not found"), { status: 404 });
+			vi.mocked(mockClient.forkSession).mockRejectedValue(error);
+
+			const callback = vi.fn();
+			sessionManager.setOnSessionNotFoundCallback(callback);
+
+			await expect(sessionManager.forkSessionWithRetry("non-existent-session")).rejects.toThrow();
+			expect(mockClient.forkSession).toHaveBeenCalledTimes(1); // No retry
+			expect(callback).toHaveBeenCalledWith("non-existent-session");
+		});
+
+		it("should pass all parameters to forkSession", async () => {
+			const forkedSessionId = "forked-session-123";
+			vi.mocked(mockClient.forkSession).mockResolvedValue(forkedSessionId);
+
+			await sessionManager.forkSessionWithRetry("parent-session-456", "message-789", "Custom Title");
+
+			expect(mockClient.forkSession).toHaveBeenCalledWith("parent-session-456", "message-789", "Custom Title");
+		});
+	});
 });

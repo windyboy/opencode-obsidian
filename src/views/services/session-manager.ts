@@ -440,6 +440,72 @@ export class SessionManager {
 	}
 
 	/**
+	 * Fork a session from a specific message point
+	 * Creates a new session that branches from the parent session
+	 * @param sessionId - ID of the session to fork
+	 * @param messageId - Optional message ID to fork from
+	 * @param title - Optional title for the forked session
+	 * @returns Promise<string> - ID of the newly created forked session
+	 */
+	async forkSession(
+		sessionId: string,
+		messageId?: string,
+		title?: string,
+	): Promise<string> {
+		if (this.localOnlyMode) {
+			throw new Error(
+				"Session forking is not available. Server does not support session management.",
+			);
+		}
+
+		try {
+			const forkedSessionId = await this.client.forkSession(
+				sessionId,
+				messageId,
+				title,
+			);
+
+			// Invalidate cache to force refresh on next list
+			this.invalidateCache();
+
+			return forkedSessionId;
+		} catch (error) {
+			const statusCode = getErrorStatusCode(error);
+
+			// Handle 404 errors by notifying callback to remove session from local cache
+			if (statusCode === 404) {
+				console.debug(
+					`[SessionManager] Session ${sessionId} not found (404), removing from local cache`,
+				);
+				this.onSessionNotFoundCallback?.(sessionId);
+			}
+
+			// Create user-friendly error
+			const friendlyMessage = getUserFriendlyErrorMessage(
+				error,
+				statusCode,
+				{
+					operation: "forking session",
+					sessionId,
+				},
+			);
+
+			const enhancedError = new Error(friendlyMessage);
+			this.errorHandler.handleError(
+				enhancedError,
+				{
+					module: "SessionManager",
+					function: "forkSession",
+					operation: "Forking session",
+					metadata: { sessionId, messageId, title, statusCode },
+				},
+				ErrorSeverity.Error,
+			);
+			throw enhancedError;
+		}
+	}
+
+	/**
 	 * Invalidate the session list cache
 	 * Called after create, update, or delete operations
 	 */
@@ -558,6 +624,20 @@ export class SessionManager {
 		return this.retryOperation(
 			() => this.deleteSession(sessionId),
 			"delete session",
+		);
+	}
+
+	/**
+	 * Fork session with automatic retry on failure
+	 */
+	async forkSessionWithRetry(
+		sessionId: string,
+		messageId?: string,
+		title?: string,
+	): Promise<string> {
+		return this.retryOperation(
+			() => this.forkSession(sessionId, messageId, title),
+			"fork session",
 		);
 	}
 }

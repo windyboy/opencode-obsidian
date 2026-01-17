@@ -12,6 +12,7 @@ export class MessageListComponent {
 		private getIsLoading?: () => boolean,
 		private onRevert?: (message: Message) => void,
 		private onUnrevert?: () => void,
+		private onFork?: (conversationId: string, messageId: string) => void,
 	) {
 		this.messageRenderer = messageRenderer;
 	}
@@ -118,7 +119,19 @@ export class MessageListComponent {
 			});
 		}
 
-		this.messageRenderer.addMessageActions(messageEl, message, this.onRegenerate, this.onRevert);
+		const activeConv = this.getActiveConversation();
+		const onForkMessage = this.onFork && activeConv
+			? (msg: Message) => this.onFork?.(activeConv.id, msg.id)
+			: undefined;
+
+		this.messageRenderer.addMessageActions(
+			messageEl,
+			message,
+			this.onRegenerate,
+			this.onRevert,
+			onForkMessage,
+			activeConv?.id,
+		);
 	}
 
 }

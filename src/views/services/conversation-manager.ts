@@ -328,6 +328,102 @@ export class ConversationManager {
 		}
 	}
 
+	/**
+	 * Fork a conversation from a specific message point
+	 * Creates a new conversation that branches from the parent conversation
+	 * @param conversationId - ID of the conversation to fork
+	 * @param messageId - Optional message ID to fork from
+	 * @returns Promise<string> - ID of the newly created forked conversation
+	 */
+	async forkConversation(
+		conversationId: string,
+		messageId?: string,
+	): Promise<string> {
+		const parentConversation = this.conversations.find(
+			(c) => c.id === conversationId,
+		);
+		if (!parentConversation) {
+			throw new Error(`Conversation not found: ${conversationId}`);
+		}
+
+		if (!parentConversation.sessionId) {
+			throw new Error(
+				`Cannot fork conversation without sessionId: ${conversationId}`,
+			);
+		}
+
+		if (!this.sessionManager) {
+			throw new Error("SessionManager not available");
+		}
+
+		if (!this.plugin.opencodeClient?.isConnected()) {
+			throw new Error("OpenCode client not connected");
+		}
+
+		this.setIsLoading?.(true);
+		this.updateConversationSelector();
+
+		try {
+			// Generate title for forked session
+			const forkTitle = `Fork of ${parentConversation.title}`;
+
+			// Fork session on server
+			const forkedSessionId = await this.sessionManager.forkSessionWithRetry(
+				parentConversation.sessionId,
+				messageId,
+				forkTitle,
+			);
+
+			// Create new local conversation
+			const forkedConversation: Conversation = {
+				id: `conv-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+				title: forkTitle,
+				messages: [], // Will be loaded from server
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				sessionId: forkedSessionId,
+			};
+
+			// Add to conversations list
+			const newConversations = [...this.conversations];
+			newConversations.unshift(forkedConversation);
+			this.setConversations(newConversations);
+
+			// Switch to forked conversation
+			this.setActiveConversationId(forkedConversation.id);
+
+			// Save conversations
+			await this.saveConversations();
+
+			// Load messages from server
+			await this.loadSessionMessages(forkedConversation.id);
+
+			// Update UI
+			this.updateConversationSelector();
+			this.updateMessages();
+
+			new Notice("Session forked successfully");
+
+			return forkedConversation.id;
+		} catch (error) {
+			this.plugin.errorHandler.handleError(
+				error,
+				{
+					module: "ConversationManager",
+					function: "forkConversation",
+					operation: "Forking conversation",
+					metadata: { conversationId, messageId },
+				},
+				ErrorSeverity.Error,
+			);
+			new Notice("Failed to fork session");
+			throw error;
+		} finally {
+			this.setIsLoading?.(false);
+			this.updateConversationSelector();
+		}
+	}
+
 	getActiveConversation(): Conversation | null {
 		return (
 			this.conversations.find(

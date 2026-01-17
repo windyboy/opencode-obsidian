@@ -120,6 +120,8 @@ export class MessageRendererComponent {
 		message: Message,
 		onRegenerate?: (message: Message) => void,
 		onRevert?: (message: Message) => void,
+		onFork?: (message: Message) => void,
+		conversationId?: string,
 	): void {
 		const actions = messageEl.createDiv(
 			"opencode-obsidian-message-actions",
@@ -171,6 +173,31 @@ export class MessageRendererComponent {
 
 			revertBtn.onclick = () => {
 				void onRevert(message);
+			};
+		}
+
+		// Add fork action for all messages
+		if (onFork && conversationId) {
+			const forkBtn = actions.createEl("button", {
+				text: "🍴",
+				cls: "opencode-obsidian-message-action",
+				attr: { title: "Fork from here" },
+			});
+
+			forkBtn.onclick = async () => {
+				try {
+					// Disable button during fork
+					forkBtn.disabled = true;
+					forkBtn.textContent = "⏳";
+
+					await onFork(message);
+				} catch (error) {
+					// Error already handled by forkConversation
+				} finally {
+					// Re-enable button
+					forkBtn.disabled = false;
+					forkBtn.textContent = "🍴";
+				}
 			};
 		}
 	}
