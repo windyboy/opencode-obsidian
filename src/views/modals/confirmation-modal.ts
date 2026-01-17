@@ -1,4 +1,5 @@
 import { Modal, Setting, App } from "obsidian";
+import { empty } from "../../utils/dom-helpers";
 
 export class ConfirmationModal extends Modal {
 	private title: string;
@@ -39,6 +40,6 @@ export class ConfirmationModal extends Modal {
 
 	onClose() {
 		const { contentEl } = this;
-		contentEl.empty();
+		empty(contentEl);
 	}
 }

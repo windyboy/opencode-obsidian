@@ -1,6 +1,7 @@
 import type { Conversation } from "../../types";
 import { Notice, App } from "obsidian";
 import { ConfirmationModal } from "../modals/confirmation-modal";
+import { empty, setAttribute, setStyles } from "../../utils/dom-helpers";
 
 export class ConversationSelectorComponent {
 	private isLoading = false;
@@ -55,7 +56,7 @@ export class ConversationSelectorComponent {
 	}
 
 	render(container: HTMLElement): void {
-		container.empty();
+		empty(container);
 
 		// Check if loading
 		const isLoading = this.getIsLoading?.() ?? false;
@@ -82,7 +83,7 @@ export class ConversationSelectorComponent {
 
 		this.conversations.forEach((conv) => {
 			const tab = tabsContainer.createDiv("opencode-obsidian-tab");
-			tab.setAttribute("data-conversation-id", conv.id);
+			setAttribute(tab, "data-conversation-id", conv.id);
 
 			if (conv.id === this.activeConversationId) {
 				tab.addClass("active");
@@ -95,7 +96,7 @@ export class ConversationSelectorComponent {
 			if (conv.sessionId) {
 				const sessionIndicator = tab.createSpan("opencode-obsidian-tab-session-indicator");
 				sessionIndicator.textContent = "●";
-				sessionIndicator.setAttribute("title", "Synced with server");
+				setAttribute(sessionIndicator, "title", "Synced with server");
 			}
 
 			const title = tabContent.createSpan("opencode-obsidian-tab-title");
@@ -109,7 +110,7 @@ export class ConversationSelectorComponent {
 
 			// Update tooltip to include metadata
 			const tooltipText = `${conv.title}\n${messageCount} message${messageCount !== 1 ? 's' : ''} • Last updated ${lastUpdated}`;
-			tab.setAttribute("title", tooltipText);
+			setAttribute(tab, "title", tooltipText);
 
 			let isEditing = false;
 			title.ondblclick = (e) => {
@@ -121,11 +122,13 @@ export class ConversationSelectorComponent {
 				input.type = "text";
 				input.value = conv.title;
 				input.className = "opencode-obsidian-tab-title-edit";
-				input.style.width = `${title.offsetWidth}px`;
-				input.style.minWidth = "120px";
-				input.style.maxWidth = "300px";
+				setStyles(input, { 
+					width: `${title.offsetWidth}px`,
+					minWidth: "120px",
+					maxWidth: "300px"
+				});
 
-				title.style.display = "none";
+				setStyles(title, { display: "none" });
 				tabContent.insertBefore(input, title);
 
 				input.focus();
@@ -137,13 +140,13 @@ export class ConversationSelectorComponent {
 						await this.renameConversation(conv.id, newTitle);
 					}
 					input.remove();
-					title.style.display = "";
+					setStyles(title, { display: "" });
 					isEditing = false;
 				};
 
 				const cancelEdit = () => {
 					input.remove();
-					title.style.display = "";
+					setStyles(title, { display: "" });
 					isEditing = false;
 				};
 
@@ -166,7 +169,7 @@ export class ConversationSelectorComponent {
 
 			const closeBtn = tab.createSpan("opencode-obsidian-tab-close");
 			closeBtn.textContent = "×";
-			closeBtn.setAttribute("title", "Delete conversation");
+			setAttribute(closeBtn, "title", "Delete conversation");
 
 			closeBtn.onclick = async (e) => {
 				e.stopPropagation();
@@ -211,7 +214,7 @@ export class ConversationSelectorComponent {
 		} else {
 			newTab.textContent = "+";
 		}
-		newTab.setAttribute("title", isLoading ? "Loading..." : "New conversation");
+		setAttribute(newTab, "title", isLoading ? "Loading..." : "New conversation");
 		newTab.onclick = async () => {
 			if (!isLoading) {
 				await this.createNewConversation();
@@ -229,7 +232,7 @@ export class ConversationSelectorComponent {
 			} else {
 				syncTab.innerHTML = "↻";
 			}
-			syncTab.setAttribute("title", isLoading ? "Syncing..." : "Sync from server");
+			setAttribute(syncTab, "title", isLoading ? "Syncing..." : "Sync from server");
 			syncTab.onclick = async () => {
 				if (!isLoading && this.syncFromServer) {
 					await this.syncFromServer();
@@ -257,10 +260,12 @@ export class ConversationSelectorComponent {
 
 		const menu = document.createElement("div");
 		menu.className = "opencode-obsidian-context-menu";
-		menu.style.position = "fixed";
-		menu.style.left = `${event.clientX}px`;
-		menu.style.top = `${event.clientY}px`;
-		menu.style.zIndex = "10000";
+		setStyles(menu, {
+			position: "fixed",
+			left: `${event.clientX}px`,
+			top: `${event.clientY}px`,
+			zIndex: "10000"
+		});
 
 		const renameItem = menu.createDiv("opencode-obsidian-context-menu-item");
 		renameItem.textContent = "Rename";

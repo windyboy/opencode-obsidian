@@ -1,5 +1,7 @@
 import type { Message, Conversation } from "../../types";
 import { MessageRendererComponent } from "./message-renderer";
+import { empty, setAttribute, setStyles } from "../../utils/dom-helpers";
+import { formatTime } from "../../utils/data-helpers";
 
 export class MessageListComponent {
 	private messageRenderer: MessageRendererComponent;
@@ -18,7 +20,7 @@ export class MessageListComponent {
 	}
 
 	render(container: HTMLElement): void {
-		container.empty();
+		empty(container);
 
 		const isLoading = this.getIsLoading?.() ?? false;
 
@@ -82,13 +84,13 @@ export class MessageListComponent {
 		const messageEl = container.createDiv(
 			`opencode-obsidian-message opencode-obsidian-message-${message.role}`,
 		);
-		messageEl.setAttribute("data-message-id", message.id);
+		setAttribute(messageEl, "data-message-id", message.id);
 
 		const header = messageEl.createDiv("opencode-obsidian-message-header");
 		header.createSpan("opencode-obsidian-message-role").textContent =
 			message.role;
 		header.createSpan("opencode-obsidian-message-time").textContent =
-			new Date(message.timestamp).toLocaleTimeString();
+			formatTime(message.timestamp);
 
 		const content = messageEl.createDiv(
 			"opencode-obsidian-message-content",
@@ -112,10 +114,7 @@ export class MessageListComponent {
 				const imgEl = imagesContainer.createEl("img", {
 					attr: { src: img.data, alt: img.name || "Image" },
 				});
-				// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-				imgEl.style.maxWidth = "300px";
-				// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-				imgEl.style.maxHeight = "300px";
+				setStyles(imgEl, { maxWidth: "300px", maxHeight: "300px" });
 			});
 		}
 

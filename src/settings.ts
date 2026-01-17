@@ -1,5 +1,13 @@
 import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import type OpenCodeObsidianPlugin from "./main";
+import { createTextarea, hasClass } from "./utils/dom-helpers";
+import {
+	normalizePath,
+	parseNumber,
+	splitLines,
+	splitCommaList,
+	normalizeExtension,
+} from "./utils/data-helpers";
 
 export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 	plugin: OpenCodeObsidianPlugin;
@@ -7,24 +15,6 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 	constructor(app: App, plugin: OpenCodeObsidianPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
-	}
-
-	/**
-	 * Create a textarea element with common styling
-	 */
-	private createTextarea(
-		container: HTMLElement,
-		placeholder: string,
-		value: string,
-		onChange: (value: string) => Promise<void>,
-	): HTMLTextAreaElement {
-		const textarea = container.createEl("textarea", {
-			cls: "opencode-setting-textarea",
-			attr: { placeholder, rows: "3" },
-		});
-		textarea.value = value;
-		textarea.onchange = () => onChange(textarea.value);
-		return textarea;
 	}
 
 	/**
@@ -137,10 +127,10 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 							// Use existing client or create temporary client
 							let client = this.plugin.opencodeClient;
 							const currentClientUrl = client?.getConfig()?.url;
-							const normalizedCurrentUrl =
-								currentClientUrl?.trim().replace(/\/+$/, "") ||
-								"";
-							const normalizedNewUrl = url.trim().replace(/\/+$/, "");
+							const normalizedCurrentUrl = currentClientUrl
+								? normalizePath(currentClientUrl)
+								: "";
+							const normalizedNewUrl = normalizePath(url);
 
 							if (!client || normalizedCurrentUrl !== normalizedNewUrl) {
 								// Create temporary client for health check
@@ -358,23 +348,22 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 				"Glob patterns for allowed paths (e.g., notes/**, docs/*.md). Leave empty to allow all paths (subject to denied paths). One pattern per line.",
 			);
 
-		this.createTextarea(
-			allowedPathsSetting.controlEl,
-			"notes/**\ndocs/*.md",
-			scope.allowedPaths?.join("\n") || "",
-			async (value) => {
+		const allowedPathsTextarea = createTextarea({
+			className: "opencode-setting-textarea",
+			placeholder: "notes/**\ndocs/*.md",
+			rows: 3,
+			value: scope.allowedPaths?.join("\n") || "",
+			onChange: async (value) => {
 				if (!this.plugin.settings.permissionScope) {
 					this.plugin.settings.permissionScope = {};
 				}
-				const paths = value
-					.split("\n")
-					.map((p) => p.trim())
-					.filter((p) => p.length > 0);
+				const paths = splitLines(value);
 				this.plugin.settings.permissionScope.allowedPaths =
 					paths.length > 0 ? paths : undefined;
 				await this.plugin.debouncedSaveSettings();
 			},
-		);
+		});
+		allowedPathsSetting.controlEl.appendChild(allowedPathsTextarea);
 
 		// Denied path patterns
 		const deniedPathsSetting = new Setting(containerEl).setName(
@@ -385,23 +374,22 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 			`Glob patterns for denied paths (checked first, always denied). Example: **/${configDir}/**, **/.git/**. One pattern per line.`,
 		);
 
-		this.createTextarea(
-			deniedPathsSetting.controlEl,
-			`**/${configDir}/**\n**/.git/**\n**/node_modules/**`,
-			scope.deniedPaths?.join("\n") || "",
-			async (value) => {
+		const deniedPathsTextarea = createTextarea({
+			className: "opencode-setting-textarea",
+			placeholder: `**/${configDir}/**\n**/.git/**\n**/node_modules/**`,
+			rows: 3,
+			value: scope.deniedPaths?.join("\n") || "",
+			onChange: async (value) => {
 				if (!this.plugin.settings.permissionScope) {
 					this.plugin.settings.permissionScope = {};
 				}
-				const paths = value
-					.split("\n")
-					.map((p) => p.trim())
-					.filter((p) => p.length > 0);
+				const paths = splitLines(value);
 				this.plugin.settings.permissionScope.deniedPaths =
 					paths.length > 0 ? paths : undefined;
 				await this.plugin.debouncedSaveSettings();
 			},
-		);
+		});
+		deniedPathsSetting.controlEl.appendChild(deniedPathsTextarea);
 
 		// Maximum file size
 		const maxFileSizeSetting = new Setting(containerEl);
@@ -465,11 +453,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 				if (!this.plugin.settings.permissionScope) {
 					this.plugin.settings.permissionScope = {};
 				}
-				const extensions = value
-					.split(",")
-					.map((e) => e.trim())
-					.filter((e) => e.length > 0)
-					.map((e) => (e.startsWith(".") ? e : `.${e}`));
+				const extensions = splitCommaList(value).map(normalizeExtension);
 				this.plugin.settings.permissionScope.allowedExtensions =
 					extensions.length > 0 ? extensions : undefined;
 				await this.plugin.debouncedSaveSettings();
@@ -516,7 +500,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 		content.addClass("hidden");
 
 		toggleButton.onclick = () => {
-			const isVisible = !content.hasClass("hidden");
+			const isVisible = !hasClass(content, "hidden");
 			if (isVisible) {
 				content.addClass("hidden");
 			} else {
@@ -590,9 +574,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 				text.inputEl.min = "1000";
 				text.onChange(async (value: string) => {
 					const serverConfig = this.ensureServerConfig();
-					const numValue = parseInt(value.trim(), 10);
-					serverConfig.reconnectDelay =
-						!isNaN(numValue) && numValue >= 1000 ? numValue : 3000;
+					serverConfig.reconnectDelay = parseNumber(value, 3000, 1000);
 					await this.plugin.debouncedSaveSettings();
 				});
 			});
@@ -614,11 +596,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 				text.inputEl.min = "0";
 				text.onChange(async (value: string) => {
 					const serverConfig = this.ensureServerConfig();
-					const trimmed = value.trim();
-					const numValue =
-						trimmed === "0" ? 0 : parseInt(trimmed, 10);
-					serverConfig.reconnectMaxAttempts =
-						!isNaN(numValue) && numValue >= 0 ? numValue : 10;
+					serverConfig.reconnectMaxAttempts = parseNumber(value, 10, 0);
 					await this.plugin.debouncedSaveSettings();
 				});
 			});
@@ -637,11 +615,7 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 				text.inputEl.min = "0";
 				text.onChange(async (value: string) => {
 					const serverConfig = this.ensureServerConfig();
-					const trimmed = value.trim();
-					const numValue =
-						trimmed === "0" ? 0 : parseInt(trimmed, 10);
-					serverConfig.requestTimeoutMs =
-						!isNaN(numValue) && numValue >= 0 ? numValue : 10000;
+					serverConfig.requestTimeoutMs = parseNumber(value, 10000, 0);
 					await this.plugin.debouncedSaveSettings();
 				});
 			});

@@ -17,6 +17,7 @@ import { ToolPermission } from "./tools/obsidian/types";
 import type { PermissionScope } from "./tools/obsidian/permission-types";
 import { ConnectionManager } from "./session/connection-manager";
 import { SessionEventBus } from "./session/session-event-bus";
+import { PermissionCoordinator } from "./tools/obsidian/permission-coordinator";
 
 /**
  * Maps string permission level settings to ToolPermission enum values
@@ -79,6 +80,7 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 	sessionEventBus = new SessionEventBus();
 	toolRegistry: ObsidianToolRegistry | null = null;
 	permissionManager: PermissionManager | null = null;
+	permissionCoordinator: PermissionCoordinator | null = null;
 
 	private bindClientCallbacks(client: OpenCodeServerClient): void {
 		client.onStreamToken((sessionId, token, done) =>
@@ -92,6 +94,19 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 		);
 		client.onSessionEnd((sessionId, reason) =>
 			this.sessionEventBus.emitSessionEnd({ sessionId, reason }),
+		);
+		client.onPermissionRequest((sessionId, requestId, operation, resourcePath, context) =>
+			this.sessionEventBus.emitPermissionRequest({
+				sessionId,
+				requestId,
+				operation,
+				resourcePath,
+				context: context as {
+					toolName?: string;
+					args?: unknown;
+					preview?: { originalContent?: string; newContent?: string; mode?: string };
+				} | undefined,
+			}),
 		);
 		client.onError((error) => this.sessionEventBus.emitError({ error }));
 	}
@@ -163,6 +178,16 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 							this.errorHandler,
 						);
 						this.bindClientCallbacks(this.opencodeClient);
+
+						// Initialize permission coordinator after client and event bus are ready
+						this.permissionCoordinator = new PermissionCoordinator(
+							this.opencodeClient,
+							this.sessionEventBus,
+							this.permissionManager,
+							auditLogger,
+							this.errorHandler,
+						);
+						this.permissionCoordinator.setApp(this.app);
 
 						console.debug(
 							"[OpenCode Obsidian] OpenCode Server client initialized",
@@ -292,6 +317,9 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 	onunload(): void {
 		console.debug("[OpenCode Obsidian] Plugin unloading...");
 
+		// Cleanup permission coordinator
+		this.permissionCoordinator = null;
+
 		// Disconnect from OpenCode Server
 		if (this.opencodeClient) {
 			void this.opencodeClient.disconnect().then(() => {
@@ -378,10 +406,11 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 				await this.opencodeClient.disconnect();
 				this.opencodeClient = null;
 				this.connectionManager = null;
+				this.permissionCoordinator = null;
 			}
 			
 			// Create new client with updated configuration
-			if (this.settings.opencodeServer) {
+			if (this.settings.opencodeServer && this.permissionManager) {
 				this.opencodeClient = new OpenCodeServerClient(
 					this.settings.opencodeServer,
 					this.errorHandler,
@@ -391,6 +420,18 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 					this.errorHandler,
 				);
 				this.bindClientCallbacks(this.opencodeClient);
+
+				// Reinitialize permission coordinator with new client
+				const auditLogger = new AuditLogger(this.app.vault);
+				this.permissionCoordinator = new PermissionCoordinator(
+					this.opencodeClient,
+					this.sessionEventBus,
+					this.permissionManager,
+					auditLogger,
+					this.errorHandler,
+				);
+				this.permissionCoordinator.setApp(this.app);
+
 				console.debug(
 					"[OpenCode Obsidian] OpenCode Server client reinitialized with new URL:",
 					newUrl,

@@ -347,14 +347,80 @@ export class AuditLogger {
   /**
    * Set retention days
    */
+  /**
+   * Sets the retention period in days.
+   * 
+   * @param days - Number of days to retain audit logs
+   */
   setRetentionDays(days: number): void {
     this.retentionDays = days
   }
 
   /**
-   * Get retention days
+   * Gets the retention period in days.
+   * 
+   * @returns The number of days audit logs are retained
    */
   getRetentionDays(): number {
     return this.retentionDays
+  }
+
+  /**
+   * Queries audit logs by session ID.
+   * 
+   * Returns all audit log entries associated with a specific session.
+   * This is useful for:
+   * - Reviewing all permission decisions for a session
+   * - Debugging session-specific issues
+   * - Generating session activity reports
+   * 
+   * @param sessionId - The session ID to query for
+   * @returns Promise resolving to array of matching audit log entries
+   * @example
+   * ```typescript
+   * const logs = await auditLogger.queryBySession('session-123');
+   * console.log(`Found ${logs.length} log entries for session`);
+   * ```
+   */
+  async queryBySession(sessionId: string): Promise<AuditLogEntry[]> {
+    try {
+      const allLogs = await this.getLogs()
+      return allLogs.filter(log => log.sessionId === sessionId)
+    } catch (error) {
+      console.error('[AuditLogger] Failed to query logs by session:', error)
+      return []
+    }
+  }
+
+  /**
+   * Queries audit logs by request ID (call ID).
+   * 
+   * Returns all audit log entries associated with a specific permission request.
+   * This is useful for:
+   * - Tracking the complete lifecycle of a permission request
+   * - Debugging permission-related issues
+   * - Verifying that requests were properly logged
+   * 
+   * Note: A single request ID may have multiple log entries (initial request,
+   * user response, etc.).
+   * 
+   * @param requestId - The request ID (callId) to query for
+   * @returns Promise resolving to array of matching audit log entries
+   * @example
+   * ```typescript
+   * const logs = await auditLogger.queryByRequestId('req-456');
+   * logs.forEach(log => {
+   *   console.log(`${log.timestamp}: ${log.approved ? 'Approved' : 'Denied'}`);
+   * });
+   * ```
+   */
+  async queryByRequestId(requestId: string): Promise<AuditLogEntry[]> {
+    try {
+      const allLogs = await this.getLogs()
+      return allLogs.filter(log => log.callId === requestId)
+    } catch (error) {
+      console.error('[AuditLogger] Failed to query logs by request ID:', error)
+      return []
+    }
   }
 }

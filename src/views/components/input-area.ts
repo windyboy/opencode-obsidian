@@ -2,6 +2,7 @@ import type OpenCodeObsidianPlugin from "../../main";
 import { App } from "obsidian";
 import { ConfirmationModal } from "../modals/confirmation-modal";
 import { AttachmentModal } from "../modals/attachment-modal";
+import { empty, setAttribute, setStyles } from "../../utils/dom-helpers";
 
 interface CommandSuggestion {
 	name: string;
@@ -25,7 +26,7 @@ export class InputAreaComponent {
 	) {}
 
 	render(container: HTMLElement): void {
-		container.empty();
+		empty(container);
 
 		const inputContainer = container.createDiv(
 			"opencode-obsidian-input-container",
@@ -130,13 +131,12 @@ export class InputAreaComponent {
 			hideSuggestions();
 			textarea.focus();
 			updateCharCount();
-			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-			textarea.style.height = "auto";
-			textarea.style.height = Math.min(textarea.scrollHeight, 200) + "px";
+			setStyles(textarea, { height: "auto" });
+			setStyles(textarea, { height: `${Math.min(textarea.scrollHeight, 200)}px` });
 		};
 
 		const renderSuggestions = (suggestions: CommandSuggestion[]) => {
-			suggestionList.empty();
+			empty(suggestionList);
 			currentSuggestions = suggestions;
 			selectedSuggestionIndex = suggestions.length > 0 ? 0 : -1;
 			if (suggestions.length === 0) {
@@ -166,7 +166,7 @@ export class InputAreaComponent {
 		};
 
 		const showStatusSuggestion = (text: string) => {
-			suggestionList.empty();
+			empty(suggestionList);
 			const item = suggestionList.createDiv(
 				"opencode-obsidian-command-suggestion opencode-obsidian-command-suggestion-empty",
 			);
@@ -211,9 +211,8 @@ export class InputAreaComponent {
 		const handleInputChange = () => {
 			updateCharCount();
 			void updateCommandSuggestions();
-			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-			textarea.style.height = "auto";
-			textarea.style.height = Math.min(textarea.scrollHeight, 200) + "px";
+			setStyles(textarea, { height: "auto" });
+			setStyles(textarea, { height: `${Math.min(textarea.scrollHeight, 200)}px` });
 		};
 
 		textarea.oninput = handleInputChange;

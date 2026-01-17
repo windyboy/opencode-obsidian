@@ -1,4 +1,5 @@
 import { Modal, Setting, Notice, App } from "obsidian";
+import { empty } from "../../utils/dom-helpers";
 
 export class AttachmentModal extends Modal {
 	private onFileSelect: (file: File) => void;
@@ -70,6 +71,6 @@ export class AttachmentModal extends Modal {
 
 	onClose() {
 		const { contentEl } = this;
-		contentEl.empty();
+		empty(contentEl);
 	}
 }

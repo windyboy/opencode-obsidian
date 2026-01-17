@@ -15,7 +15,7 @@ vi.mock("obsidian", () => ({
 // Mock OpenCodeServerClient
 const mockListAgents = vi.fn();
 const mockHealthCheck = vi.fn();
-const mockDisconnect = vi.fn();
+const mockDisconnect = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("./opencode-server/client", () => ({
 	OpenCodeServerClient: vi.fn().mockImplementation(function() {
@@ -23,10 +23,12 @@ vi.mock("./opencode-server/client", () => ({
 			listAgents: mockListAgents,
 			healthCheck: mockHealthCheck,
 			disconnect: mockDisconnect,
+			getConfig: vi.fn().mockReturnValue({ url: "" }),
 			onStreamToken: vi.fn(),
 			onStreamThinking: vi.fn(),
 			onProgressUpdate: vi.fn(),
 			onSessionEnd: vi.fn(),
+			onPermissionRequest: vi.fn(),
 			onError: vi.fn(),
 		};
 	}),
@@ -43,23 +45,48 @@ vi.mock("./settings", () => ({
 }));
 
 vi.mock("./tools/obsidian/tool-registry", () => ({
-	ObsidianToolRegistry: vi.fn(),
+	ObsidianToolRegistry: vi.fn().mockImplementation(function() {
+		return {};
+	}),
 }));
 
 vi.mock("./tools/obsidian/tool-executor", () => ({
-	ObsidianToolExecutor: vi.fn(),
+	ObsidianToolExecutor: vi.fn().mockImplementation(function() {
+		return {};
+	}),
 }));
 
 vi.mock("./tools/obsidian/permission-manager", () => ({
-	PermissionManager: vi.fn(),
+	PermissionManager: vi.fn().mockImplementation(function() {
+		return {
+			getPermissionLevel: vi.fn().mockReturnValue("read-only"),
+			setPermissionLevel: vi.fn(),
+			setScope: vi.fn(),
+			validatePath: vi.fn().mockResolvedValue({ allowed: true }),
+		};
+	}),
 }));
 
 vi.mock("./tools/obsidian/audit-logger", () => ({
-	AuditLogger: vi.fn(),
+	AuditLogger: vi.fn().mockImplementation(function() {
+		return {
+			log: vi.fn().mockResolvedValue(undefined),
+		};
+	}),
+}));
+
+vi.mock("./tools/obsidian/permission-coordinator", () => ({
+	PermissionCoordinator: vi.fn().mockImplementation(function() {
+		return {
+			setApp: vi.fn(),
+		};
+	}),
 }));
 
 vi.mock("./session/connection-manager", () => ({
-	ConnectionManager: vi.fn(),
+	ConnectionManager: vi.fn().mockImplementation(function() {
+		return {};
+	}),
 }));
 
 vi.mock("./session/session-event-bus", () => ({
@@ -69,6 +96,7 @@ vi.mock("./session/session-event-bus", () => ({
 			emitStreamThinking: vi.fn(),
 			emitProgressUpdate: vi.fn(),
 			emitSessionEnd: vi.fn(),
+			emitPermissionRequest: vi.fn(),
 			emitError: vi.fn(),
 		};
 	}),
@@ -105,6 +133,9 @@ describe("OpenCodeObsidianPlugin - Agent Loading", () => {
 			dir: "/test",
 		} as any);
 
+		// Manually set app property (normally set by Obsidian framework)
+		plugin.app = mockApp;
+
 		// Mock plugin methods
 		plugin.loadData = vi.fn().mockResolvedValue({});
 		plugin.saveData = vi.fn().mockResolvedValue(undefined);
@@ -112,6 +143,12 @@ describe("OpenCodeObsidianPlugin - Agent Loading", () => {
 		plugin.addRibbonIcon = vi.fn();
 		plugin.addCommand = vi.fn();
 		plugin.addSettingTab = vi.fn();
+
+		// Track saveSettings calls for testing
+		const originalSaveSettings = plugin.saveSettings.bind(plugin);
+		plugin.saveSettings = vi.fn().mockImplementation(async function(this: typeof plugin) {
+			return originalSaveSettings();
+		});
 	});
 
 	afterEach(() => {
@@ -220,6 +257,78 @@ describe("OpenCodeObsidianPlugin - Agent Loading", () => {
 
 			expect(plugin.settings.agents).toEqual(mockAgents);
 			expect(plugin.saveSettings).toHaveBeenCalled();
+		});
+	});
+
+	describe("PermissionCoordinator initialization", () => {
+		beforeEach(() => {
+			// Mock loadData to return settings with server URL
+			plugin.loadData = vi.fn().mockResolvedValue({
+				agent: "assistant",
+				instructions: [],
+				opencodeServer: { url: "http://127.0.0.1:4096" },
+				toolPermission: "read-only",
+			});
+
+			// Initialize error handler
+			plugin.errorHandler = new ErrorHandler({
+				showUserNotifications: false,
+				logToConsole: false,
+				collectErrors: false,
+			});
+		});
+
+		it("should initialize PermissionCoordinator when server URL is configured", async () => {
+			mockHealthCheck.mockResolvedValue(true);
+
+			await plugin.onload();
+			
+			// Wait for async saveSettings to complete (called by migrateSettings)
+			// The PermissionCoordinator is initialized in saveSettings when URL changes
+			await new Promise(resolve => setTimeout(resolve, 100));
+			
+			// PermissionCoordinator is initialized after settings migration
+			expect(plugin.permissionCoordinator).not.toBeNull();
+		});
+
+		it("should call setApp on PermissionCoordinator after initialization", async () => {
+			mockHealthCheck.mockResolvedValue(true);
+
+			await plugin.onload();
+			
+			// Wait for async saveSettings to complete
+			await new Promise(resolve => setTimeout(resolve, 100));
+			
+			expect(plugin.permissionCoordinator).not.toBeNull();
+			expect(plugin.permissionCoordinator?.setApp).toHaveBeenCalledWith(mockApp);
+		});
+
+		it("should not initialize PermissionCoordinator when server URL is not configured", async () => {
+			// Override loadData to return empty server URL
+			plugin.loadData = vi.fn().mockResolvedValue({
+				agent: "assistant",
+				instructions: [],
+				opencodeServer: { url: "" },
+				toolPermission: "read-only",
+			});
+
+			await plugin.onload();
+
+			expect(plugin.permissionCoordinator).toBeNull();
+		});
+
+		it("should set PermissionCoordinator to null on unload", async () => {
+			mockHealthCheck.mockResolvedValue(true);
+
+			await plugin.onload();
+			
+			// Wait for async saveSettings to complete
+			await new Promise(resolve => setTimeout(resolve, 100));
+			
+			expect(plugin.permissionCoordinator).not.toBeNull();
+
+			plugin.onunload();
+			expect(plugin.permissionCoordinator).toBeNull();
 		});
 	});
 });

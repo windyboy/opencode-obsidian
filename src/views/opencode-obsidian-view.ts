@@ -6,6 +6,8 @@ import {
 import type OpenCodeObsidianPlugin from "../main";
 import { ErrorSeverity } from "../utils/error-handler";
 import { debounceAsync } from "../utils/debounce-throttle";
+import { parseSlashCommand, sanitizeFilename, createFilenameSafeTimestamp } from "../utils/data-helpers";
+import { empty, setAttribute, setStyles } from "../utils/dom-helpers";
 import type {
 	Conversation,
 	Message,
@@ -265,7 +267,7 @@ export class OpenCodeObsidianView extends ItemView {
 	async onOpen() {
 		const container = this.getContainer();
 		if (!container) return;
-		container.empty();
+		empty(container);
 		container.addClass("opencode-obsidian-view");
 
 		this.renderView();
@@ -366,7 +368,7 @@ export class OpenCodeObsidianView extends ItemView {
 		const container = this.getContainer();
 		if (!container) return;
 		
-		container.empty();
+		empty(container);
 		this.headerComponent.render(container.createDiv("opencode-obsidian-header"));
 		this.conversationSelectorComponent.render(container.createDiv("opencode-obsidian-conversation-selector"));
 		this.messageListComponent.render(container.createDiv("opencode-obsidian-messages"));
@@ -575,19 +577,7 @@ export class OpenCodeObsidianView extends ItemView {
 	}
 
 	private parseSlashCommand(content: string): { command: string; args: string } | null {
-		const trimmed = content.trim();
-		if (!trimmed.startsWith("/")) return null;
-		
-		const withoutSlash = trimmed.slice(1).trim();
-		if (!withoutSlash) return null;
-		
-		const spaceIndex = withoutSlash.indexOf(" ");
-		if (spaceIndex === -1) {
-			return { command: withoutSlash, args: "" };
-		}
-		
-		const command = withoutSlash.slice(0, spaceIndex);
-		return command ? { command, args: withoutSlash.slice(spaceIndex + 1) } : null;
+		return parseSlashCommand(content);
 	}
 
 	private findTargetConversation(sessionId: string, requireMatch = false): Conversation | null {
@@ -755,7 +745,7 @@ export class OpenCodeObsidianView extends ItemView {
 			return;
 		}
 
-		contentEl.empty();
+		empty(contentEl);
 		this.messageRendererComponent.renderMessageContent(contentEl, content);
 
 		const messagesContainer = this.containerEl.querySelector(".opencode-obsidian-messages") as HTMLElement;
@@ -809,10 +799,8 @@ export class OpenCodeObsidianView extends ItemView {
 
 			const markdownContent = lines.join("\n");
 
-			const sanitizedTitle = conversation.title
-				.replace(/[<>:"/\\|?*]/g, "_")
-				.substring(0, 50);
-			const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+			const sanitizedTitle = sanitizeFilename(conversation.title);
+			const timestamp = createFilenameSafeTimestamp();
 			const filename = `${sanitizedTitle}-${timestamp}.md`;
 
 			const exportPath = `Exports/${filename}`;
@@ -951,11 +939,9 @@ export class OpenCodeObsidianView extends ItemView {
 		);
 		if (indicator) {
 			indicator.textContent = `💭 ${content || "Thinking..."}`;
-			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-			indicator.style.display = "block";
+			setStyles(indicator, { display: "block" });
 			setTimeout(() => {
-				// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-				indicator.style.display = "none";
+				setStyles(indicator, { display: "none" });
 			}, 3000);
 		}
 	}
@@ -967,8 +953,7 @@ export class OpenCodeObsidianView extends ItemView {
 		);
 		if (indicator) {
 			indicator.textContent = `🔒 ${content}`;
-			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-			indicator.style.display = "block";
+			setStyles(indicator, { display: "block" });
 		}
 	}
 

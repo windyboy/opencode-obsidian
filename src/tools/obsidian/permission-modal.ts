@@ -31,6 +31,10 @@ export type PermissionResponseCallback = (allowed: boolean, reason?: string) => 
 export class PermissionModal extends Modal {
   private request: PermissionRequest
   private onResponse: PermissionResponseCallback
+  private timeoutSeconds = 60
+  private countdownInterval: ReturnType<typeof setInterval> | null = null
+  private countdownEl: HTMLElement | null = null
+  private responseHandled = false
 
   constructor(app: App, request: PermissionRequest, onResponse: PermissionResponseCallback) {
     super(app)
@@ -42,8 +46,16 @@ export class PermissionModal extends Modal {
     const { contentEl } = this
     contentEl.empty()
 
-    // Title
-    contentEl.createEl('h2', { text: 'Permission request' })
+    // Title with countdown
+    const titleContainer = contentEl.createDiv('opencode-obsidian-permission-title')
+    titleContainer.createEl('h2', { text: 'Permission request' })
+    this.countdownEl = titleContainer.createEl('span', {
+      text: ` (${this.timeoutSeconds}s)`,
+      cls: 'opencode-obsidian-permission-countdown'
+    })
+
+    // Start countdown timer
+    this.startCountdown()
 
     // Tool information
     const toolInfo = contentEl.createDiv('opencode-obsidian-permission-tool-info')
@@ -69,6 +81,7 @@ export class PermissionModal extends Modal {
         .setButtonText('Deny')
         .setWarning()
         .onClick(() => {
+          this.responseHandled = true
           this.onResponse(false, 'User denied permission')
           this.close()
         })
@@ -77,10 +90,36 @@ export class PermissionModal extends Modal {
         .setButtonText('Approve')
         .setCta()
         .onClick(() => {
+          this.responseHandled = true
           this.onResponse(true)
           this.close()
         })
       )
+  }
+
+  /**
+   * Start countdown timer that updates every second
+   */
+  private startCountdown(): void {
+    this.countdownInterval = setInterval(() => {
+      this.timeoutSeconds--
+      if (this.countdownEl) {
+        this.countdownEl.textContent = ` (${this.timeoutSeconds}s)`
+      }
+      if (this.timeoutSeconds <= 0) {
+        this.stopCountdown()
+      }
+    }, 1000)
+  }
+
+  /**
+   * Stop countdown timer
+   */
+  private stopCountdown(): void {
+    if (this.countdownInterval) {
+      clearInterval(this.countdownInterval)
+      this.countdownInterval = null
+    }
   }
 
   /**
@@ -297,6 +336,14 @@ export class PermissionModal extends Modal {
   }
 
   onClose() {
+    // Stop countdown timer
+    this.stopCountdown()
+
+    // If modal closed without explicit approve/deny, treat as denial
+    if (!this.responseHandled) {
+      this.onResponse(false, 'Modal closed without response')
+    }
+
     const { contentEl } = this
     contentEl.empty()
   }

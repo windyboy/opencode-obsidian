@@ -2,6 +2,7 @@ import { MarkdownRenderer, Notice, ItemView } from "obsidian";
 import type { Message } from "../../types";
 import type OpenCodeObsidianPlugin from "../../main";
 import { ErrorSeverity } from "../../utils/error-handler";
+import { empty } from "../../utils/dom-helpers";
 
 export class MessageRendererComponent {
 	constructor(

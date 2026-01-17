@@ -1,5 +1,6 @@
 import { Modal, App, MarkdownRenderer } from "obsidian";
 import type { SessionDiff, FileDiff } from "../../types";
+import { empty } from "../../utils/dom-helpers";
 
 /**
  * Modal for displaying session file diffs
@@ -37,7 +38,7 @@ export class DiffViewerModal extends Modal {
 
 	onClose() {
 		const { contentEl } = this;
-		contentEl.empty();
+		empty(contentEl);
 	}
 
 	/**

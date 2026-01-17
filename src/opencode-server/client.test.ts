@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fc from "fast-check";
 import { ErrorHandler } from "../utils/error-handler";
 
 // Mock the SDK client
@@ -400,6 +401,141 @@ describe("OpenCodeServerClient", () => {
 
 			await client.createSession();
 			expect(client.getCurrentSessionId()).toBe("session-123");
+		});
+	});
+
+	describe("Permission response", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+			// Mock the permission.respond method on the SDK client
+			(mockSDKClient.session as any).permission = {
+				respond: vi.fn(),
+			};
+		});
+
+		it("should respond to permission request successfully", async () => {
+			(mockSDKClient.session as any).permission.respond.mockResolvedValue({
+				data: {},
+				error: null,
+			});
+
+			await client.respondToPermission(
+				"session-123",
+				"request-456",
+				true,
+				"User approved",
+			);
+
+			expect(
+				(mockSDKClient.session as any).permission.respond,
+			).toHaveBeenCalledWith({
+				path: { id: "session-123" },
+				body: {
+					requestId: "request-456",
+					approved: true,
+					reason: "User approved",
+				},
+			});
+		});
+
+		it("should retry on first failure and succeed on second attempt", async () => {
+			const mockRespond = (mockSDKClient.session as any).permission.respond;
+			mockRespond
+				.mockRejectedValueOnce(new Error("Network error"))
+				.mockResolvedValueOnce({
+					data: {},
+					error: null,
+				});
+
+			const promise = client.respondToPermission(
+				"session-123",
+				"request-456",
+				false,
+				"User denied",
+			);
+
+			// Fast-forward time by 500ms to allow retry
+			await vi.advanceTimersByTimeAsync(500);
+			await promise;
+
+			expect(mockRespond).toHaveBeenCalledTimes(2);
+		});
+
+		it("should wait 500ms between retry attempts", async () => {
+			const mockRespond = (mockSDKClient.session as any).permission.respond;
+			mockRespond
+				.mockRejectedValueOnce(new Error("Network error"))
+				.mockResolvedValueOnce({
+					data: {},
+					error: null,
+				});
+
+			const promise = client.respondToPermission(
+				"session-123",
+				"request-456",
+				true,
+			);
+
+			// Fast-forward time by 500ms
+			await vi.advanceTimersByTimeAsync(500);
+			await promise;
+
+			expect(mockRespond).toHaveBeenCalledTimes(2);
+		});
+
+		it("should throw error after all retry attempts fail", async () => {
+			const mockRespond = (mockSDKClient.session as any).permission.respond;
+			mockRespond.mockRejectedValue(new Error("Persistent network error"));
+
+			// Use expect().rejects to properly handle the rejection
+			const promise = expect(
+				client.respondToPermission("session-123", "request-456", true),
+			).rejects.toThrow("Persistent network error");
+
+			// Fast-forward time by 500ms to allow retry
+			await vi.advanceTimersByTimeAsync(500);
+			await promise;
+
+			expect(mockRespond).toHaveBeenCalledTimes(2); // Initial + 1 retry
+		});
+
+		it("should handle error response from SDK", async () => {
+			(mockSDKClient.session as any).permission.respond.mockResolvedValue({
+				data: null,
+				error: "Permission endpoint not available",
+			});
+
+			// Use expect().rejects to properly handle the rejection
+			const promise = expect(
+				client.respondToPermission("session-123", "request-456", false),
+			).rejects.toThrow("Permission response failed");
+
+			// Fast-forward time by 500ms to allow retry
+			await vi.advanceTimersByTimeAsync(500);
+			await promise;
+		});
+
+		it("should work without optional reason parameter", async () => {
+			(mockSDKClient.session as any).permission.respond.mockResolvedValue({
+				data: {},
+				error: null,
+			});
+
+			await client.respondToPermission("session-123", "request-456", true);
+
+			expect(
+				(mockSDKClient.session as any).permission.respond,
+			).toHaveBeenCalledWith({
+				path: { id: "session-123" },
+				body: {
+					requestId: "request-456",
+					approved: true,
+					reason: undefined,
+				},
+			});
 		});
 	});
 
@@ -1035,6 +1171,194 @@ describe("OpenCodeServerClient", () => {
 			expect(sessionEndCallback).toHaveBeenCalledWith(
 				"test-session",
 				"completed",
+			);
+		});
+
+		it("should handle permission.request events with all fields", () => {
+			const permissionCallback = vi.fn();
+			client.onPermissionRequest(permissionCallback);
+
+			const permissionEvent = {
+				type: "permission.request",
+				sessionId: "test-session",
+				properties: {
+					requestId: "req-123",
+					operation: "write",
+					resourcePath: "/path/to/file.md",
+					context: {
+						toolName: "obsidian.write_file",
+						args: { path: "/path/to/file.md", content: "test" },
+						preview: { newContent: "test content" },
+					},
+				},
+			};
+
+			(client as any).handleSDKEvent(permissionEvent);
+			expect(permissionCallback).toHaveBeenCalledWith(
+				"test-session",
+				"req-123",
+				"write",
+				"/path/to/file.md",
+				{
+					toolName: "obsidian.write_file",
+					args: { path: "/path/to/file.md", content: "test" },
+					preview: { newContent: "test content" },
+				},
+			);
+		});
+
+		it("should handle permission.request events from data field", () => {
+			const permissionCallback = vi.fn();
+			client.onPermissionRequest(permissionCallback);
+
+			const permissionEvent = {
+				type: "permission.request",
+				sessionId: "test-session",
+				data: {
+					requestId: "req-456",
+					operation: "read",
+					resourcePath: "/notes/test.md",
+				},
+			};
+
+			(client as any).handleSDKEvent(permissionEvent);
+			expect(permissionCallback).toHaveBeenCalledWith(
+				"test-session",
+				"req-456",
+				"read",
+				"/notes/test.md",
+				undefined,
+			);
+		});
+
+		it("should log warning for malformed permission.request events", () => {
+			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const permissionCallback = vi.fn();
+			client.onPermissionRequest(permissionCallback);
+
+			// Missing requestId
+			const malformedEvent1 = {
+				type: "permission.request",
+				sessionId: "test-session",
+				properties: {
+					operation: "write",
+					resourcePath: "/path/to/file.md",
+				},
+			};
+
+			(client as any).handleSDKEvent(malformedEvent1);
+			expect(consoleWarnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Malformed permission.request event"),
+				expect.any(Object),
+			);
+			expect(permissionCallback).not.toHaveBeenCalled();
+
+			// Missing operation
+			const malformedEvent2 = {
+				type: "permission.request",
+				sessionId: "test-session",
+				properties: {
+					requestId: "req-789",
+					resourcePath: "/path/to/file.md",
+				},
+			};
+
+			(client as any).handleSDKEvent(malformedEvent2);
+			expect(permissionCallback).not.toHaveBeenCalled();
+
+			// Missing resourcePath
+			const malformedEvent3 = {
+				type: "permission.request",
+				sessionId: "test-session",
+				properties: {
+					requestId: "req-789",
+					operation: "write",
+				},
+			};
+
+			(client as any).handleSDKEvent(malformedEvent3);
+			expect(permissionCallback).not.toHaveBeenCalled();
+
+			consoleWarnSpy.mockRestore();
+		});
+
+		/**
+		 * **Validates: Requirements 1.3**
+		 *
+		 * Property: For any permission.request event with missing required fields,
+		 * no modal is shown (callback not invoked) and a warning is logged.
+		 */
+		it("Property 2: Malformed event handling - events with missing fields are denied and logged", async () => {
+			// Generator for malformed permission events
+			// Each event is missing at least one required field (requestId, operation, or resourcePath)
+			const malformedEventArb = fc.record({
+				type: fc.constant("permission.request"),
+				sessionId: fc.string({ minLength: 1, maxLength: 50 }),
+				properties: fc.oneof(
+					// Missing requestId
+					fc.record({
+						operation: fc.string({ minLength: 1, maxLength: 20 }),
+						resourcePath: fc.string({ minLength: 1, maxLength: 100 }),
+						context: fc.option(fc.object(), { nil: undefined }),
+					}),
+					// Missing operation
+					fc.record({
+						requestId: fc.string({ minLength: 1, maxLength: 50 }),
+						resourcePath: fc.string({ minLength: 1, maxLength: 100 }),
+						context: fc.option(fc.object(), { nil: undefined }),
+					}),
+					// Missing resourcePath
+					fc.record({
+						requestId: fc.string({ minLength: 1, maxLength: 50 }),
+						operation: fc.string({ minLength: 1, maxLength: 20 }),
+						context: fc.option(fc.object(), { nil: undefined }),
+					}),
+					// Missing all fields
+					fc.record({
+						context: fc.option(fc.object(), { nil: undefined }),
+					}),
+					// Empty strings (also invalid)
+					fc.record({
+						requestId: fc.constant(""),
+						operation: fc.string({ minLength: 1, maxLength: 20 }),
+						resourcePath: fc.string({ minLength: 1, maxLength: 100 }),
+					}),
+					fc.record({
+						requestId: fc.string({ minLength: 1, maxLength: 50 }),
+						operation: fc.constant(""),
+						resourcePath: fc.string({ minLength: 1, maxLength: 100 }),
+					}),
+					fc.record({
+						requestId: fc.string({ minLength: 1, maxLength: 50 }),
+						operation: fc.string({ minLength: 1, maxLength: 20 }),
+						resourcePath: fc.constant(""),
+					}),
+				),
+			});
+
+			await fc.assert(
+				fc.asyncProperty(malformedEventArb, async (event) => {
+					// Setup
+					const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+					const permissionCallback = vi.fn();
+					client.onPermissionRequest(permissionCallback);
+
+					// Execute
+					(client as any).handleSDKEvent(event);
+
+					// Verify: No callback invoked (no modal shown)
+					expect(permissionCallback).not.toHaveBeenCalled();
+
+					// Verify: Warning logged
+					expect(consoleWarnSpy).toHaveBeenCalledWith(
+						expect.stringContaining("Malformed permission.request event"),
+						expect.any(Object),
+					);
+
+					// Cleanup
+					consoleWarnSpy.mockRestore();
+				}),
+				{ numRuns: 100 }, // Run 100+ iterations as specified
 			);
 		});
 	});
