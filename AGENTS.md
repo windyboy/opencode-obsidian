@@ -12,6 +12,7 @@ AI-powered chat plugin for Obsidian with:
 - Multi-session conversation management
 - Permission system for vault operations
 - Agent and skill configuration
+- Small personal obsidian plugin project
 
 ## Architecture
 

@@ -4,7 +4,7 @@ import {
 	VIEW_TYPE_OPENCODE_OBSIDIAN,
 } from "./views/opencode-obsidian-view";
 import { OpenCodeObsidianSettingTab } from "./settings";
-import type { OpenCodeObsidianSettings } from "./types";
+import type { OpenCodeObsidianSettings, Agent } from "./types";
 import { UI_CONFIG } from "./utils/constants";
 import { ErrorHandler, ErrorSeverity } from "./utils/error-handler";
 import { debounceAsync } from "./utils/debounce-throttle";
@@ -197,6 +197,11 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 								ErrorSeverity.Warning,
 							);
 						}
+
+						// Load agents (non-blocking)
+						this.loadAgents().catch(error => {
+							console.warn("Failed to load agents from server, using defaults", error);
+						});
 					} else {
 						this.errorHandler.handleError(
 							new Error("OpenCode Server URL not configured"),
@@ -445,5 +450,43 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 		} else {
 			new Notice("Please open the chat view first");
 		}
+	}
+
+	/**
+	 * Load agents from OpenCode Server
+	 * Non-blocking operation that updates settings on success
+	 * Falls back to default agents on error
+	 */
+	private async loadAgents(): Promise<void> {
+		try {
+			if (!this.opencodeClient) {
+				return; // No client configured yet
+			}
+			const agents = await this.opencodeClient.listAgents();
+			this.settings.agents = agents;
+			await this.saveSettings();
+		} catch (error) {
+			// Fallback to hardcoded agents
+			this.settings.agents = this.getDefaultAgents();
+			this.errorHandler.handleError(
+				error,
+				{ module: "Plugin", function: "loadAgents" },
+				ErrorSeverity.Warning,
+			);
+		}
+	}
+
+	/**
+	 * Get default hardcoded agents as fallback
+	 * @returns Array of default agents
+	 */
+	private getDefaultAgents(): Agent[] {
+		return [
+			{ id: "assistant", name: "Assistant", systemPrompt: "" },
+			{ id: "bootstrap", name: "Bootstrap", systemPrompt: "" },
+			{ id: "thinking-partner", name: "Thinking Partner", systemPrompt: "" },
+			{ id: "research-assistant", name: "Research Assistant", systemPrompt: "" },
+			{ id: "read-only", name: "Read Only", systemPrompt: "" },
+		];
 	}
 }

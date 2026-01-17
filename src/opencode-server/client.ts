@@ -943,6 +943,46 @@ export class OpenCodeServerClient {
 	}
 
 	/**
+	 * List available agents from server
+	 * @returns Array of agents with id, name, description
+	 * @throws Error if request fails
+	 */
+	async listAgents(): Promise<import("../types").Agent[]> {
+		try {
+			const response = await this.sdkClient.app.agents();
+			if (response.error || !response.data) {
+				throw new Error(
+					`Failed to list agents: ${response.error ?? "Unknown error"}`,
+				);
+			}
+
+			return response.data.map((agent: any) => ({
+				id: agent.id,
+				name: agent.name,
+				description: agent.description,
+				systemPrompt: agent.systemPrompt || "",
+				model: agent.model,
+				tools: agent.tools,
+				skills: agent.skills,
+				color: agent.color,
+				hidden: agent.hidden,
+				mode: agent.mode,
+			}));
+		} catch (error) {
+			this.errorHandler.handleError(
+				error,
+				{
+					module: "OpenCodeClient",
+					function: "listAgents",
+					operation: "Listing agents",
+				},
+				ErrorSeverity.Warning,
+			);
+			throw error;
+		}
+	}
+
+	/**
 	 * Abort a session
 	 */
 	async abortSession(sessionId: string): Promise<void> {

@@ -236,6 +236,38 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 				agentSetting.setDesc(this.getAgentDescription());
 			});
 		});
+
+		// Add refresh button
+		agentSetting.addButton((button) => {
+			button
+				.setButtonText("Refresh agents")
+				.setTooltip("Fetch latest agents from server")
+				.onClick(async () => {
+					button.setDisabled(true);
+					button.setButtonText("Refreshing...");
+
+					try {
+						if (!this.plugin.opencodeClient) {
+							new Notice("OpenCode Server client not configured");
+							return;
+						}
+
+						const agents = await this.plugin.opencodeClient.listAgents();
+						this.plugin.settings.agents = agents;
+						await this.plugin.saveSettings();
+						this.display(); // Re-render settings
+						new Notice("Agents refreshed successfully");
+					} catch (error) {
+						const errorMessage = error instanceof Error
+							? error.message
+							: "Unknown error";
+						new Notice(`Failed to refresh agents: ${errorMessage}`);
+					} finally {
+						button.setDisabled(false);
+						button.setButtonText("Refresh agents");
+					}
+				});
+		});
 	}
 
 	/**

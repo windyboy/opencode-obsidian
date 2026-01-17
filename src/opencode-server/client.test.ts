@@ -17,6 +17,9 @@ const mockSDKClient = {
 		abort: vi.fn(),
 		fork: vi.fn(),
 	},
+	app: {
+		agents: vi.fn(),
+	},
 };
 
 // Mock Obsidian API
@@ -1404,6 +1407,125 @@ describe("OpenCodeServerClient", () => {
 
 			const result = await client.healthCheck();
 			expect(result).toBe(false);
+		});
+	});
+
+	describe("List agents", () => {
+		beforeEach(() => {
+			client = new OpenCodeServerClient(
+				{ url: "http://127.0.0.1:4096" },
+				errorHandler,
+			);
+		});
+
+		it("should list agents successfully", async () => {
+			const mockAgents = [
+				{
+					id: "assistant",
+					name: "Assistant",
+					description: "General purpose assistant",
+					systemPrompt: "You are a helpful assistant",
+				},
+				{
+					id: "bootstrap",
+					name: "Bootstrap",
+					description: "Bootstrap agent",
+					systemPrompt: "Bootstrap prompt",
+					model: { providerID: "anthropic", modelID: "claude-3-5-sonnet" },
+					tools: { "*": true },
+					skills: ["skill1"],
+					color: "#38A3EE",
+					hidden: false,
+					mode: "primary",
+				},
+			];
+
+			mockSDKClient.app.agents.mockResolvedValue({
+				data: mockAgents,
+				error: null,
+			});
+
+			const agents = await client.listAgents();
+
+			expect(agents).toHaveLength(2);
+			expect(agents[0]).toEqual({
+				id: "assistant",
+				name: "Assistant",
+				description: "General purpose assistant",
+				systemPrompt: "You are a helpful assistant",
+				model: undefined,
+				tools: undefined,
+				skills: undefined,
+				color: undefined,
+				hidden: undefined,
+				mode: undefined,
+			});
+			expect(agents[1]).toEqual({
+				id: "bootstrap",
+				name: "Bootstrap",
+				description: "Bootstrap agent",
+				systemPrompt: "Bootstrap prompt",
+				model: { providerID: "anthropic", modelID: "claude-3-5-sonnet" },
+				tools: { "*": true },
+				skills: ["skill1"],
+				color: "#38A3EE",
+				hidden: false,
+				mode: "primary",
+			});
+		});
+
+		it("should handle error response from server", async () => {
+			mockSDKClient.app.agents.mockResolvedValue({
+				data: null,
+				error: "Server error",
+			});
+
+			await expect(client.listAgents()).rejects.toThrow(
+				"Failed to list agents: Server error",
+			);
+		});
+
+		it("should handle missing data in response", async () => {
+			mockSDKClient.app.agents.mockResolvedValue({
+				data: null,
+				error: null,
+			});
+
+			await expect(client.listAgents()).rejects.toThrow(
+				"Failed to list agents: Unknown error",
+			);
+		});
+
+		it("should handle network errors", async () => {
+			mockSDKClient.app.agents.mockRejectedValue(
+				new Error("Network error"),
+			);
+
+			await expect(client.listAgents()).rejects.toThrow("Network error");
+		});
+
+		it("should map agent fields correctly", async () => {
+			const mockAgents = [
+				{
+					id: "test-agent",
+					name: "Test Agent",
+					description: "Test description",
+					systemPrompt: "Test prompt",
+				},
+			];
+
+			mockSDKClient.app.agents.mockResolvedValue({
+				data: mockAgents,
+				error: null,
+			});
+
+			const agents = await client.listAgents();
+
+			expect(agents.length).toBe(1);
+			expect(agents[0]?.id).toBe("test-agent");
+			expect(agents[0]?.name).toBe("Test Agent");
+			expect(agents[0]?.description).toBe("Test description");
+			expect(agents[0]?.systemPrompt).toBe("Test prompt");
 		});
 	});
 	});

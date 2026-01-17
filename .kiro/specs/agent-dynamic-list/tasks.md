@@ -1,0 +1,74 @@
+# Implementation Tasks: Agent Dynamic List
+
+- [x] 1. Add listAgents() to OpenCodeServerClient
+  - [x] 1.1 Add `listAgents()` method to `OpenCodeServerClient` class
+    - Call `sdkClient.app.agents()`
+    - Map response to `Agent[]` type
+    - Handle errors with ErrorHandler
+    - Add JSDoc comments
+  - [x] 1.2 Write unit tests for `listAgents()`
+    - Test successful response
+    - Test error response
+    - Test error handling
+
+- [x] 2. Add Agent Loading on Plugin Startup
+  - [x] 2.1 Add `loadAgents()` method to plugin main class
+    - Call `opencodeClient.listAgents()`
+    - Store agents in settings on success
+    - Fallback to `getDefaultAgents()` on error
+    - Non-blocking (use `.catch()`)
+  - [x] 2.2 Add `getDefaultAgents()` helper method
+    - Return hardcoded agent list
+    - Match existing agent structure
+  - [x] 2.3 Call `loadAgents()` in `onload()`
+    - Add after existing initialization
+    - Handle case when client not configured
+  - [x] 2.4 Write unit tests for agent loading
+    - Test successful load
+    - Test fallback on error
+    - Test non-blocking behavior
+
+- [ ] 3. Add Refresh Button to Settings
+  - [x] 3.1 Add refresh button in `renderAgentConfiguration()`
+    - Button text: "Refresh agents"
+    - Tooltip: "Fetch latest agents from server"
+    - Position after agent dropdown
+  - [x] 3.2 Implement button click handler
+    - Disable button and change text to "Refreshing..."
+    - Call `opencodeClient.listAgents()`
+    - Update settings and re-render on success
+    - Show success notice
+    - Show error notice on failure
+    - Re-enable button in finally block
+  - [ ] 3.3 Manual testing
+    - Test refresh with server running
+    - Test refresh with server down
+    - Verify button states
+    - Verify notices display correctly
+
+- [ ] 4. Integration Testing
+  - [ ] 4.1 Test complete flow
+    - Start plugin with server running
+    - Verify agents loaded from server
+    - Change agent selection
+    - Click refresh button
+    - Verify agents updated
+  - [ ] 4.2 Test error scenarios
+    - Start plugin with server down
+    - Verify fallback to defaults
+    - Verify no errors in console
+    - Click refresh with server down
+    - Verify error notice shown
+
+- [x] 5. Documentation and Cleanup
+  - [x] 5.1 Update code comments
+    - Add JSDoc to new methods
+    - Update existing comments if needed
+  - [x] 5.2 Run linter and type check
+    - `bun run lint`
+    - `bun run check`
+    - Fix any issues
+  - [x] 5.3 Final manual testing
+    - Test all scenarios
+    - Verify backward compatibility
+    - Check console for warnings/errors
