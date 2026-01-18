@@ -28,6 +28,7 @@ import { ConversationManager } from "./services/conversation-manager";
 import { MessageSender } from "./services/message-sender";
 import { ConversationSync } from "./services/conversation-sync";
 import { SessionManager } from "./services/session-manager";
+import { TodoListComponent } from "../todo/todo-list-component";
 
 export const VIEW_TYPE_OPENCODE_OBSIDIAN = "opencode-obsidian-view";
 
@@ -49,7 +50,8 @@ export class OpenCodeObsidianView extends ItemView {
 	private isStreaming = false;
 	private isConversationOperationLoading = false;
 	private currentAbortController: AbortController | null = null;
-	private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
+	// Health status is now managed by connection handler
+	// private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
 	private lastHealthCheckResult: boolean | null = null;
 	private eventUnsubscribers: Array<() => void> = [];
 	private commandSuggestions: CommandSuggestion[] = [];
@@ -58,6 +60,9 @@ export class OpenCodeObsidianView extends ItemView {
 	private debouncedSaveScrollPosition = debounceAsync(async (conversationId: string, scrollTop: number) => {
 		await this.saveScrollPosition(conversationId, scrollTop);
 	}, 500);
+	// Todo list related
+	private isTodoListVisible: boolean = false;
+	private todoListContainer: HTMLElement | null = null;
 
 	// Components
 	private headerComponent: HeaderComponent;
@@ -333,6 +338,7 @@ export class OpenCodeObsidianView extends ItemView {
 		}
 
 		if (this.plugin.opencodeClient) {
+			// Perform initial health check
 			await this.performHealthCheck();
 			
 			if (this.plugin.opencodeClient.isConnected() && this.lastHealthCheckResult) {
@@ -341,7 +347,8 @@ export class OpenCodeObsidianView extends ItemView {
 				this.conversationSync.startPeriodicSync();
 			}
 			
-			this.startPeriodicHealthCheck();
+			// Removed periodic health check - health status is now managed by connection handler
+			// Connection state changes will trigger UI updates automatically
 		}
 		
 		// Create new conversation if none exist
@@ -364,7 +371,8 @@ export class OpenCodeObsidianView extends ItemView {
 		}
 		this.eventUnsubscribers = [];
 
-		this.stopPeriodicHealthCheck();
+		// Periodic health check removed - no need to stop it
+		// this.stopPeriodicHealthCheck();
 		this.conversationSync.stopPeriodicSync();
 	}
 
@@ -375,21 +383,43 @@ export class OpenCodeObsidianView extends ItemView {
 		empty(container);
 		this.headerComponent.render(container.createDiv("opencode-obsidian-header"));
 		
+		// Create view toggle button
+		const viewToggle = container.createEl("button", {
+			cls: "opencode-obsidian-view-toggle",
+			text: this.isTodoListVisible ? "Chat" : "Todo List",
+			attr: { title: this.isTodoListVisible ? "Switch to chat view" : "Switch to todo list view" }
+		});
+		viewToggle.addEventListener("click", () => this.toggleView());
+		
 		// Create search panel container
 		this.searchPanelContainer = container.createDiv("opencode-obsidian-search-panel");
-		if (this.isSearchPanelVisible && this.plugin.opencodeClient) {
+		if (this.isSearchPanelVisible && this.plugin.opencodeClient && !this.isTodoListVisible) {
 			this.searchPanel = new SearchPanel(this.plugin, this.searchPanelContainer);
 		} else {
 			this.searchPanelContainer.hide();
 		}
 		
-		this.conversationSelectorComponent.render(container.createDiv("opencode-obsidian-conversation-selector"));
-		this.messageListComponent.render(container.createDiv("opencode-obsidian-messages"));
-		this.inputAreaComponent.render(container.createDiv("opencode-obsidian-input"));
+		// Render either chat view or todo list view
+		if (this.isTodoListVisible) {
+			// Render todo list
+			if (this.plugin.todoManager) {
+				const todoListComponent = new TodoListComponent(this.plugin, this.plugin.todoManager);
+				todoListComponent.render(container.createDiv("opencode-obsidian-todo-view"));
+			} else {
+				const errorDiv = container.createDiv("opencode-obsidian-error");
+				errorDiv.textContent = "Todo manager not initialized. Please try reloading the plugin.";
+			}
+		} else {
+			// Render chat view
+			this.conversationSelectorComponent.render(container.createDiv("opencode-obsidian-conversation-selector"));
+			this.messageListComponent.render(container.createDiv("opencode-obsidian-messages"));
+			this.inputAreaComponent.render(container.createDiv("opencode-obsidian-input"));
+		}
 	}
 
 	private getContainer(): HTMLElement | null {
-		return (this.containerEl.children[1] as HTMLElement) || null;
+		const contentEl = this.containerEl.children[1] as HTMLElement | undefined;
+		return contentEl ?? this.containerEl;
 	}
 
 	private updateHeader(): void {
@@ -459,9 +489,9 @@ export class OpenCodeObsidianView extends ItemView {
 		}
 
 		try {
-			const isHealthy = await this.plugin.opencodeClient.healthCheck();
-			this.lastHealthCheckResult = isHealthy;
-			new Notice(isHealthy ? "Server is healthy" : "Server health check failed");
+			const healthResult = await this.plugin.opencodeClient.healthCheck();
+			this.lastHealthCheckResult = healthResult.isHealthy;
+			new Notice(healthResult.isHealthy ? "Server is healthy" : `Server health check failed: ${healthResult.error || 'Unknown error'}`);
 		} catch (error) {
 			this.lastHealthCheckResult = false;
 			const errorMessage = error instanceof Error ? error.message : String(error);
@@ -490,6 +520,22 @@ export class OpenCodeObsidianView extends ItemView {
 			this.isConversationOperationLoading = false;
 			this.updateConversationSelector();
 		}
+	}
+
+	/**
+	 * Show or hide the todo list
+	 */
+	public showTodoList(): void {
+		this.isTodoListVisible = !this.isTodoListVisible;
+		this.renderView();
+	}
+
+	/**
+	 * Toggle between chat and todo list views
+	 */
+	private toggleView(): void {
+		this.isTodoListVisible = !this.isTodoListVisible;
+		this.renderView();
 	}
 
 	private async revertToMessage(message: Message): Promise<void> {
@@ -586,22 +632,23 @@ export class OpenCodeObsidianView extends ItemView {
 		}
 	}
 
-	private startPeriodicHealthCheck(): void {
-		this.stopPeriodicHealthCheck();
+	// Periodic health check removed - health status is now managed by connection handler
+	// private startPeriodicHealthCheck(): void {
+	//	this.stopPeriodicHealthCheck();
 
-		this.healthCheckInterval = setInterval(() => {
-			if (this.plugin.opencodeClient?.isConnected()) {
-				void this.performHealthCheck();
-			}
-		}, 30000);
-	}
+	//	this.healthCheckInterval = setInterval(() => {
+	//		if (this.plugin.opencodeClient?.isConnected()) {
+	//			void this.performHealthCheck();
+	//		}
+	//	}, 30000);
+	// }
 
-	private stopPeriodicHealthCheck(): void {
-		if (this.healthCheckInterval) {
-			clearInterval(this.healthCheckInterval);
-			this.healthCheckInterval = null;
-		}
-	}
+	// private stopPeriodicHealthCheck(): void {
+	//	if (this.healthCheckInterval) {
+	//		clearInterval(this.healthCheckInterval);
+	//		this.healthCheckInterval = null;
+	//	}
+	// }
 
 	private async ensureCommandSuggestions(): Promise<void> {
 		if (!this.plugin.opencodeClient) {
@@ -661,6 +708,17 @@ export class OpenCodeObsidianView extends ItemView {
 			}
 		}
 		this.eventUnsubscribers = [];
+
+		// Subscribe to health status changes from connection handler
+		if (this.plugin.opencodeClient) {
+			this.eventUnsubscribers.push(
+				this.plugin.opencodeClient.onHealthStatusChange((isHealthy) => {
+					this.lastHealthCheckResult = isHealthy;
+					this.updateHeader();
+					console.debug("[OpenCodeObsidianView] Health status updated:", isHealthy);
+				})
+			);
+		}
 
 		const bus = this.plugin.sessionEventBus;
 

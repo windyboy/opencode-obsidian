@@ -5,7 +5,8 @@ import {
 	ServerManagerConfig, 
 	HealthCheckResult, 
 	ServerError,
-	ServerStateChangeEvent 
+	ServerStateChangeEvent,
+	ProcessMetrics
 } from "./types";
 
 export class ServerManager {
@@ -16,6 +17,11 @@ export class ServerManager {
 	private config: ServerManagerConfig;
 	private errorHandler: ErrorHandler;
 	private onStateChange: (event: ServerStateChangeEvent) => void;
+	private restartAttempts: number = 0;
+	private maxRestartAttempts: number = 3;
+	private autoRestartEnabled: boolean = true;
+	private metrics: ProcessMetrics | null = null;
+	private metricsInterval: ReturnType<typeof setInterval> | null = null;
 
 	/**
 	 * 从配置初始化服务器管理器
@@ -73,6 +79,8 @@ export class ServerManager {
 		this.config = config;
 		this.errorHandler = errorHandler;
 		this.onStateChange = onStateChange;
+		this.autoRestartEnabled = config.autoRestart ?? true;
+		this.maxRestartAttempts = config.maxRestartAttempts ?? 3;
 		
 		this.errorHandler.handleError(
 		new Error(`ServerManager initialized with config: ${JSON.stringify(config)}`),
@@ -178,20 +186,7 @@ export class ServerManager {
 			});
 
 			this.process.on("exit", (code, signal) => {
-				this.errorHandler.handleError(
-				new Error(`Process exited with code ${code}, signal ${signal}`),
-				{ module: "ServerManager", function: "process.exit" },
-				ErrorSeverity.Info
-			);
-				this.process = null;
-
-				if (this.state === "starting" && code !== null && code !== 0) {
-					this.earlyExitCode = code;
-				}
-
-				if (this.state === "running") {
-					this.setState("stopped", null);
-				}
+				this.handleProcessExit(code, signal);
 			});
 
 			this.process.on("error", (err: NodeJS.ErrnoException) => {
@@ -212,6 +207,8 @@ export class ServerManager {
 			const ready = await this.waitForServerOrExit(this.config.startupTimeout);
 			if (ready) {
 				this.setState("running", null);
+				this.restartAttempts = 0;  // 重置重启计数
+				this.startMetricsCollection();  // 开始收集指标
 				return true;
 			}
 
@@ -238,6 +235,8 @@ export class ServerManager {
 	}
 
 	stop(): void {
+		this.stopMetricsCollection();  // 停止收集指标
+		
 		if (!this.process) {
 			this.setState("stopped", null);
 			return;
@@ -270,34 +269,205 @@ export class ServerManager {
 
 	async checkServerHealth(): Promise<HealthCheckResult> {
 		try {
-			const response = await fetch(`${this.getUrl()}/health`, {
+			const checkedEndpoints: string[] = ["/health"];
+			
+			// 1. 基础健康检查
+			const healthResponse = await fetch(`${this.getUrl()}/health`, {
 				method: "GET",
 				signal: AbortSignal.timeout(2000),
 			});
-			
+
+			if (!healthResponse.ok) {
+				return {
+					isHealthy: false,
+					statusCode: healthResponse.status,
+					error: `Health endpoint returned ${healthResponse.status}`,
+					checkedEndpoints
+				};
+			}
+
+			// 2. 验证关键端点（可选，避免过度检查）
+			try {
+				checkedEndpoints.push("/sessions");
+				const sessionsResponse = await fetch(`${this.getUrl()}/sessions`, {
+					method: "GET",
+					signal: AbortSignal.timeout(2000),
+				});
+
+				if (!sessionsResponse.ok) {
+					return {
+						isHealthy: false,
+						statusCode: sessionsResponse.status,
+						error: "Sessions endpoint not responding",
+						checkedEndpoints
+					};
+				}
+			} catch (sessionError) {
+				// 如果/sessions检查失败，记录警告但仍认为健康检查通过
+				this.errorHandler.handleError(
+					new Error(`Sessions endpoint check failed: ${sessionError instanceof Error ? sessionError.message : "Unknown error"}`),
+					{ module: "ServerManager", function: "checkServerHealth" },
+					ErrorSeverity.Warning
+				);
+			}
+
 			this.errorHandler.handleError(
-			new Error(`Health check result: ${response.status} ${response.statusText}`),
-			{ module: "ServerManager", function: "checkServerHealth" },
-			ErrorSeverity.Info
-		);
+				new Error(`Health check passed for endpoints: ${checkedEndpoints.join(", ")}`),
+				{ module: "ServerManager", function: "checkServerHealth" },
+				ErrorSeverity.Info
+			);
 			
 			return {
-				isHealthy: response.ok,
-				statusCode: response.status
+				isHealthy: true,
+				statusCode: healthResponse.status,
+				checkedEndpoints
 			};
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			this.errorHandler.handleError(
-			new Error(`Health check failed: ${errorMsg}`),
-			{ module: "ServerManager", function: "checkServerHealth" },
-			ErrorSeverity.Info
-		);
+				new Error(`Health check failed: ${errorMsg}`),
+				{ module: "ServerManager", function: "checkServerHealth" },
+				ErrorSeverity.Info
+			);
 			
 			return {
 				isHealthy: false,
-				error: errorMsg
+				error: errorMsg,
+				checkedEndpoints: ["/health"]
 			};
 		}
+	}
+
+	/**
+	 * 处理进程退出事件
+	 */
+	private handleProcessExit(code: number | null, signal: string | null): void {
+		this.process = null;
+
+		// 记录退出信息
+		this.errorHandler.handleError(
+			new Error(`Process exited: code=${code}, signal=${signal}`),
+			{ module: "ServerManager", function: "handleProcessExit" },
+			ErrorSeverity.Info
+		);
+
+		// 如果是正常停止，不重启
+		if (this.state === "stopped") {
+			return;
+		}
+
+		// 如果启动阶段失败，记录退出码
+		if (this.state === "starting" && code !== null && code !== 0) {
+			this.earlyExitCode = code;
+			return;
+		}
+
+		// 运行中崩溃，尝试自动重启
+		if (this.state === "running" && this.autoRestartEnabled) {
+			this.attemptAutoRestart();
+		} else {
+			this.setState("stopped", null);
+		}
+	}
+
+	/**
+	 * 尝试自动重启服务器
+	 */
+	private attemptAutoRestart(): void {
+		if (this.restartAttempts >= this.maxRestartAttempts) {
+			this.errorHandler.handleError(
+				new Error(`Max restart attempts (${this.maxRestartAttempts}) reached`),
+				{ module: "ServerManager", function: "attemptAutoRestart" },
+				ErrorSeverity.Error
+			);
+			this.setState("error", {
+				message: "Server crashed and failed to restart",
+				code: "MAX_RESTART_ATTEMPTS"
+			});
+			return;
+		}
+
+		this.restartAttempts++;
+		const delay = this.calculateBackoffDelay(this.restartAttempts);
+
+		this.errorHandler.handleError(
+			new Error(`Auto-restarting in ${delay}ms (attempt ${this.restartAttempts}/${this.maxRestartAttempts})`),
+			{ module: "ServerManager", function: "attemptAutoRestart" },
+			ErrorSeverity.Warning
+		);
+
+		setTimeout(() => {
+			void this.start();
+		}, delay);
+	}
+
+	/**
+	 * 计算指数退避延迟
+	 */
+	private calculateBackoffDelay(attempt: number): number {
+		// 指数退避: 1s, 2s, 4s
+		return Math.min(1000 * Math.pow(2, attempt - 1), 4000);
+	}
+
+	/**
+	 * 开始收集进程指标
+	 */
+	private startMetricsCollection(): void {
+		// 每 30 秒采集一次（避免过度消耗资源）
+		this.metricsInterval = setInterval(() => {
+			void this.collectMetrics();
+		}, 30000);
+	}
+
+	/**
+	 * 停止收集进程指标
+	 */
+	private stopMetricsCollection(): void {
+		if (this.metricsInterval) {
+			clearInterval(this.metricsInterval);
+			this.metricsInterval = null;
+		}
+		this.metrics = null;
+	}
+
+	/**
+	 * 收集进程指标
+	 */
+	private async collectMetrics(): Promise<void> {
+		if (!this.process || !this.process.pid) {
+			return;
+		}
+
+		try {
+			// 使用 Node.js 内置 API
+			const usage = process.cpuUsage();
+			const memUsage = process.memoryUsage();
+
+			this.metrics = {
+				cpu: (usage.user + usage.system) / 1000000, // 转换为秒
+				memory: memUsage.rss / 1024 / 1024,         // 转换为 MB
+				uptime: process.uptime(),
+				timestamp: Date.now()
+			};
+
+			// 记录到日志（仅在异常时）
+			if (this.metrics.memory > 500) {  // 超过 500MB 警告
+				this.errorHandler.handleError(
+					new Error(`High memory usage: ${this.metrics.memory.toFixed(2)} MB`),
+					{ module: "ServerManager", function: "collectMetrics" },
+					ErrorSeverity.Warning
+				);
+			}
+		} catch (error) {
+			// 静默失败，不影响主流程
+		}
+	}
+
+	/**
+	 * 获取当前进程指标
+	 */
+	public getMetrics(): ProcessMetrics | null {
+		return this.metrics;
 	}
 
 	private setState(state: ServerState, error: ServerError | null): void {

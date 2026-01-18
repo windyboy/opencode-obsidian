@@ -14,6 +14,7 @@ import type {
 	SessionContext,
 	ProgressUpdate,
 	ReconnectAttemptInfo,
+	HealthCheckResult,
 } from "./types";
 import type { SessionListItem, Message, SearchQuery, SearchResult, FileResult, SymbolResult } from "../types";
 import { ConnectionHandler } from "./connection-handler";
@@ -394,8 +395,22 @@ export class OpenCodeServerClient {
 	 */
 	onConnectionStateChange(
 		callback: (state: ConnectionState, info?: { error?: Error | null }) => void,
-	): void {
-		this.connectionHandler.onConnectionStateChange(callback);
+	): () => void {
+		return this.connectionHandler.onConnectionStateChange(callback);
+	}
+
+	/**
+	 * Subscribe to health status changes.
+	 */
+	onHealthStatusChange(callback: (isHealthy: boolean | null) => void): () => void {
+		return this.connectionHandler.onHealthStatusChange(callback);
+	}
+
+	/**
+	 * Get current health status.
+	 */
+	getHealthStatus(): boolean | null {
+		return this.connectionHandler.getHealthStatus();
 	}
 
 	/**
@@ -785,88 +800,11 @@ export class OpenCodeServerClient {
 
 	/**
 	 * Perform health check on OpenCode Server
+	 * Delegates to ConnectionHandler for implementation
 	 */
-	async healthCheck(): Promise<boolean> {
-		try {
-			// Health check uses direct requestUrl to avoid JSON parsing issues
-			// Health endpoint may return HTML or plain text, not JSON
-			
-			const healthUrl = `${this.config.url}/health`;
-			let response: Awaited<ReturnType<typeof requestUrl>>;
-			
-			try {
-				// Use requestUrl directly with text/plain content type to avoid JSON parsing
-				// Note: requestUrl may still attempt to parse JSON based on response Content-Type header
-				response = await requestUrl({
-					url: healthUrl,
-					method: "GET",
-					contentType: "text/plain",
-				});
-			} catch (requestError) {
-				// Check if this is a JSON parsing error (expected for HTML responses)
-				const errorMessage = requestError instanceof Error ? requestError.message : String(requestError);
-				const isJsonParseError = errorMessage.includes("not valid JSON") || 
-				                        errorMessage.includes("Unexpected token");
-				
-				if (isJsonParseError) {
-					// JSON parse errors are expected for /health endpoint that returns HTML
-					// Don't log this as an error - just treat as unhealthy
-					// The server is responding, but with HTML instead of JSON
-					return false;
-				}
-				
-				// For other errors (connection errors, etc.), log but don't show to user
-				this.errorHandler.handleError(
-					requestError,
-					{
-						module: "OpenCodeClient",
-						function: "healthCheck",
-						operation: "Health check request",
-						metadata: { url: healthUrl },
-					},
-					ErrorSeverity.Warning,
-				);
-				return false;
-			}
-
-			const isHealthy = response.status >= 200 && response.status < 300;
-			if (!isHealthy) {
-				// Log non-2xx status as warning via error handler (not console)
-				this.errorHandler.handleError(
-					new Error(`Health check returned status ${response.status}`),
-					{
-						module: "OpenCodeClient",
-						function: "healthCheck",
-						operation: "Health check response",
-						metadata: { url: healthUrl, status: response.status },
-					},
-					ErrorSeverity.Warning,
-				);
-			}
-
-			return isHealthy;
-		} catch (error) {
-			// Check if this is a JSON parsing error that bypassed inner catch
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			const isJsonParseError = errorMessage.includes("not valid JSON") || 
-			                        errorMessage.includes("Unexpected token");
-			if (isJsonParseError) {
-				// JSON parse error bypassed inner catch - treat as unhealthy without logging
-				return false;
-			}
-			// All errors are handled via error handler (Warning severity to avoid user notifications)
-			this.errorHandler.handleError(
-				error,
-				{
-					module: "OpenCodeClient",
-					function: "healthCheck",
-					operation: "Health check",
-					metadata: { serverUrl: this.config.url },
-				},
-				ErrorSeverity.Warning,
-			);
-			return false;
-		}
+	async healthCheck(): Promise<HealthCheckResult> {
+		// Delegate health check to ConnectionHandler which has the centralized implementation
+		return this.connectionHandler.healthCheck();
 	}
 
 	/**

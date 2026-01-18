@@ -96,6 +96,115 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 
 		// Embedded server configuration (only shown when enabled)
 		if (embeddedServerEnabled) {
+			// Server status display
+			const serverStatusSetting = new Setting(containerEl);
+			serverStatusSetting.setName("Server Status");
+			const statusContainer = serverStatusSetting.controlEl.createDiv("opencode-server-status");
+			
+			// Update status display
+			const updateStatusDisplay = () => {
+				statusContainer.empty();
+				if (this.plugin.serverManager) {
+					const state = this.plugin.serverManager.getState();
+					const statusText = statusContainer.createEl("span", {
+						text: state.charAt(0).toUpperCase() + state.slice(1),
+						cls: `opencode-server-status-${state}`
+					});
+					
+					// Show error details if server is in error state
+					if (state === "error") {
+						const error = this.plugin.serverManager.getLastError();
+						if (error) {
+							statusContainer.createEl("span", {
+								text: ` - ${error.message}`,
+								cls: "opencode-server-status-error-message"
+							});
+						}
+					}
+					
+					// Add start/stop button based on current state
+					const buttonContainer = statusContainer.createDiv("opencode-server-control-buttons");
+					if (state === "running") {
+						const stopButton = buttonContainer.createEl("button", {
+							text: "Stop",
+							cls: "mod-danger"
+						});
+						stopButton.onclick = async () => {
+							stopButton.disabled = true;
+							stopButton.textContent = "Stopping...";
+							this.plugin.serverManager?.stop();
+							await this.plugin.saveSettings();
+							this.display();
+						};
+					} else if (state === "stopped" || state === "error") {
+						const startButton = buttonContainer.createEl("button", {
+							text: "Start",
+							cls: "mod-cta"
+						});
+						startButton.onclick = async () => {
+							startButton.disabled = true;
+							startButton.textContent = "Starting...";
+							if (this.plugin.serverManager) {
+								await this.plugin.serverManager.start();
+							} else {
+								// Reinitialize server manager if it doesn't exist
+								this.plugin.serverManager = await import("./embedded-server/ServerManager").then(m => 
+									m.ServerManager.initializeFromConfig(
+										serverConfig,
+										this.plugin.errorHandler,
+										(event) => this.plugin.handleServerStateChange(event),
+										async (url) => {
+											serverConfig.url = url;
+											await this.plugin.saveSettings();
+										}
+									)
+								);
+							}
+							await this.plugin.saveSettings();
+							this.display();
+						};
+					}
+				} else {
+					statusContainer.createEl("span", {
+						text: "Not initialized",
+						cls: "opencode-server-status-stopped"
+					});
+					const initializeButton = statusContainer.createEl("button", {
+						text: "Initialize",
+						cls: "mod-cta"
+					});
+					initializeButton.onclick = async () => {
+						initializeButton.disabled = true;
+						initializeButton.textContent = "Initializing...";
+						this.plugin.serverManager = await import("./embedded-server/ServerManager").then(m => 
+							m.ServerManager.initializeFromConfig(
+								serverConfig,
+								this.plugin.errorHandler,
+								(event) => this.plugin.handleServerStateChange(event),
+								async (url) => {
+									serverConfig.url = url;
+									await this.plugin.saveSettings();
+								}
+							)
+						);
+						await this.plugin.saveSettings();
+						this.display();
+					};
+				}
+			};
+			
+			updateStatusDisplay();
+			
+			// Add refresh button to manually update status
+			serverStatusSetting.addExtraButton((button) => {
+				button
+					.setIcon("refresh-cw")
+					.setTooltip("Refresh server status")
+					.onClick(() => {
+						updateStatusDisplay();
+					});
+			});
+
 			// OpenCode executable path
 			new Setting(containerEl)
 				.setName("OpenCode executable path")

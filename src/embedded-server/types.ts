@@ -17,6 +17,10 @@ export interface ServerManagerConfig {
 	startupTimeout: number;
 	/** Working directory */
 	workingDirectory: string;
+	/** Whether to automatically restart the server if it crashes */
+	autoRestart?: boolean;
+	/** Maximum number of restart attempts */
+	maxRestartAttempts?: number;
 }
 
 /**
@@ -29,6 +33,8 @@ export interface HealthCheckResult {
 	statusCode?: number;
 	/** Error message if health check failed */
 	error?: string;
+	/** List of endpoints that were checked */
+	checkedEndpoints?: string[];
 }
 
 /**
@@ -41,6 +47,20 @@ export interface ServerError {
 	code?: string;
 	/** Original error if available */
 	originalError?: unknown;
+}
+
+/**
+ * Process metrics interface
+ */
+export interface ProcessMetrics {
+	/** CPU usage percentage */
+	cpu: number;
+	/** Memory usage in MB */
+	memory: number;
+	/** Process uptime in seconds */
+	uptime: number;
+	/** Collection timestamp */
+	timestamp: number;
 }
 
 /**

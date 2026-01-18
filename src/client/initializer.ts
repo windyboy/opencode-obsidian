@@ -52,11 +52,36 @@ export async function initializeClient(
     );
     permissionCoordinator.setApp(app);
 
-    // 健康检查（不阻塞）
-    performHealthCheck(client, errorHandler);
-
-    // 加载 agents
-    await loadAgents(client, errorHandler, onAgentsLoaded, getDefaultAgents);
+    // 健康检查（阻塞），确保服务器可用再加载代理
+    try {
+        const healthResult = await client.healthCheck();
+        const isHealthy = healthResult.isHealthy;
+        if (isHealthy) {
+            console.debug("[OpenCode Obsidian] Initial health check passed");
+            // 服务器可用，加载 agents
+            await loadAgents(client, errorHandler, onAgentsLoaded, getDefaultAgents);
+        } else {
+            // 服务器不可用，使用默认 agents
+            errorHandler.handleError(
+                new Error("Initial health check failed - server may be unavailable, using default agents"),
+                { module: "ClientInitializer", function: "initializeClient" },
+                ErrorSeverity.Warning
+            );
+            if (getDefaultAgents && onAgentsLoaded) {
+                await onAgentsLoaded(getDefaultAgents());
+            }
+        }
+    } catch (error) {
+        // 健康检查失败，使用默认 agents
+        errorHandler.handleError(
+            error,
+            { module: "ClientInitializer", function: "initializeClient" },
+            ErrorSeverity.Warning
+        );
+        if (getDefaultAgents && onAgentsLoaded) {
+            await onAgentsLoaded(getDefaultAgents());
+        }
+    }
 
     console.debug("[OpenCode Obsidian] OpenCode Server client initialized");
     return { client, connectionManager, permissionCoordinator };
@@ -133,7 +158,8 @@ async function performHealthCheck(
     errorHandler: ErrorHandler
 ): Promise<void> {
     try {
-        const isHealthy = await client.healthCheck();
+        const healthResult = await client.healthCheck();
+        const isHealthy = healthResult.isHealthy;
         if (isHealthy) {
             console.debug("[OpenCode Obsidian] Initial health check passed");
         } else {

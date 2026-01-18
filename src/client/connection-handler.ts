@@ -4,6 +4,7 @@ import type {
 	OpenCodeServerConfig,
 	ConnectionState,
 	ReconnectAttemptInfo,
+	HealthCheckResult,
 } from "./types";
 
 /**
@@ -14,6 +15,8 @@ export class ConnectionHandler {
 	private config: OpenCodeServerConfig;
 	private errorHandler: ErrorHandler;
 	private connectionState: ConnectionState = "disconnected";
+	private healthStatus: boolean | null = null;
+	private lastHealthCheckTime: number | null = null;
 	private lastConnectionError: Error | null = null;
 	private eventStreamAbort: AbortController | null = null;
 
@@ -23,6 +26,7 @@ export class ConnectionHandler {
 	> = [];
 	private reconnectAttemptCallbacks: Array<(info: ReconnectAttemptInfo) => void> =
 		[];
+	private healthStatusCallbacks: Array<(isHealthy: boolean | null) => void> = [];
 
 	constructor(config: OpenCodeServerConfig, errorHandler: ErrorHandler) {
 		this.config = config;
@@ -34,15 +38,27 @@ export class ConnectionHandler {
 	 */
 	onConnectionStateChange(
 		callback: (state: ConnectionState, info?: { error?: Error | null }) => void,
-	): void {
+	): () => void {
 		this.connectionStateCallbacks.push(callback);
+		return () => {
+			const index = this.connectionStateCallbacks.indexOf(callback);
+			if (index > -1) {
+				this.connectionStateCallbacks.splice(index, 1);
+			}
+		};
 	}
 
 	/**
 	 * Subscribe to reconnect attempt info (next delay, attempt count)
 	 */
-	onReconnectAttempt(callback: (info: ReconnectAttemptInfo) => void): void {
+	onReconnectAttempt(callback: (info: ReconnectAttemptInfo) => void): () => void {
 		this.reconnectAttemptCallbacks.push(callback);
+		return () => {
+			const index = this.reconnectAttemptCallbacks.indexOf(callback);
+			if (index > -1) {
+				this.reconnectAttemptCallbacks.splice(index, 1);
+			}
+		};
 	}
 
 	/**
@@ -50,6 +66,53 @@ export class ConnectionHandler {
 	 */
 	getLastConnectionError(): Error | null {
 		return this.lastConnectionError;
+	}
+
+	/**
+	 * Subscribe to health status changes
+	 */
+	onHealthStatusChange(callback: (isHealthy: boolean | null) => void): () => void {
+		this.healthStatusCallbacks.push(callback);
+		return () => {
+			const index = this.healthStatusCallbacks.indexOf(callback);
+			if (index > -1) {
+				this.healthStatusCallbacks.splice(index, 1);
+			}
+		};
+	}
+
+	/**
+	 * Get current health status
+	 */
+	getHealthStatus(): boolean | null {
+		return this.healthStatus;
+	}
+
+	/**
+	 * Update health status and notify listeners
+	 */
+	private setHealthStatus(status: boolean | null): void {
+		if (this.healthStatus === status) {
+			return;
+		}
+		this.healthStatus = status;
+		this.lastHealthCheckTime = Date.now();
+		for (const callback of this.healthStatusCallbacks) {
+			try {
+				callback(status);
+			} catch (error) {
+				this.errorHandler.handleError(
+					error,
+					{
+						module: "ConnectionHandler",
+						function: "setHealthStatus",
+						operation: "Notifying health status listeners",
+						metadata: { status },
+					},
+					ErrorSeverity.Warning,
+				);
+			}
+		}
 	}
 
 	/**
@@ -249,17 +312,28 @@ export class ConnectionHandler {
 					}
 
 					attempt += 1;
-					const cappedAttempt =
+					const cappedAttempt = 
 						maxAttempts === 0 ? attempt : Math.min(attempt, maxAttempts);
 					const delayBase = Math.min(
 						baseDelay * 2 ** (cappedAttempt - 1),
 						maxDelay,
 					);
 					const jitter = Math.floor(
-						Math.random() *
+						Math.random() * 
 							Math.max(1, Math.floor(delayBase * 0.25)),
 					);
 					const delay = delayBase + jitter;
+
+					// Before reconnecting, check if server is actually available
+					// This prevents infinite reconnection attempts when server is completely unavailable
+					const healthCheckResult = await this.healthCheck();
+					if (!healthCheckResult.isHealthy) {
+						// If server is unavailable, stop reconnecting immediately
+						const err = new Error(`OpenCode Server is unavailable. Stopping reconnection attempts. ${healthCheckResult.error ? `Error: ${healthCheckResult.error}` : ''}`);
+						this.lastConnectionError = err;
+						this.setConnectionState("error", { error: err });
+						throw err;
+					}
 
 					this.notifyReconnectAttempt({
 						attempt: cappedAttempt,
@@ -268,7 +342,7 @@ export class ConnectionHandler {
 					});
 
 					if (maxAttempts !== 0 && attempt >= maxAttempts) {
-						const err =
+						const err = 
 							error instanceof Error ? error : new Error(String(error));
 						this.lastConnectionError = err;
 						this.setConnectionState("error", { error: err });
@@ -304,7 +378,7 @@ export class ConnectionHandler {
 	/**
 	 * Perform health check on OpenCode Server
 	 */
-	async healthCheck(): Promise<boolean> {
+	async healthCheck(): Promise<HealthCheckResult> {
 		try {
 			// Health check uses direct requestUrl to avoid JSON parsing issues
 			// Health endpoint may return HTML or plain text, not JSON
@@ -330,7 +404,11 @@ export class ConnectionHandler {
 					// JSON parse errors are expected for /health endpoint that returns HTML
 					// Don't log this as an error - just treat as unhealthy
 					// The server is responding, but with HTML instead of JSON
-					return false;
+					this.setHealthStatus(false);
+					return {
+						isHealthy: false,
+						error: errorMessage,
+					};
 				}
 
 				// For other errors (connection errors, etc.), log but don't show to user
@@ -344,7 +422,11 @@ export class ConnectionHandler {
 					},
 					ErrorSeverity.Warning,
 				);
-				return false;
+				this.setHealthStatus(false);
+				return {
+					isHealthy: false,
+					error: errorMessage,
+				};
 			}
 
 			const isHealthy = response.status >= 200 && response.status < 300;
@@ -362,7 +444,11 @@ export class ConnectionHandler {
 				);
 			}
 
-			return isHealthy;
+			this.setHealthStatus(isHealthy);
+			return {
+				isHealthy,
+				statusCode: response.status,
+			};
 		} catch (error) {
 			// Check if this is a JSON parsing error that bypassed inner catch
 			const errorMessage = error instanceof Error ? error.message : String(error);
@@ -370,7 +456,11 @@ export class ConnectionHandler {
 				errorMessage.includes("Unexpected token");
 			if (isJsonParseError) {
 				// JSON parse error bypassed inner catch - treat as unhealthy without logging
-				return false;
+				this.setHealthStatus(false);
+				return {
+					isHealthy: false,
+					error: errorMessage,
+				};
 			}
 			// All errors are handled via error handler (Warning severity to avoid user notifications)
 			this.errorHandler.handleError(
@@ -383,7 +473,11 @@ export class ConnectionHandler {
 				},
 				ErrorSeverity.Warning,
 			);
-			return false;
+			this.setHealthStatus(false);
+			return {
+				isHealthy: false,
+				error: errorMessage,
+			};
 		}
 	}
 

@@ -1,1603 +1,475 @@
-/* OpenCode Obsidian View Styles */
+/* Search highlight */
+.search-highlight {
+  background-color: var(--text-highlight-bg);
+  color: var(--text-highlight);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* Server Status Styles */
+.opencode-server-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.opencode-server-status-running {
+  color: var(--color-green);
+}
+
+.opencode-server-status-stopped {
+  color: var(--text-muted);
+}
+
+.opencode-server-status-starting {
+  color: var(--color-blue);
+}
+
+.opencode-server-status-error {
+  color: var(--color-red);
+}
+
+.opencode-server-status-error-message {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.opencode-server-control-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.opencode-server-metrics {
+  padding: 8px 0;
+}
+
+.opencode-server-metrics-text {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Server Start Modal Styles */
+.opencode-server-start-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* Core view layout */
 .opencode-obsidian-view {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 0;
+  overflow: hidden;
 }
 
 .opencode-obsidian-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  gap: 8px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--background-modifier-border);
-  background: var(--background-secondary);
-  position: relative;
-  transition: background 0.2s ease;
-}
-
-.opencode-obsidian-tool-indicator,
-.opencode-obsidian-compaction-indicator,
-.opencode-obsidian-blocked-indicator {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: var(--background-modifier-hover);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 11px;
-  color: var(--text-muted);
-  display: none;
-  z-index: 10;
-}
-
-.opencode-obsidian-blocked-indicator {
-  background: var(--background-modifier-error-hover);
-  border-color: var(--color-orange);
-  color: var(--color-orange);
-}
-
-.opencode-obsidian-thinking-indicator {
-  background: var(--background-modifier-hover);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 8px 12px;
-  margin: 8px 0;
-  font-size: 12px;
-  color: var(--text-muted);
-  font-style: italic;
-  display: none;
+  background-color: var(--background-secondary);
 }
 
 .opencode-obsidian-status {
   font-size: 12px;
-  font-weight: 500;
-  cursor: help;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .opencode-obsidian-status.connected {
-  color: var(--color-green);
+  color: var(--text-success);
+}
+
+.opencode-obsidian-status.reconnecting,
+.opencode-obsidian-status.connecting {
+  color: var(--text-warning);
 }
 
 .opencode-obsidian-status.disconnected {
-  color: var(--color-red);
-}
-
-.opencode-obsidian-status.connecting {
-  color: var(--color-blue, #3b82f6);
-}
-
-.opencode-obsidian-status.reconnecting {
-  color: var(--color-orange, #f59e0b);
+  color: var(--text-error);
 }
 
 .opencode-obsidian-controls {
+  margin-left: auto;
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
-.opencode-obsidian-controls button {
-  font-size: 12px;
-  padding: 4px 8px;
+.opencode-obsidian-view-toggle {
+  align-self: flex-start;
+  margin: 8px 10px 0;
 }
 
-.opencode-obsidian-conversation-selector {
-  padding: 0;
+.opencode-obsidian-search-panel {
+  padding: 6px 10px;
   border-bottom: 1px solid var(--background-modifier-border);
-  background: var(--background-secondary-alt);
+}
+
+/* Conversation selector */
+.opencode-obsidian-conversation-selector {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .opencode-obsidian-tabs-container {
   display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  padding: 6px 8px;
+  gap: 6px;
   overflow-x: auto;
-  overflow-y: hidden;
-  scroll-behavior: smooth;
-  -webkit-overflow-scrolling: touch;
-}
-
-.opencode-obsidian-tabs-container.opencode-obsidian-tabs-loading {
-  opacity: 0.7;
-  pointer-events: none;
-}
-
-.opencode-obsidian-tabs-container::-webkit-scrollbar {
-  height: 6px;
-}
-
-.opencode-obsidian-tabs-container::-webkit-scrollbar-track {
-  background: var(--background-secondary-alt);
-  border-radius: 3px;
-}
-
-.opencode-obsidian-tabs-container::-webkit-scrollbar-thumb {
-  background: var(--background-modifier-border);
-  border-radius: 3px;
-  transition: background 0.2s ease;
-}
-
-.opencode-obsidian-tabs-container::-webkit-scrollbar-thumb:hover {
-  background: var(--background-modifier-border-hover);
+  padding-bottom: 4px;
 }
 
 .opencode-obsidian-tab {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
-  background: var(--background-primary);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
-  border-bottom: none;
-  border-radius: 4px 4px 0 0;
   cursor: pointer;
-  transition: background 0.15s ease;
-  position: relative;
   white-space: nowrap;
-  min-width: 100px;
-  max-width: 350px;
-  user-select: none;
+}
+
+.opencode-obsidian-tab.active {
+  background-color: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
 }
 
 .opencode-obsidian-tab-content {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  flex: 1;
-  overflow: hidden;
-  min-width: 0;
-}
-
-.opencode-obsidian-tab-session-indicator {
-  font-size: 8px;
-  color: var(--color-green);
-  flex-shrink: 0;
-  line-height: 1;
-  margin-right: 2px;
-}
-
-.opencode-obsidian-tab.active .opencode-obsidian-tab-session-indicator {
-  color: var(--color-accent);
 }
 
 .opencode-obsidian-tab-metadata {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-muted);
-  opacity: 0.7;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.opencode-obsidian-tab.active .opencode-obsidian-tab-metadata {
-  opacity: 0.8;
-}
-
-.opencode-obsidian-tab:hover {
-  background: var(--background-modifier-hover);
-}
-
-.opencode-obsidian-tab.active {
-  background: var(--background-primary);
-  border-color: var(--color-accent);
-  border-bottom: 2px solid var(--background-primary);
-  z-index: 1;
-}
-
-.opencode-obsidian-tab.active:hover {
-  background: var(--background-primary);
-}
-
-.opencode-obsidian-tab-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 13px;
-  color: var(--text-normal);
-  font-weight: 400;
-}
-
-.opencode-obsidian-tab.active .opencode-obsidian-tab-title {
-  color: var(--color-accent);
-  font-weight: 500;
 }
 
 .opencode-obsidian-tab-close {
-  display: none;
-  width: 16px;
-  height: 16px;
-  line-height: 16px;
-  text-align: center;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 14px;
-  font-weight: normal;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  flex-shrink: 0;
+  margin-left: 6px;
+  opacity: 0.6;
 }
 
 .opencode-obsidian-tab:hover .opencode-obsidian-tab-close {
-  display: block;
+  opacity: 1;
 }
 
-.opencode-obsidian-tab-close:hover {
-  background: var(--background-modifier-hover);
-  color: var(--color-red);
-}
-
-.opencode-obsidian-tab-new {
-  min-width: 32px;
-  max-width: 32px;
-  padding: 6px;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 400;
-  color: var(--text-muted);
-  border-style: solid;
-  background: var(--background-primary);
-}
-
-.opencode-obsidian-tab-new:hover {
-  background: var(--background-modifier-hover);
-  border-color: var(--background-modifier-border-hover);
-  color: var(--text-normal);
-}
-
+.opencode-obsidian-tab-new,
 .opencode-obsidian-tab-sync {
-  min-width: 32px;
-  max-width: 32px;
-  padding: 6px;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 400;
-  color: var(--text-muted);
-  border-style: solid;
-  background: var(--background-primary);
-  display: flex;
-  align-items: center;
-}
-
-.opencode-obsidian-tab-sync:hover {
-  background: var(--background-modifier-hover);
-  border-color: var(--background-modifier-border-hover);
-  color: var(--color-accent);
-}
-
-.opencode-obsidian-tab-sync:active {
-  transform: rotate(180deg);
-  transition: transform 0.3s ease;
+  font-weight: 600;
 }
 
 .opencode-obsidian-tab-disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  opacity: 0.6;
   pointer-events: none;
 }
 
-/* Title editing input */
-.opencode-obsidian-tab-title-edit {
-  background: var(--background-primary);
-  border: 2px solid var(--color-accent);
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 13px;
-  color: var(--text-normal);
-  font-family: var(--font-interface);
-  outline: none;
-  box-shadow: 0 0 0 2px var(--color-accent-1);
-}
-
-.opencode-obsidian-tab-title-edit:focus {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-1);
-}
-
-/* Context menu */
-.opencode-obsidian-context-menu {
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  padding: 4px;
-  min-width: 150px;
-  z-index: 10000;
-}
-
-.opencode-obsidian-context-menu-item {
-  padding: 8px 12px;
-  font-size: 13px;
-  color: var(--text-normal);
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background 0.15s ease;
-  user-select: none;
-}
-
-.opencode-obsidian-context-menu-item:hover {
-  background: var(--background-modifier-hover);
-}
-
-.opencode-obsidian-context-menu-item-danger {
-  color: var(--color-red);
-}
-
-.opencode-obsidian-context-menu-item-danger:hover {
-  background: var(--background-modifier-error-hover);
-  color: var(--color-red);
-}
-
-.opencode-obsidian-conversation-select {
-  width: 100%;
-  padding: 6px 10px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-primary);
-  color: var(--text-normal);
-  transition: all 0.2s ease;
-}
-
-.opencode-obsidian-conversation-select:hover {
-  border-color: var(--color-accent);
-  background: var(--background-modifier-hover);
-}
-
-.opencode-obsidian-conversation-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-1);
-}
-
 .opencode-obsidian-no-conversations {
-  text-align: center;
   color: var(--text-muted);
-  font-style: italic;
-  padding: 12px 16px;
+  padding: 8px 0;
 }
 
+/* Message list */
 .opencode-obsidian-messages {
   flex: 1;
-  overflow-y: auto;
-  padding: 16px;
+  overflow: auto;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  scroll-behavior: smooth;
-}
-
-/* Custom scrollbar styling */
-.opencode-obsidian-messages::-webkit-scrollbar {
-  width: 8px;
-}
-
-.opencode-obsidian-messages::-webkit-scrollbar-track {
-  background: var(--background-secondary);
-  border-radius: 4px;
-}
-
-.opencode-obsidian-messages::-webkit-scrollbar-thumb {
-  background: var(--background-modifier-border);
-  border-radius: 4px;
-  transition: background 0.2s ease;
-}
-
-.opencode-obsidian-messages::-webkit-scrollbar-thumb:hover {
-  background: var(--background-modifier-border-hover);
-}
-
-.opencode-obsidian-empty-messages {
-  text-align: center;
-  color: var(--text-muted);
-  font-style: italic;
-  margin-top: 50%;
-  padding: 24px;
-  font-size: 14px;
-  opacity: 0.7;
-  transition: opacity 0.2s ease;
+  gap: 10px;
 }
 
 .opencode-obsidian-message {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px 16px;
-  border-radius: 12px;
-  max-width: 85%;
-  position: relative;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.opencode-obsidian-message:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  transform: translateY(-1px);
-}
-
-.opencode-obsidian-message:hover .opencode-obsidian-message-actions {
-  opacity: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
 }
 
 .opencode-obsidian-message-user {
   align-self: flex-end;
-  background: var(--color-accent);
-  color: var(--text-on-accent);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.opencode-obsidian-message-user:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.opencode-obsidian-message-assistant {
-  align-self: flex-start;
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-
-.opencode-obsidian-message-assistant:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  border-color: var(--background-modifier-border-hover);
+  background-color: var(--background-modifier-hover);
 }
 
 .opencode-obsidian-message-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
   font-size: 11px;
-  margin-bottom: 6px;
-  gap: 8px;
-}
-
-.opencode-obsidian-message-role {
-  font-weight: 600;
-  text-transform: capitalize;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--background-modifier-hover);
-  font-size: 10px;
-  letter-spacing: 0.3px;
-}
-
-.opencode-obsidian-message-user .opencode-obsidian-message-role {
-  background: rgba(255, 255, 255, 0.2);
-  color: var(--text-on-accent);
-}
-
-.opencode-obsidian-message-time {
-  font-size: 10px;
-  opacity: 0.6;
-  font-weight: 400;
+  color: var(--text-muted);
+  margin-bottom: 4px;
 }
 
 .opencode-obsidian-message-content {
+  font-size: 13px;
   line-height: 1.4;
-  word-wrap: break-word;
-}
-
-.opencode-obsidian-message-content p {
-  margin: 8px 0;
-}
-
-.opencode-obsidian-message-content p:first-child {
-  margin-top: 0;
-}
-
-.opencode-obsidian-message-content p:last-child {
-  margin-bottom: 0;
-}
-
-.opencode-obsidian-message-content code {
-  background: var(--background-modifier-hover);
-  padding: 3px 6px;
-  border-radius: 4px;
-  font-family: var(--font-monospace);
-  font-size: 0.9em;
-  border: 1px solid var(--background-modifier-border);
-}
-
-.opencode-obsidian-code-block {
-  background: var(--background-primary-alt, var(--background-modifier-hover));
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  padding: 16px;
-  margin: 12px 0;
-  position: relative;
-  overflow-x: auto;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  transition: all 0.2s ease;
-}
-
-.opencode-obsidian-code-block:hover {
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-  border-color: var(--background-modifier-border-hover);
-}
-
-.opencode-obsidian-code-block code {
-  background: none;
-  padding: 0;
-  font-family: var(--font-monospace);
-  font-size: 0.9em;
-  white-space: pre;
-  color: var(--text-normal);
-  line-height: 1.5;
-}
-
-.opencode-obsidian-code-actions {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  opacity: 0;
-  transition: opacity 0.2s ease, transform 0.2s ease;
-  transform: translateY(-2px);
-  z-index: 10;
-}
-
-.opencode-obsidian-code-block:hover .opencode-obsidian-code-actions {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.opencode-obsidian-code-copy {
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.opencode-obsidian-code-copy:hover {
-  background: var(--background-modifier-hover);
-  border-color: var(--color-accent);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.opencode-obsidian-code-copy:active {
-  transform: translateY(0);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.opencode-obsidian-message-actions {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  display: flex;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.opencode-obsidian-message-action {
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 12px;
-  cursor: pointer;
-  opacity: 0.7;
-  transition: all 0.2s ease;
-}
-
-.opencode-obsidian-message-action:hover {
-  background: var(--background-modifier-hover);
-  opacity: 1;
-}
-
-.opencode-obsidian-message-action:disabled {
-  cursor: not-allowed;
-  opacity: 0.3;
-  background: var(--background-modifier-border);
-}
-
-.opencode-obsidian-message-images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
 }
 
 .opencode-obsidian-message-images img {
-  border-radius: 4px;
-  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  margin-top: 6px;
+}
+
+.opencode-obsidian-message-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.opencode-obsidian-message-action {
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.opencode-obsidian-message-action:hover {
+  color: var(--text-normal);
+}
+
+.opencode-obsidian-empty-messages {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 20px 0;
 }
 
 .opencode-obsidian-reverted-indicator {
-  padding: 12px 16px;
-  margin: 8px 16px;
-  background: var(--background-modifier-error-hover);
-  border: 1px solid var(--color-orange);
+  padding: 8px 10px;
   border-radius: 6px;
-  color: var(--color-orange);
+  background-color: var(--background-secondary);
+  border: 1px dashed var(--background-modifier-border);
   font-size: 12px;
-  text-align: center;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
+  color: var(--text-muted);
 }
 
 .opencode-obsidian-unrevert-button {
-  padding: 4px 12px;
-  background: var(--color-orange);
-  color: var(--text-on-accent);
-  border: none;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
+  margin-left: 8px;
 }
 
-.opencode-obsidian-unrevert-button:hover {
-  background: var(--color-orange-hover, var(--color-orange));
-  opacity: 0.9;
-  transform: translateY(-1px);
-}
-
+/* Input area */
 .opencode-obsidian-input {
   border-top: 1px solid var(--background-modifier-border);
-  background: var(--background-secondary);
-  transition: background 0.2s ease;
+  padding: 8px 10px;
+  background-color: var(--background-secondary);
 }
 
 .opencode-obsidian-input-container {
-  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
 }
 
 .opencode-obsidian-input-toolbar {
   display: flex;
-  gap: 10px;
   align-items: center;
+  gap: 8px;
 }
 
-.opencode-obsidian-model-select,
 .opencode-obsidian-agent-select {
-  padding: 6px 10px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-size: 12px;
-  transition: all 0.2s ease;
-}
-
-.opencode-obsidian-model-select:hover,
-.opencode-obsidian-agent-select:hover {
-  border-color: var(--color-accent);
-  background: var(--background-modifier-hover);
-}
-
-.opencode-obsidian-model-select:focus,
-.opencode-obsidian-agent-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-1);
-}
-
-.opencode-obsidian-model-input {
-  width: 100%;
-  padding: 4px 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-size: 12px;
-  font-family: var(--font-monospace);
-}
-
-.opencode-obsidian-model-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.opencode-obsidian-model-suggestions {
-  padding: 4px 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-size: 12px;
+  max-width: 200px;
 }
 
 .opencode-obsidian-input-textarea {
   width: 100%;
-  min-height: 70px;
-  max-height: 200px;
-  padding: 12px 16px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-family: var(--font-interface);
-  font-size: 14px;
-  line-height: 1.5;
+  min-height: 60px;
   resize: none;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.opencode-obsidian-input-textarea:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-1), 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.opencode-obsidian-command-suggestions {
-  display: none;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  background: var(--background-primary);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-  overflow: hidden;
-}
-
-.opencode-obsidian-command-suggestions.is-visible {
-  display: block;
-}
-
-.opencode-obsidian-command-suggestions-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.opencode-obsidian-command-suggestion {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.opencode-obsidian-command-suggestion.is-selected,
-.opencode-obsidian-command-suggestion:hover {
-  background: var(--background-modifier-hover);
-}
-
-.opencode-obsidian-command-suggestion-name {
-  font-family: var(--font-monospace);
-  font-size: 12px;
-  color: var(--text-normal);
-}
-
-.opencode-obsidian-command-suggestion-description {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.opencode-obsidian-command-suggestion-empty {
-  cursor: default;
-  color: var(--text-muted);
 }
 
 .opencode-obsidian-input-status {
   display: flex;
   justify-content: space-between;
-  align-items: center;
   font-size: 11px;
   color: var(--text-muted);
 }
 
-.opencode-obsidian-char-count.opencode-obsidian-char-warning {
-  color: var(--color-orange);
-}
-
-.opencode-obsidian-streaming-status.opencode-obsidian-streaming {
-  color: var(--color-accent);
+.opencode-obsidian-streaming {
+  color: var(--text-accent);
 }
 
 .opencode-obsidian-input-buttons {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  align-items: center;
+  gap: 6px;
 }
 
-.opencode-obsidian-input-buttons button {
-  padding: 8px 16px;
-  font-size: 13px;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  font-weight: 500;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+/* Command suggestions */
+.opencode-obsidian-command-suggestions {
+  position: relative;
 }
 
-.opencode-obsidian-input-buttons button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.opencode-obsidian-input-buttons button:active {
-  transform: translateY(0);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.opencode-obsidian-attach-btn,
-.opencode-obsidian-clear-btn {
-  padding: 8px 12px !important;
-  font-size: 16px !important;
-  border-radius: 6px !important;
-  transition: all 0.2s ease !important;
-}
-
-.opencode-obsidian-attach-btn:hover,
-.opencode-obsidian-clear-btn:hover {
-  background: var(--background-modifier-hover) !important;
-  transform: translateY(-1px);
-}
-
-/* Settings Styles */
-.opencode-obsidian-test-container,
-.opencode-obsidian-status-container {
-  margin-top: 16px;
-}
-
-.opencode-obsidian-server-status {
-  padding: 12px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-secondary);
-  margin-top: 8px;
-}
-
-.opencode-obsidian-server-status p {
-  margin: 4px 0;
-  font-size: 13px;
-}
-
-.opencode-obsidian-status-good {
-  color: var(--color-green);
-}
-
-.opencode-obsidian-status-bad {
-  color: var(--color-red);
-}
-
-.opencode-obsidian-status-warning {
-  color: var(--color-orange, #f59e0b);
-}
-
-.opencode-obsidian-status-info {
-  color: var(--text-muted);
-}
-
-/* Tool Use/Result Styles */
-.opencode-obsidian-tool-use {
-  background: var(--background-modifier-hover);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 8px;
-  margin: 4px 0;
-  font-size: 12px;
-}
-
-.opencode-obsidian-tool-result {
-  background: var(--background-modifier-hover);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 8px;
-  margin: 4px 0;
-  font-size: 12px;
-}
-
-.opencode-obsidian-tool-result.error {
-  border-color: var(--color-red);
-  background: var(--background-modifier-error);
-}
-
-/* Modal Styles */
-.opencode-obsidian-drop-zone {
-  border: 2px dashed var(--background-modifier-border);
-  border-radius: 8px;
-  padding: 40px 20px;
-  text-align: center;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.2s;
-  margin: 16px 0;
-}
-
-.opencode-obsidian-drop-zone:hover,
-.opencode-obsidian-drop-zone-hover {
-  border-color: var(--color-accent);
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
-
-.opencode-obsidian-permission-request {
-  margin: 16px 0;
-}
-
-.opencode-obsidian-permission-request h3 {
-  margin: 8px 0;
-  color: var(--text-normal);
-}
-
-.opencode-obsidian-permission-request pre {
-  background: var(--background-modifier-hover);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 12px;
-  margin: 8px 0;
-  overflow-x: auto;
-}
-
-.opencode-obsidian-command-preview {
-  background: var(--background-modifier-error-hover);
-  border-color: var(--color-orange);
-}
-
-.opencode-obsidian-permission-warning {
-  background: var(--background-modifier-error-hover);
-  border: 1px solid var(--color-orange);
-  border-radius: 6px;
-  padding: 12px;
-  margin: 16px 0;
-}
-
-.opencode-obsidian-warning-text {
-  color: var(--color-orange);
-  font-weight: 500;
-  margin: 0;
-}
-
-/* Model Selector Styles */
-.opencode-obsidian-model-selector-modal {
-  min-width: 500px;
-  max-width: 600px;
-  max-height: 70vh;
-}
-
-.opencode-obsidian-model-search-container {
-  margin-bottom: 16px;
-}
-
-.opencode-obsidian-model-search-input {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-size: 14px;
-}
-
-.opencode-obsidian-model-search-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.opencode-obsidian-models-container {
-  max-height: calc(70vh - 120px);
-  overflow-y: auto;
-}
-
-.opencode-obsidian-model-provider-section {
-  margin-bottom: 20px;
-}
-
-.opencode-obsidian-model-provider-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--background-modifier-border);
-  margin-bottom: 12px;
-  cursor: pointer;
-}
-
-.opencode-obsidian-provider-toggle {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-muted);
-  padding: 0;
-  width: 20px;
-  text-align: center;
-}
-
-.opencode-obsidian-model-provider-header h3 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-normal);
-}
-
-.opencode-obsidian-models-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 8px;
-}
-
-.opencode-obsidian-model-card {
-  padding: 10px 12px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-primary);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.opencode-obsidian-model-card:hover {
-  border-color: var(--color-accent);
-  background: var(--background-modifier-hover);
-  transform: translateY(-1px);
-}
-
-.opencode-obsidian-model-card.selected {
-  border-color: var(--color-accent);
-  background: var(--background-modifier-active);
-  box-shadow: 0 0 0 2px var(--color-accent-1);
-}
-
-.opencode-obsidian-model-card-name {
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text-normal);
-  margin-bottom: 4px;
-}
-
-.opencode-obsidian-model-card-id {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: var(--font-monospace);
-  word-break: break-all;
-}
-
-.opencode-obsidian-no-models {
-  text-align: center;
-  padding: 40px 20px;
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-.opencode-obsidian-pagination {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-  margin-top: 16px;
-  padding: 12px 0;
-  border-top: 1px solid var(--background-modifier-border);
-}
-
-.opencode-obsidian-pagination-btn {
-  padding: 6px 12px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.opencode-obsidian-pagination-btn:hover:not(:disabled) {
-  background: var(--background-modifier-hover);
-  border-color: var(--color-accent);
-}
-
-.opencode-obsidian-pagination-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.opencode-obsidian-page-info {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-/* Model Select Button */
-.opencode-obsidian-model-select-btn {
-  padding: 4px 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.opencode-obsidian-model-select-btn:hover {
-  background: var(--background-modifier-hover);
-  border-color: var(--color-accent);
-}
-
-.opencode-obsidian-model-input-container {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-/* Responsive adjustments */
-@media (max-width: 600px) {
-  .opencode-obsidian-message {
-    max-width: 95%;
-  }
-  
-  .opencode-obsidian-input-buttons {
-    flex-direction: column;
-  }
-  
-  .opencode-obsidian-input-toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  
-  .opencode-obsidian-model-select,
-  .opencode-obsidian-agent-select {
-    width: 100%;
-  }
-
-  .opencode-obsidian-model-selector-modal {
-    min-width: auto;
-    max-width: 100%;
-  }
-
-  .opencode-obsidian-models-list {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Loading Spinner */
-.opencode-obsidian-spinner {
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--background-modifier-border);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: opencode-spin 0.8s linear infinite;
-}
-
-.opencode-obsidian-spinner-large {
-  width: 24px;
-  height: 24px;
-  border-width: 3px;
-}
-
-@keyframes opencode-spin {
-  to { transform: rotate(360deg); }
-}
-
-.opencode-obsidian-loading-overlay {
+.opencode-obsidian-command-suggestions-list {
   position: absolute;
-  top: 0;
   left: 0;
   right: 0;
-  bottom: 0;
-  background: rgba(var(--background-primary-rgb, 255, 255, 255), 0.7);
+  bottom: calc(100% + 6px);
+  max-height: 200px;
+  overflow: auto;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  display: none;
+  z-index: 20;
+}
+
+.opencode-obsidian-command-suggestions.is-visible .opencode-obsidian-command-suggestions-list {
+  display: block;
+}
+
+.opencode-obsidian-command-suggestion {
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.opencode-obsidian-command-suggestion.is-selected {
+  background-color: var(--background-modifier-hover);
+}
+
+.opencode-obsidian-command-suggestion-description {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.opencode-obsidian-command-suggestion-empty {
+  color: var(--text-muted);
+}
+
+/* Loading and spinners */
+.opencode-obsidian-loading-overlay {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
-  backdrop-filter: blur(2px);
+  height: 100%;
+  color: var(--text-muted);
 }
 
 .opencode-obsidian-loading-message {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
-  background: var(--background-primary);
+}
+
+.opencode-obsidian-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--interactive-accent);
+  border-radius: 50%;
+  animation: opencode-obsidian-spin 0.8s linear infinite;
+}
+
+.opencode-obsidian-spinner-large {
+  width: 18px;
+  height: 18px;
+  border-width: 3px;
+}
+
+@keyframes opencode-obsidian-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Context menu */
+.opencode-obsidian-context-menu {
+  background-color: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  font-size: 13px;
-  color: var(--text-normal);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
 
-/* Settings Page Styles */
-.opencode-setting-url.mod-invalid {
-  border-color: var(--text-error) !important;
-}
-
-.opencode-setting-textarea {
-  width: 100%;
+.opencode-obsidian-context-menu-item {
   padding: 6px 8px;
-  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
   border-radius: 4px;
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-family: var(--font-monospace);
-  font-size: 12px;
-  resize: vertical;
 }
 
-.opencode-setting-textarea:focus {
-  outline: none;
-  border-color: var(--color-accent);
+.opencode-obsidian-context-menu-item:hover {
+  background-color: var(--background-modifier-hover);
 }
 
-.opencode-settings-advanced {
-  margin-top: 2em;
-  border-top: 1px solid var(--background-modifier-border);
-  padding-top: 1em;
+.opencode-obsidian-context-menu-item-danger {
+  color: var(--text-error);
 }
 
-.opencode-settings-advanced-header {
+/* Todo list */
+.opencode-obsidian-todo-container {
+  padding: 10px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5em;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.opencode-settings-advanced-header h3 {
-  margin: 0;
-}
-
-.opencode-settings-advanced-header button {
-  font-size: 12px;
-  padding: 4px 12px;
-}
-
-.opencode-settings-advanced-content {
-  margin-top: 1em;
-}
-
-.opencode-settings-advanced-content.hidden {
-  display: none;
-}
-
-/* Diff Viewer Modal Styles */
-.opencode-diff-viewer {
-  min-width: 600px;
-  max-width: 900px;
-}
-
-.opencode-diff-viewer h2 {
-  margin-bottom: 16px;
-  color: var(--text-normal);
-  font-size: 18px;
+.opencode-obsidian-todo-header {
+  font-size: 14px;
   font-weight: 600;
 }
 
-.opencode-diff-empty {
-  text-align: center;
-  padding: 40px 20px;
-  color: var(--text-muted);
-  font-style: italic;
-  font-size: 14px;
+.opencode-obsidian-todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.opencode-diff-file {
-  margin-bottom: 24px;
+.opencode-obsidian-todo-item {
+  padding: 8px 10px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
-  overflow: hidden;
-  background: var(--background-primary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  background-color: var(--background-secondary);
 }
 
-.opencode-diff-file-header {
-  padding: 12px 16px;
-  background: var(--background-secondary);
-  border-bottom: 1px solid var(--background-modifier-border);
-  font-family: var(--font-monospace);
-  font-size: 13px;
-  color: var(--text-normal);
+.opencode-obsidian-todo-title {
   font-weight: 600;
 }
 
-.opencode-diff-content {
-  padding: 0;
-}
-
-.opencode-diff-section {
-  margin: 0;
-  position: relative;
-}
-
-.opencode-diff-section-header {
-  padding: 8px 16px;
-  font-size: 12px;
-  font-weight: 600;
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-
-.opencode-diff-section-header.removed {
-  background: rgba(255, 0, 0, 0.05);
-  color: var(--color-red);
-  border-left: 3px solid var(--color-red);
-}
-
-.opencode-diff-section-header.added {
-  background: rgba(0, 255, 0, 0.05);
-  color: var(--color-green);
-  border-left: 3px solid var(--color-green);
-}
-
-.opencode-diff-code {
-  margin: 0;
-  padding: 16px;
-  background: var(--background-primary-alt, var(--background-modifier-hover));
-  border: none;
-  border-radius: 0;
-  position: relative;
-  overflow-x: auto;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.opencode-diff-code.removed {
-  background: rgba(255, 0, 0, 0.03);
-  border-left: 3px solid var(--color-red);
-}
-
-.opencode-diff-code.added {
-  background: rgba(0, 255, 0, 0.03);
-  border-left: 3px solid var(--color-green);
-}
-
-.opencode-diff-code code {
-  background: none;
-  padding: 0;
-  font-family: var(--font-monospace);
-  font-size: 12px;
-  white-space: pre;
-  color: var(--text-normal);
-  line-height: 1.5;
-  border: none;
-}
-
-.opencode-diff-code-actions {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  z-index: 10;
-}
-
-.opencode-diff-code:hover .opencode-diff-code-actions {
-  opacity: 1;
-}
-
-.opencode-diff-code-copy {
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 4px 10px;
+.opencode-obsidian-todo-meta {
   font-size: 11px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-  color: var(--text-normal);
+  color: var(--text-muted);
 }
 
-.opencode-diff-code-copy:hover {
-  background: var(--background-modifier-hover);
-  border-color: var(--color-accent);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+.opencode-obsidian-todo-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
 }
 
-.opencode-diff-code-copy:active {
-  transform: translateY(0);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+.opencode-obsidian-todo-empty {
+  color: var(--text-muted);
+  padding: 8px 0;
 }
 
-/* Responsive adjustments for diff viewer */
-@media (max-width: 600px) {
-  .opencode-diff-viewer {
-    min-width: auto;
-    max-width: 100%;
-  }
-  
-  .opencode-diff-file-header {
-    font-size: 11px;
-    padding: 10px 12px;
-  }
-  
-  .opencode-diff-code {
-    font-size: 11px;
-    padding: 12px;
-  }
+/* Modals */
+.opencode-obsidian-drop-zone {
+  border: 1px dashed var(--background-modifier-border);
+  padding: 12px;
+  text-align: center;
+  border-radius: 8px;
 }
-/ *   = = = = = = = = = = = = = = = = = = = =   * / 
- / *   S e a r c h   P a n e l   * / 
- / *   = = = = = = = = = = = = = = = = = = = =   * / 
- 
- / *   S e a r c h   p a n e l   c o n t a i n e r   * / 
- . o p e n c o d e - o b s i d i a n - s e a r c h - p a n e l   { 
-     b a c k g r o u n d - c o l o r :   v a r ( - - b a c k g r o u n d - p r i m a r y ) ; 
-     b o r d e r - b o t t o m :   1 p x   s o l i d   v a r ( - - b a c k g r o u n d - m o d i f i e r - b o r d e r ) ; 
-     p a d d i n g :   8 p x ; 
-     m a x - h e i g h t :   4 0 0 p x ; 
-     o v e r f l o w :   h i d d e n ; 
-     t r a n s i t i o n :   a l l   0 . 2 s   e a s e ; 
- } 
- 
- / *   S e a r c h   h e a d e r   * / 
- . s e a r c h - h e a d e r   { 
-     d i s p l a y :   f l e x ; 
-     f l e x - d i r e c t i o n :   c o l u m n ; 
-     g a p :   8 p x ; 
-     m a r g i n - b o t t o m :   8 p x ; 
- } 
- 
- / *   S e a r c h   m o d e   t a b s   * / 
- . s e a r c h - m o d e - t a b s   { 
-     d i s p l a y :   f l e x ; 
-     g a p :   4 p x ; 
-     m a r g i n - b o t t o m :   8 p x ; 
- } 
- 
- / *   S e a r c h   m o d e   t a b   * / 
- . s e a r c h - m o d e - t a b   { 
-     p a d d i n g :   4 p x   8 p x ; 
-     b o r d e r - r a d i u s :   v a r ( - - r a d i u s - x s ) ; 
-     c u r s o r :   p o i n t e r ; 
-     f o n t - s i z e :   v a r ( - - f o n t - s i z e - s m a l l e r ) ; 
-     t r a n s i t i o n :   a l l   0 . 2 s   e a s e ; 
- } 
- 
- . s e a r c h - m o d e - t a b : h o v e r   { 
-     b a c k g r o u n d - c o l o r :   v a r ( - - b a c k g r o u n d - m o d i f i e r - h o v e r ) ; 
- } 
- 
- / *   S e a r c h   i n p u t   c o n t a i n e r   * / 
- . s e a r c h - i n p u t - c o n t a i n e r   { 
-     d i s p l a y :   f l e x ; 
-     g a p :   8 p x ; 
-     a l i g n - i t e m s :   c e n t e r ; 
- } 
- 
- / *   S e a r c h   i n p u t   * / 
- . s e a r c h - i n p u t   { 
-     f l e x :   1 ; 
-     p a d d i n g :   8 p x   1 2 p x ; 
-     b o r d e r :   1 p x   s o l i d   v a r ( - - b a c k g r o u n d - m o d i f i e r - b o r d e r ) ; 
-     b o r d e r - r a d i u s :   v a r ( - - r a d i u s - s ) ; 
-     b a c k g r o u n d - c o l o r :   v a r ( - - b a c k g r o u n d - s e c o n d a r y ) ; 
-     c o l o r :   v a r ( - - t e x t - n o r m a l ) ; 
-     f o n t - s i z e :   v a r ( - - f o n t - s i z e - n o r m a l ) ; 
-     t r a n s i t i o n :   a l l   0 . 2 s   e a s e ; 
- } 
- 
- . s e a r c h - i n p u t : f o c u s   { 
-     o u t l i n e :   n o n e ; 
-     b o r d e r - c o l o r :   v a r ( - - i n t e r a c t i v e - a c c e n t ) ; 
-     b o x - s h a d o w :   0   0   0   1 p x   v a r ( - - i n t e r a c t i v e - a c c e n t ) ; 
- } 
- 
- / *   S e a r c h   b u t t o n   * / 
- . s e a r c h - b u t t o n   { 
-     p a d d i n g :   8 p x   1 6 p x ; 
-     b a c k g r o u n d - c o l o r :   v a r ( - - i n t e r a c t i v e - a c c e n t ) ; 
-     c o l o r :   v a r ( - - t e x t - o n - a c c e n t ) ; 
-     b o r d e r :   n o n e ; 
-     b o r d e r - r a d i u s :   v a r ( - - r a d i u s - s ) ; 
-     c u r s o r :   p o i n t e r ; 
-     f o n t - s i z e :   v a r ( - - f o n t - s i z e - n o r m a l ) ; 
-     t r a n s i t i o n :   a l l   0 . 2 s   e a s e ; 
- } 
- 
- . s e a r c h - b u t t o n : h o v e r   { 
-     b a c k g r o u n d - c o l o r :   v a r ( - - i n t e r a c t i v e - a c c e n t - h o v e r ) ; 
- } 
- 
- . s e a r c h - b u t t o n : d i s a b l e d   { 
-     b a c k g r o u n d - c o l o r :   v a r ( - - i n t e r a c t i v e - d i s a b l e d ) ; 
-     c u r s o r :   n o t - a l l o w e d ; 
- } 
- 
- / *   S e a r c h   r e s u l t s   c o n t a i n e r   * / 
- . s e a r c h - r e s u l t s   { 
-     m a x - h e i g h t :   3 0 0 p x ; 
-     o v e r f l o w - y :   a u t o ; 
-     d i s p l a y :   f l e x ; 
-     f l e x - d i r e c t i o n :   c o l u m n ; 
-     g a p :   4 p x ; 
- } 
- 
- / *   S e a r c h   r e s u l t   i t e m   * / 
- . s e a r c h - r e s u l t - i t e m   { 
-     p a d d i n g :   8 p x   1 2 p x ; 
-     b o r d e r - r a d i u s :   v a r ( - - r a d i u s - s ) ; 
-     b a c k g r o u n d - c o l o r :   v a r ( - - b a c k g r o u n d - s e c o n d a r y ) ; 
-     c u r s o r :   p o i n t e r ; 
-     t r a n s i t i o n :   a l l   0 . 2 s   e a s e ; 
- } 
- 
- . s e a r c h - r e s u l t - i t e m : h o v e r   { 
-     b a c k g r o u n d - c o l o r :   v a r ( - - b a c k g r o u n d - s e c o n d a r y - a l t ) ; 
- } 
- 
- / *   S e a r c h   r e s u l t   p a t h   * / 
- . s e a r c h - r e s u l t - p a t h   { 
-     f o n t - s i z e :   v a r ( - - f o n t - s i z e - s m a l l e r ) ; 
-     c o l o r :   v a r ( - - t e x t - m u t e d ) ; 
-     m a r g i n - b o t t o m :   4 p x ; 
-     w o r d - b r e a k :   b r e a k - a l l ; 
- } 
- 
- / *   S e a r c h   r e s u l t   c o n t e n t   * / 
- . s e a r c h - r e s u l t - c o n t e n t   { 
-     f o n t - s i z e :   v a r ( - - f o n t - s i z e - s m a l l ) ; 
-     w h i t e - s p a c e :   p r e - w r a p ; 
-     w o r d - b r e a k :   b r e a k - w o r d ; 
-     c o l o r :   v a r ( - - t e x t - n o r m a l ) ; 
- } 
- 
- / *   S e a r c h   r e s u l t   s y m b o l   h e a d e r   * / 
- . s e a r c h - r e s u l t - s y m b o l - h e a d e r   { 
-     d i s p l a y :   f l e x ; 
-     a l i g n - i t e m s :   c e n t e r ; 
-     g a p :   8 p x ; 
-     m a r g i n - b o t t o m :   4 p x ; 
- } 
- 
- / *   S e a r c h   r e s u l t   s y m b o l   n a m e   * / 
- . s e a r c h - r e s u l t - s y m b o l - n a m e   { 
-     f o n t - s i z e :   v a r ( - - f o n t - s i z e - s m a l l ) ; 
-     f o n t - w e i g h t :   5 0 0 ; 
-     c o l o r :   v a r ( - - t e x t - n o r m a l ) ; 
- } 
- 
- / *   S e a r c h   r e s u l t   s y m b o l   t y p e   * / 
- . s e a r c h - r e s u l t - s y m b o l - t y p e   { 
-     f o n t - s i z e :   v a r ( - - f o n t - s i z e - s m a l l e r ) ; 
-     c o l o r :   v a r ( - - t e x t - m u t e d ) ; 
-     b a c k g r o u n d - c o l o r :   v a r ( - - b a c k g r o u n d - s e c o n d a r y - a l t ) ; 
-     p a d d i n g :   2 p x   6 p x ; 
-     b o r d e r - r a d i u s :   v a r ( - - r a d i u s - x s ) ; 
- } 
- 
- / *   S e a r c h   r e s u l t   m e t a d a t a   * / 
- . s e a r c h - r e s u l t - m e t a d a t a   { 
-     f o n t - s i z e :   v a r ( - - f o n t - s i z e - s m a l l e r ) ; 
-     c o l o r :   v a r ( - - t e x t - m u t e d ) ; 
- } 
- 
- / *   S e a r c h   n o   r e s u l t s   * / 
- . s e a r c h - n o - r e s u l t s   { 
-     p a d d i n g :   1 6 p x ; 
-     t e x t - a l i g n :   c e n t e r ; 
-     c o l o r :   v a r ( - - t e x t - m u t e d ) ; 
-     f o n t - s i z e :   v a r ( - - f o n t - s i z e - s m a l l ) ; 
- } 
- 
- / *   S e a r c h   s t a t u s   m e s s a g e   * / 
- . s e a r c h - s t a t u s   { 
-     p a d d i n g :   8 p x ; 
-     f o n t - s i z e :   v a r ( - - f o n t - s i z e - s m a l l e r ) ; 
-     c o l o r :   v a r ( - - t e x t - m u t e d ) ; 
-     b o r d e r - t o p :   1 p x   s o l i d   v a r ( - - b a c k g r o u n d - m o d i f i e r - b o r d e r ) ; 
-     t e x t - a l i g n :   r i g h t ; 
- } 
- 
- / *   S e a r c h   l o a d i n g   * / 
- . s e a r c h - l o a d i n g   { 
-     p a d d i n g :   1 6 p x ; 
-     t e x t - a l i g n :   c e n t e r ; 
-     c o l o r :   v a r ( - - t e x t - m u t e d ) ; 
-     f o n t - s i z e :   v a r ( - - f o n t - s i z e - s m a l l ) ; 
- } 
- 
- / *   S e a r c h   h i g h l i g h t   * / 
- . s e a r c h - h i g h l i g h t   { 
-     b a c k g r o u n d - c o l o r :   v a r ( - - t e x t - h i g h l i g h t - b g ) ; 
-     c o l o r :   v a r ( - - t e x t - h i g h l i g h t ) ; 
-     p a d d i n g :   0   2 p x ; 
-     b o r d e r - r a d i u s :   2 p x ; 
- } 
- 
- 
+
+.opencode-obsidian-drop-zone-hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.opencode-obsidian-permission-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.opencode-obsidian-code-preview {
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  padding: 8px;
+  border-radius: 6px;
+  white-space: pre-wrap;
+}

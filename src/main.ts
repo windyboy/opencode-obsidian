@@ -21,6 +21,8 @@ import { SessionEventBus } from "./session/session-event-bus";
 import { PermissionCoordinator } from "./tools/obsidian/permission-coordinator";
 import { ServerManager } from "./embedded-server/ServerManager";
 import { ServerStateChangeEvent } from "./embedded-server/types";
+import { TodoManager } from "./todo/todo-manager";
+import { TodoListComponent } from "./todo/todo-list-component";
 
 /**
  * Maps string permission level settings to ToolPermission enum values
@@ -88,6 +90,8 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 	permissionManager: PermissionManager | null = null;
 	permissionCoordinator: PermissionCoordinator | null = null;
 	serverManager: ServerManager | null = null;
+	todoManager: TodoManager | null = null;
+	todoListComponent: TodoListComponent | null = null;
 
 
 
@@ -151,40 +155,68 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 					// Initialize server (external or embedded)
 					if (this.settings.opencodeServer) {
 						const serverConfig = this.settings.opencodeServer;
-						this.serverManager = await ServerManager.initializeFromConfig(
-							serverConfig,
-							this.errorHandler,
-							(event) => this.handleServerStateChange(event),
-							async (url) => {
-								// URL 就绪回调：更新配置
-								if (!serverConfig.url) {
-									serverConfig.url = url;
-									await this.saveSettings();
+						try {
+							this.serverManager = await ServerManager.initializeFromConfig(
+								serverConfig,
+								this.errorHandler,
+								(event) => this.handleServerStateChange(event),
+								async (url) => {
+									// URL 就绪回调：更新配置
+									if (!serverConfig.url) {
+										serverConfig.url = url;
+										await this.saveSettings();
+									}
 								}
-							}
-						);
+							);
+						} catch (error) {
+							this.errorHandler.handleError(
+								error,
+								{
+									module: "OpenCodeObsidianPlugin",
+									function: "onload",
+									operation: "Server initialization",
+								},
+								ErrorSeverity.Warning,
+							);
+							// Continue loading plugin even if server initialization fails
+						}
 					}
 
-					// Initialize OpenCode Server client if URL is configured
-					if (this.settings.opencodeServer?.url) {
-						const clientSetup = await initializeClient(
-							this.settings.opencodeServer,
-							this.errorHandler,
-							this.sessionEventBus,
-							this.permissionManager,
-							auditLogger,
-							this.app,
-							async (agents: Agent[]) => {
-								this.settings.agents = agents;
-								await this.saveSettings();
-							},
-							() => this.getDefaultAgents()
-						);
+					// Initialize OpenCode Server client if conditions are met
+					const opencodeServer = this.settings.opencodeServer;
+					if (opencodeServer) {
+						const useEmbeddedServer = opencodeServer.useEmbeddedServer;
+						const hasServerUrl = opencodeServer.url;
+						const embeddedServerReady = useEmbeddedServer && this.serverManager && this.serverManager.getState() === "running";
+						const externalServerConfigured = !useEmbeddedServer && hasServerUrl;
 
-						if (clientSetup) {
-							this.opencodeClient = clientSetup.client;
-							this.connectionManager = clientSetup.connectionManager;
-							this.permissionCoordinator = clientSetup.permissionCoordinator;
+						// Only initialize client if:
+						// 1. Using embedded server and serverManager is ready and running, OR
+						// 2. Using external server and URL is configured
+						if ((embeddedServerReady || externalServerConfigured) && hasServerUrl) {
+							const clientSetup = await initializeClient(
+					opencodeServer,
+					this.errorHandler,
+					this.sessionEventBus,
+					this.permissionManager,
+					auditLogger,
+					this.app,
+					async (agents: Agent[]) => {
+						// Only save if agents have actually changed to avoid infinite loop
+						const agentsChanged = JSON.stringify(this.settings.agents) !== JSON.stringify(agents);
+						if (agentsChanged) {
+							this.settings.agents = agents;
+							await this.saveSettings();
+						}
+					},
+					() => this.getDefaultAgents()
+				);
+
+							if (clientSetup) {
+								this.opencodeClient = clientSetup.client;
+								this.connectionManager = clientSetup.connectionManager;
+								this.permissionCoordinator = clientSetup.permissionCoordinator;
+							}
 						}
 					}
 				}
@@ -199,6 +231,18 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 					ErrorSeverity.Warning,
 				);
 				// Continue loading plugin even if tool execution layer fails
+			}
+
+			// Initialize Todo Manager
+			try {
+				this.todoManager = new TodoManager({}, this.errorHandler);
+				console.debug("[OpenCode Obsidian] Todo Manager initialized");
+			} catch (error) {
+				this.errorHandler.handleError(
+					error,
+					{ module: "OpenCodeObsidianPlugin", function: "onload" },
+					ErrorSeverity.Warning
+				);
 			}
 
 			// Register the main view
@@ -251,8 +295,31 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 				},
 			});
 
+			// Add command to open todo list
+			this.addCommand({
+				id: "open-todo-list",
+				name: "Open Todo List",
+				hotkeys: [{ modifiers: ["Mod"], key: "t" }],
+				callback: () => {
+					const view = this.getActiveView();
+					if (view) {
+						// 这里将在OpenCodeObsidianView中实现显示待办事项列表的方法
+						if (typeof (view as any).showTodoList === 'function') {
+							(view as any).showTodoList();
+						} else {
+							new Notice("Todo list functionality not available in this view");
+						}
+					} else {
+						new Notice("Please open the chat view first");
+					}
+				},
+			});
+
 			// Add settings tab
 			this.addSettingTab(new OpenCodeObsidianSettingTab(this.app, this));
+
+				// Server status check after plugin fully loaded
+			void this.checkServerStatusAndPrompt();
 
 			console.debug("[OpenCode Obsidian] Plugin loaded successfully ✓");
 		} catch (error) {
@@ -276,6 +343,64 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 			}
 			throw error; // Re-throw to let Obsidian handle the error
 		}
+	}
+
+	/**
+	 * Check server status on plugin startup and prompt user if needed
+	 */
+	private async checkServerStatusAndPrompt(): Promise<void> {
+		try {
+			const serverConfig = this.settings.opencodeServer;
+			if (!serverConfig) {
+				return; // No server configured yet
+			}
+
+			// Check if using embedded server
+			if (serverConfig.useEmbeddedServer) {
+				// Give server some time to start if it's initializing
+				await new Promise(resolve => setTimeout(resolve, 1000));
+
+				// Check if server manager exists and is running
+				if (this.serverManager) {
+					const state = this.serverManager.getState();
+					if (state !== "running" && state !== "starting") {
+						// Server is not running, show prompt
+						this.showServerStartPrompt();
+					}
+				} else {
+					// Server manager not initialized, show prompt
+					this.showServerStartPrompt();
+				}
+			} else {
+				// Using external server - check connection
+				if (serverConfig.url && this.opencodeClient) {
+					try {
+						const isHealthy = await this.opencodeClient.healthCheck();
+						if (!isHealthy) {
+							// External server not reachable, show notice
+							new Notice("OpenCode external server not reachable. Please check configuration.");
+						}
+					} catch (error) {
+						// Connection error, show notice
+						console.debug("[OpenCode Obsidian] External server connection check failed:", error);
+						new Notice("Unable to connect to OpenCode server. Please verify configuration.");
+					}
+				}
+			}
+		} catch (error) {
+			console.error("[OpenCode Obsidian] Server status check failed:", error);
+			// Don't show error to user - just log it
+		}
+	}
+
+	/**
+	 * Show server start prompt modal
+	 */
+	private showServerStartPrompt(): void {
+		// Import modal dynamically to avoid circular dependencies
+		import("./views/modals/server-start-modal").then(m => {
+			new m.ServerStartModal(this.app, this).open();
+		});
 	}
 
 	onunload(): void {
@@ -304,7 +429,7 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 	/**
 	 * Handle server state changes
 	 */
-	private handleServerStateChange(event: ServerStateChangeEvent): void {
+	public handleServerStateChange(event: ServerStateChangeEvent): void {
 		console.debug("[OpenCode Obsidian] Server state change:", event);
 
 		if (event.state === "error" && event.error) {
@@ -396,8 +521,12 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 				auditLogger,
 				this.app,
 				async (agents: Agent[]) => {
-					this.settings.agents = agents;
-					await this.saveSettings();
+					// Only save if agents have actually changed to avoid infinite loop
+					const agentsChanged = JSON.stringify(this.settings.agents) !== JSON.stringify(agents);
+					if (agentsChanged) {
+						this.settings.agents = agents;
+						await this.saveSettings();
+					}
 				},
 				() => this.getDefaultAgents()
 			);

@@ -1,6 +1,7 @@
 import type {
 	ConnectionState,
 	ReconnectAttemptInfo,
+	ConnectionQualityMetrics
 } from "../client/types";
 import type { OpenCodeServerClient } from "../client/client";
 import { ErrorSeverity, type ErrorHandler } from "../utils/error-handler";
@@ -9,6 +10,7 @@ export interface ConnectionDiagnostics {
 	state: ConnectionState;
 	lastError: Error | null;
 	lastReconnectAttempt: ReconnectAttemptInfo | null;
+	qualityMetrics?: ConnectionQualityMetrics;
 }
 
 type Unsubscribe = () => void;
@@ -19,8 +21,14 @@ export class ConnectionManager {
 	private state: ConnectionState = "disconnected";
 	private lastError: Error | null = null;
 	private lastReconnectAttempt: ReconnectAttemptInfo | null = null;
-	private stateListeners: Array<(diagnostics: ConnectionDiagnostics) => void> =
-		[];
+	private qualityMetrics: ConnectionQualityMetrics = {
+		latency: 0,
+		reconnectCount: 0,
+		connectedDuration: 0,
+		lastPingTime: 0
+	};
+	private connectionStartTime: number | null = null;
+	private stateListeners: Array<(diagnostics: ConnectionDiagnostics) => void> = [];
 
 	constructor(client: OpenCodeServerClient, errorHandler: ErrorHandler) {
 		this.client = client;
@@ -31,11 +39,20 @@ export class ConnectionManager {
 		this.client.onConnectionStateChange((state, info) => {
 			this.state = state;
 			this.lastError = info?.error ?? client.getLastConnectionError();
+			
+			// 更新连接开始时间
+			if (state === "connected") {
+				this.connectionStartTime = Date.now();
+			} else if (state === "disconnected" || state === "error") {
+				this.connectionStartTime = null;
+			}
+			
 			this.notify();
 		});
 
 		this.client.onReconnectAttempt((info) => {
 			this.lastReconnectAttempt = info;
+			this.qualityMetrics.reconnectCount++;
 			this.notify();
 		});
 	}
@@ -45,7 +62,41 @@ export class ConnectionManager {
 			state: this.state,
 			lastError: this.lastError,
 			lastReconnectAttempt: this.lastReconnectAttempt,
+			qualityMetrics: this.getQualityMetrics()
 		};
+	}
+
+	/**
+	 * 获取连接质量指标
+	 */
+	getQualityMetrics(): ConnectionQualityMetrics {
+		// 更新连接时长
+		if (this.connectionStartTime && this.state === "connected") {
+			this.qualityMetrics.connectedDuration = 
+				Math.floor((Date.now() - this.connectionStartTime) / 1000);
+		}
+		return { ...this.qualityMetrics };
+	}
+
+	/**
+	 * 测量连接延迟
+	 */
+	async measureLatency(): Promise<number> {
+		const start = Date.now();
+		try {
+			await this.client.healthCheck();
+			const latency = Date.now() - start;
+			this.qualityMetrics.latency = latency;
+			this.qualityMetrics.lastPingTime = Date.now();
+			return latency;
+		} catch (error) {
+			this.errorHandler.handleError(
+				error,
+				{ module: "ConnectionManager", function: "measureLatency" },
+				ErrorSeverity.Warning
+			);
+			return -1; // 表示失败
+		}
 	}
 
 	onDiagnosticsChange(

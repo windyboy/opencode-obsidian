@@ -17,7 +17,7 @@ const mockListAgents = vi.fn();
 const mockHealthCheck = vi.fn();
 const mockDisconnect = vi.fn().mockResolvedValue(undefined);
 
-vi.mock("./opencode-server/client", () => ({
+vi.mock("./client/client", () => ({
 	OpenCodeServerClient: vi.fn().mockImplementation(function() {
 		return {
 			listAgents: mockListAgents,
@@ -33,6 +33,27 @@ vi.mock("./opencode-server/client", () => ({
 		};
 	}),
 }));
+
+// Mock ServerManager
+vi.mock("./embedded-server/ServerManager", () => {
+	const mockInstance = {
+		getState: vi.fn().mockReturnValue("stopped"),
+		getUrl: vi.fn().mockReturnValue("http://127.0.0.1:4096"),
+		start: vi.fn().mockResolvedValue(true),
+		stop: vi.fn(),
+		checkServerHealth: vi.fn().mockResolvedValue({ isHealthy: false }),
+	};
+	
+	const mockConstructor = vi.fn().mockImplementation(function() {
+		return mockInstance;
+	}) as any;
+	
+	mockConstructor.initializeFromConfig = vi.fn().mockResolvedValue(null);
+	
+	return {
+		ServerManager: mockConstructor,
+	};
+});
 
 // Mock other dependencies
 vi.mock("./views/opencode-obsidian-view", () => ({

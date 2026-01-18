@@ -195,6 +195,22 @@ export interface PluginSettingTab {
   display(): void
 }
 
+// Mock requestUrl function
+export async function requestUrl(options: {
+  url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  contentType?: string;
+  body?: unknown;
+}): Promise<{status: number; headers: Record<string, string>; text: string; json: unknown}> {
+  return {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+    text: JSON.stringify({ isHealthy: true }),
+    json: { isHealthy: true }
+  };
+}
+
 // Export all types
 export type {
   Vault,

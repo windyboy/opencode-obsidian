@@ -68,3 +68,29 @@ export interface OpenCodeServerConfig {
 	/** Maximum number of reconnection attempts (default: 10, 0 = unlimited) */
 	reconnectMaxAttempts?: number;
 }
+
+/**
+ * Health check result
+ */
+export interface HealthCheckResult {
+	/** Whether the server is healthy */
+	isHealthy: boolean;
+	/** HTTP status code (only for successful responses) */
+	statusCode?: number;
+	/** Error message (only for failed responses) */
+	error?: string;
+}
+
+/**
+ * Connection quality metrics
+ */
+export interface ConnectionQualityMetrics {
+	/** Average latency in milliseconds */
+	latency: number;
+	/** Number of reconnect attempts */
+	reconnectCount: number;
+	/** Connected duration in seconds */
+	connectedDuration: number;
+	/** Last ping timestamp */
+	lastPingTime: number;
+}
