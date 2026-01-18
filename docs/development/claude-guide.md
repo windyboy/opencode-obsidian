@@ -71,7 +71,7 @@ All vault operations MUST go through PermissionManager:
 - Three levels: read-only, scoped-write, full-write
 
 **Input Validation:**
-Use validators from `src/utils/validators.ts` for all external inputs (configs, agents, user data).
+Use appropriate validation techniques directly in the component or service that handles external inputs (configs, agents, user data). There is no central validation utility file.
 
 ## Code Standards
 
@@ -156,7 +156,7 @@ describe("SessionManager", () => {
 - `src/tools/obsidian/tool-registry.ts` - Tool definitions (6 core tools)
 - `src/tools/obsidian/permission-manager.ts` - Permission checks
 - `src/utils/constants.ts` - Configuration constants (timeouts, limits, etc.)
-- `src/utils/validators.ts` - Input validation functions
+
 
 ## Available Tools
 
@@ -206,7 +206,7 @@ Uses esbuild with custom plugin for Obsidian:
 
 **Always:**
 - Use PermissionManager for ALL vault operations
-- Validate inputs with validators.ts
+- Validate all external inputs appropriately
 - Never bypass permission checks
 - No secrets in logs or error messages
 - Audit log all tool executions

@@ -54,32 +54,15 @@ The `OpenCodeObsidianPlugin` class extends Obsidian's `Plugin` class and serves 
 -   Configurable notification callbacks
 -   Optional error collection for debugging
 
-#### 2. Input Validation (`src/utils/validators.ts`)
-
-**Responsibility**: Validate configuration, agent, and provider inputs
-
--   Comprehensive validation functions for:
-    -   OpenCodeConfig
-    -   Provider configurations
-    -   Agent frontmatter and structures
-    -   Skill frontmatter and structures
-
-**Key Features**:
-
--   Type-safe validation with detailed error messages
--   URL format validation
--   Color hex validation
--   Model format validation
--   Provider ID format validation
-
 #### 3. OpenCode Server Client (`src/opencode-server/client.ts`)
 
 **Responsibility**: HTTP + SSE communication with OpenCode Server runtime
 
 -   **OpenCodeServerClient**: Obsidian wrapper for `@opencode-ai/sdk/client`
-    -   Session management (create, get, abort)
-    -   Message sending with streaming support
-    -   SSE event stream handling with auto-reconnect
+    -   Delegates to specialized handlers:
+        -   **ConnectionHandler**: Manages connection lifecycle
+        -   **StreamHandler**: Handles SSE event streams
+        -   **SessionOperations**: Manages session creation, messaging, and operations
     -   Obsidian `requestUrl` API adapter for custom fetch
     -   Event callback system for UI integration
 
@@ -178,41 +161,43 @@ The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestratio
 -   Type-safe event handling
 -   Session ID management
 
-**Current Architecture Issues**:
+**Architecture Improvements Implemented**:
 
-⚠️ **Issue 1**: View directly binds SSE callbacks
+✅ **Improvement 1**: SessionEventBus decouples UI from transport layer
 
--   `OpenCodeObsidianView` registers callbacks directly on `OpenCodeServerClient`
--   UI layer knows transport protocol details (stream.token, thinking, progress)
--   Makes it difficult to replace protocol or introduce offline mode
--   **Solution**: Introduce SessionEventBus to decouple UI from transport layer
+-   `OpenCodeObsidianView` now listens to domain events from `SessionEventBus`
+-   UI layer no longer knows transport protocol details
+-   Enables easier protocol replacement and offline mode support
 
-⚠️ **Issue 2**: Concurrent session callbacks conflict
+✅ **Improvement 2**: ConnectionManager centralizes connection lifecycle management
 
--   `startSession()` uses array for callbacks, causing race conditions
--   Multiple concurrent `startSession()` calls may receive wrong `sessionId`
--   Timeout cleanup not properly handled, causing memory leaks
--   **Solution**: Use `Map<obsidianSessionId, PendingRequest>` for request tracking
+-   Replaces scattered connection handling in main.ts and view
+-   Provides consistent connection state management
+-   Simplifies error handling and reconnection logic
 
-⚠️ **Issue 3**: Stream callbacks ignore sessionId
+✅ **Improvement 3**: Modular OpenCodeServerClient architecture
 
--   All stream callbacks use `activeConv` instead of checking `sessionId`
--   Multi-session scenarios cause messages to be written to wrong conversation
--   **Solution**: Route messages by `sessionId` using `findConversationBySessionId()`
+-   Uses specialized handlers (ConnectionHandler, StreamHandler, SessionOperations)
+-   Better separation of concerns and improved maintainability
 
 ### Connection Management
 
 **Current State**:
 
--   Connection initialized in `main.ts` plugin initialization
--   View's `onOpen()` also checks and connects if needed
--   No unified connection state management
+✅ **Implemented**: `ConnectionManager` centralized connection management
 
-**Planned Improvement**:
+-   Connection lifecycle managed by `ConnectionManager` class
+-   Plugin initializes and manages connection state
+-   View only displays connection state and user actions
+-   Consistent error handling and reconnection logic
+-   Provides connection diagnostics for debugging
 
--   Create `ConnectionManager` to centralize connection lifecycle
--   Plugin manages connection, View only displays state
--   Clear separation of concerns
+**Key Benefits**:
+
+-   Single source of truth for connection state
+-   Improved separation of concerns
+-   Simplified error handling
+-   Better testability
 
 ## Key Design Decisions
 
@@ -334,13 +319,6 @@ The plugin integrates with OpenCode Server via HTTP + SSE for agent orchestratio
 -   User notifications with context-aware messages
 -   Error collection for debugging
 -   Function wrapping for automatic error handling
-
-### Validators (`src/utils/validators.ts`)
-
--   Type-safe input validation for configs, agents, providers
--   URL format validation and security checks
--   Color hex validation and model format validation
--   Provider ID format validation
 
 ### Constants (`src/utils/constants.ts`)
 

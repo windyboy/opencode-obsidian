@@ -241,9 +241,9 @@ opencode-obsidian/
 │   │   └── services/                # Business logic services
 │   └── utils/
 │       ├── error-handler.ts         # Unified error handling system
-│       ├── validators.ts            # Input validation utilities
 │       ├── constants.ts             # Configuration constants
-│       └── debounce-throttle.ts     # Debounce/throttle utilities
+│       ├── debounce-throttle.ts     # Debounce/throttle utilities
+│       └── data-helpers.ts          # Data processing utilities
 ├── docs/
 │   ├── README.md                    # Documentation index
 │   ├── architecture/                # Architecture documentation
