@@ -7,8 +7,9 @@ import { OpenCodeObsidianSettingTab } from "./settings";
 import type { OpenCodeObsidianSettings, Agent } from "./types";
 import { UI_CONFIG } from "./utils/constants";
 import { ErrorHandler, ErrorSeverity } from "./utils/error-handler";
-import { debounceAsync } from "./utils/debounce-throttle";
-import { OpenCodeServerClient } from "./opencode-server/client";
+import { debounceAsync } from "./utils/helpers";
+import { initializeClient, reinitializeClient } from "./client/initializer";
+import { OpenCodeServerClient } from "./client/client";
 import { ObsidianToolRegistry } from "./tools/obsidian/tool-registry";
 import { ObsidianToolExecutor } from "./tools/obsidian/tool-executor";
 import { PermissionManager } from "./tools/obsidian/permission-manager";
@@ -18,8 +19,8 @@ import type { PermissionScope } from "./tools/obsidian/permission-types";
 import { ConnectionManager } from "./session/connection-manager";
 import { SessionEventBus } from "./session/session-event-bus";
 import { PermissionCoordinator } from "./tools/obsidian/permission-coordinator";
-import { ServerManager } from "./server/ServerManager";
-import { ServerStateChangeEvent } from "./server/types";
+import { ServerManager } from "./embedded-server/ServerManager";
+import { ServerStateChangeEvent } from "./embedded-server/types";
 
 /**
  * Maps string permission level settings to ToolPermission enum values
@@ -88,34 +89,7 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 	permissionCoordinator: PermissionCoordinator | null = null;
 	serverManager: ServerManager | null = null;
 
-	private bindClientCallbacks(client: OpenCodeServerClient): void {
-		client.onStreamToken((sessionId, token, done) =>
-			this.sessionEventBus.emitStreamToken({ sessionId, token, done }),
-		);
-		client.onStreamThinking((sessionId, content) =>
-			this.sessionEventBus.emitStreamThinking({ sessionId, content }),
-		);
-		client.onProgressUpdate((sessionId, progress) =>
-			this.sessionEventBus.emitProgressUpdate({ sessionId, progress }),
-		);
-		client.onSessionEnd((sessionId, reason) =>
-			this.sessionEventBus.emitSessionEnd({ sessionId, reason }),
-		);
-		client.onPermissionRequest((sessionId, requestId, operation, resourcePath, context) =>
-			this.sessionEventBus.emitPermissionRequest({
-				sessionId,
-				requestId,
-				operation,
-				resourcePath,
-				context: context as {
-					toolName?: string;
-					args?: unknown;
-					preview?: { originalContent?: string; newContent?: string; mode?: string };
-				} | undefined,
-			}),
-		);
-		client.onError((error) => this.sessionEventBus.emitError({ error }));
-	}
+
 
 	async onload() {
 		console.debug("[OpenCode Obsidian] Plugin loading...");
@@ -175,68 +149,43 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 					);
 
 					// Initialize server (external or embedded)
-					await this.initializeServer();
+					if (this.settings.opencodeServer) {
+						const serverConfig = this.settings.opencodeServer;
+						this.serverManager = await ServerManager.initializeFromConfig(
+							serverConfig,
+							this.errorHandler,
+							(event) => this.handleServerStateChange(event),
+							async (url) => {
+								// URL 就绪回调：更新配置
+								if (!serverConfig.url) {
+									serverConfig.url = url;
+									await this.saveSettings();
+								}
+							}
+						);
+					}
 
 					// Initialize OpenCode Server client if URL is configured
 					if (this.settings.opencodeServer?.url) {
-						this.opencodeClient = new OpenCodeServerClient(
+						const clientSetup = await initializeClient(
 							this.settings.opencodeServer,
 							this.errorHandler,
-						);
-						this.connectionManager = new ConnectionManager(
-							this.opencodeClient,
-							this.errorHandler,
-						);
-						this.bindClientCallbacks(this.opencodeClient);
-
-						// Initialize permission coordinator after client and event bus are ready
-						this.permissionCoordinator = new PermissionCoordinator(
-							this.opencodeClient,
 							this.sessionEventBus,
 							this.permissionManager,
 							auditLogger,
-							this.errorHandler,
+							this.app,
+							async (agents: Agent[]) => {
+								this.settings.agents = agents;
+								await this.saveSettings();
+							},
+							() => this.getDefaultAgents()
 						);
-						this.permissionCoordinator.setApp(this.app);
 
-						console.debug(
-							"[OpenCode Obsidian] OpenCode Server client initialized",
-						);
-
-						// Perform initial health check
-						try {
-							const isHealthy = await this.opencodeClient.healthCheck();
-							if (isHealthy) {
-								console.debug(
-									"[OpenCode Obsidian] Initial health check passed",
-								);
-							} else {
-								this.errorHandler.handleError(
-									new Error("Initial health check failed - server may be unavailable"),
-									{
-										module: "OpenCodeObsidianPlugin",
-										function: "onload",
-										operation: "Initial health check",
-									},
-									ErrorSeverity.Warning,
-								);
-							}
-						} catch (error) {
-							this.errorHandler.handleError(
-								error,
-								{
-									module: "OpenCodeObsidianPlugin",
-									function: "onload",
-									operation: "Initial health check",
-								},
-								ErrorSeverity.Warning,
-							);
+						if (clientSetup) {
+							this.opencodeClient = clientSetup.client;
+							this.connectionManager = clientSetup.connectionManager;
+							this.permissionCoordinator = clientSetup.permissionCoordinator;
 						}
-
-						// Load agents (non-blocking)
-						this.loadAgents().catch(error => {
-							console.warn("Failed to load agents from server, using defaults", error);
-						});
 					}
 				}
 			} catch (error) {
@@ -353,50 +302,6 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 	}
 
 	/**
-	 * Initialize server based on configuration (external or embedded)
-	 */
-	private async initializeServer(): Promise<void> {
-		const serverConfig = this.settings.opencodeServer;
-		if (!serverConfig) return;
-
-		// Check if embedded server is enabled
-		if (serverConfig.useEmbeddedServer) {
-			console.debug("[OpenCode Obsidian] Initializing embedded OpenCode Server...");
-
-			// Create server manager
-			this.serverManager = new ServerManager(
-				{
-					opencodePath: serverConfig.opencodePath || "opencode",
-					port: serverConfig.embeddedServerPort || 4096,
-					hostname: "127.0.0.1",
-					startupTimeout: 5000,
-					workingDirectory: ".",
-				},
-				this.errorHandler,
-				(event) => this.handleServerStateChange(event)
-			);
-
-			// Start embedded server
-			const started = await this.serverManager.start();
-			if (started) {
-				// Update server URL in settings
-				if (!serverConfig.url) {
-					serverConfig.url = this.serverManager.getUrl();
-					await this.saveSettings();
-				}
-				console.debug("[OpenCode Obsidian] Embedded OpenCode Server started successfully");
-			} else {
-				console.error("[OpenCode Obsidian] Failed to start embedded OpenCode Server");
-				// Fallback: don't set URL, client won't initialize
-				serverConfig.url = ""; // Clear URL instead of deleting since it's not optional
-			}
-		} else {
-			console.debug("[OpenCode Obsidian] Using external OpenCode Server");
-			// External server - nothing to initialize here
-		}
-	}
-
-	/**
 	 * Handle server state changes
 	 */
 	private handleServerStateChange(event: ServerStateChangeEvent): void {
@@ -475,48 +380,38 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 		await this.saveData(this.settings);
 		
 		// Reinitialize OpenCode Server client if URL changed
-		if (urlChanged) {
+		if (urlChanged && this.settings.opencodeServer && this.permissionManager) {
 			console.debug(
 				"[OpenCode Obsidian] Server URL changed, reinitializing client...",
 				{ oldUrl, newUrl },
 			);
 			
-			// Disconnect old client
-			if (this.opencodeClient) {
-				await this.opencodeClient.disconnect();
-				this.opencodeClient = null;
-				this.connectionManager = null;
-				this.permissionCoordinator = null;
+			const auditLogger = new AuditLogger(this.app.vault);
+			const clientSetup = await reinitializeClient(
+				this.opencodeClient,
+				this.settings.opencodeServer,
+				this.errorHandler,
+				this.sessionEventBus,
+				this.permissionManager,
+				auditLogger,
+				this.app,
+				async (agents: Agent[]) => {
+					this.settings.agents = agents;
+					await this.saveSettings();
+				},
+				() => this.getDefaultAgents()
+			);
+			
+			if (clientSetup) {
+				this.opencodeClient = clientSetup.client;
+				this.connectionManager = clientSetup.connectionManager;
+				this.permissionCoordinator = clientSetup.permissionCoordinator;
 			}
 			
-			// Create new client with updated configuration
-			if (this.settings.opencodeServer && this.permissionManager) {
-				this.opencodeClient = new OpenCodeServerClient(
-					this.settings.opencodeServer,
-					this.errorHandler,
-				);
-				this.connectionManager = new ConnectionManager(
-					this.opencodeClient,
-					this.errorHandler,
-				);
-				this.bindClientCallbacks(this.opencodeClient);
-
-				// Reinitialize permission coordinator with new client
-				const auditLogger = new AuditLogger(this.app.vault);
-				this.permissionCoordinator = new PermissionCoordinator(
-					this.opencodeClient,
-					this.sessionEventBus,
-					this.permissionManager,
-					auditLogger,
-					this.errorHandler,
-				);
-				this.permissionCoordinator.setApp(this.app);
-
-				console.debug(
-					"[OpenCode Obsidian] OpenCode Server client reinitialized with new URL:",
-					newUrl,
-				);
-			}
+			console.debug(
+				"[OpenCode Obsidian] OpenCode Server client reinitialized with new URL:",
+				newUrl,
+			);
 		}
 	}
 

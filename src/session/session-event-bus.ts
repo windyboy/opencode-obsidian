@@ -1,4 +1,4 @@
-import type { ProgressUpdate } from "../opencode-server/types";
+import type { ProgressUpdate } from "../client/types";
 
 /**
  * Event emitted when a stream token is received from the server.

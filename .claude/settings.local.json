@@ -6,7 +6,10 @@
       "Bash(cat:*)",
       "Bash(pnpm check:*)",
       "Bash(pnpm lint:*)",
-      "mcp__plugin_claude-mem_mcp-search__search"
+      "mcp__plugin_claude-mem_mcp-search__search",
+      "Bash(tree:*)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)"
     ]
   }
 }

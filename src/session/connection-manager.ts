@@ -1,8 +1,8 @@
 import type {
 	ConnectionState,
 	ReconnectAttemptInfo,
-} from "../opencode-server/types";
-import type { OpenCodeServerClient } from "../opencode-server/client";
+} from "../client/types";
+import type { OpenCodeServerClient } from "../client/client";
 import { ErrorSeverity, type ErrorHandler } from "../utils/error-handler";
 
 export interface ConnectionDiagnostics {

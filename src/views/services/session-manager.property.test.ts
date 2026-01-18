@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from "vitest";
 import * as fc from "fast-check";
 import { SessionManager } from "./session-manager";
-import type { OpenCodeServerClient } from "../../opencode-server/client";
+import type { OpenCodeServerClient } from "../../client/client";
 import type { SessionListItem, Message } from "../../types";
 import { ErrorHandler } from "../../utils/error-handler";
 

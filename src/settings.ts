@@ -1,13 +1,14 @@
 import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import type OpenCodeObsidianPlugin from "./main";
-import { createTextarea, hasClass } from "./utils/dom-helpers";
 import {
+	createTextarea,
+	hasClass,
 	normalizePath,
 	parseNumber,
 	splitLines,
 	splitCommaList,
 	normalizeExtension,
-} from "./utils/data-helpers";
+} from "./utils/helpers";
 
 export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 	plugin: OpenCodeObsidianPlugin;
@@ -190,15 +191,15 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 								if (!client || normalizedCurrentUrl !== normalizedNewUrl) {
 									// Create temporary client for health check
 									const { OpenCodeServerClient } = await import(
-										"./opencode-server/client"
-									);
+					"./client/client"
+				);
 									client = new OpenCodeServerClient(
 										serverConfig,
 										this.plugin.errorHandler,
 									);
 								}
 
-								const isHealthy = await client.healthCheck();
+								const isHealthy = await client!.healthCheck();
 
 								if (isHealthy) {
 									new Notice("Connection successful");

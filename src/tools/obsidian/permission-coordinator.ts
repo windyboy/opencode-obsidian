@@ -1,5 +1,5 @@
 import type { App } from 'obsidian';
-import type { OpenCodeServerClient } from '../../opencode-server/client';
+import type { OpenCodeServerClient } from '../../client/client';
 import type { SessionEventBus, PermissionRequestEvent } from '../../session/session-event-bus';
 import type { PermissionManager } from './permission-manager';
 import type { AuditLogger } from './audit-logger';

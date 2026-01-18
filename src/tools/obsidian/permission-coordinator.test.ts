@@ -1,10 +1,10 @@
-﻿import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
+import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import * as fc from "fast-check";
 import { PermissionCoordinator } from "./permission-coordinator";
 import { SessionEventBus, type PermissionRequestEvent } from "../../session/session-event-bus";
 import { ErrorHandler, ErrorSeverity } from "../../utils/error-handler";
 import { ToolPermission } from "./types";
-import { OpenCodeServerClient } from "../../opencode-server/client";
+import { OpenCodeServerClient } from "../../client/client";
 import type { PermissionManager } from "./permission-manager";
 import { AuditLogger } from "./audit-logger";
 

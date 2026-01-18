@@ -22,7 +22,7 @@ vi.mock("@opencode-ai/sdk/client", () => ({
 }));
 
 import { ErrorHandler } from "../utils/error-handler";
-import { OpenCodeServerClient } from "../opencode-server/client";
+import { OpenCodeServerClient } from "../client/client";
 import { ConnectionManager } from "./connection-manager";
 
 function createMockStream(events: any[]): AsyncGenerator<any, any, unknown> {

@@ -1,4 +1,4 @@
-import type { OpenCodeServerClient } from "../../opencode-server/client";
+import type { OpenCodeServerClient } from "../../client/client";
 import type { SessionListItem, Message, Conversation } from "../../types";
 import { ErrorHandler, ErrorSeverity } from "../../utils/error-handler";
 import { getUserFriendlyErrorMessage, isRetryableError, getErrorStatusCode } from "../../utils/error-messages";

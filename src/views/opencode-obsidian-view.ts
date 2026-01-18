@@ -20,8 +20,8 @@ import { ConversationSelectorComponent } from "./components/conversation-selecto
 import { MessageListComponent } from "./components/message-list";
 import { MessageRendererComponent } from "./components/message-renderer";
 import { InputAreaComponent } from "./components/input-area";
-import { AttachmentModal } from "./modals/attachment-modal";
 import { ConfirmationModal } from "./modals/confirmation-modal";
+import { AttachmentModal } from "./modals/attachment-modal";
 import { DiffViewerModal } from "./modals/diff-viewer-modal";
 import { SearchPanel } from "./components/search-panel";
 import { ConversationManager } from "./services/conversation-manager";
