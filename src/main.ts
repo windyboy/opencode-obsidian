@@ -287,6 +287,21 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 				},
 			});
 
+			// Add command to open search panel
+			this.addCommand({
+				id: "open-search-panel",
+				name: "Search files",
+				hotkeys: [{ modifiers: ["Mod"], key: "f" }],
+				callback: () => {
+					const view = this.getActiveView();
+					if (view) {
+						view.openSearchPanel();
+					} else {
+						new Notice("Please open the chat view first");
+					}
+				},
+			});
+
 			// Add settings tab
 			this.addSettingTab(new OpenCodeObsidianSettingTab(this.app, this));
 

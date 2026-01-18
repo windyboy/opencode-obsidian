@@ -235,15 +235,22 @@ opencode-obsidian/
 │   │       ├── permission-types.ts  # Permission type definitions
 │   │       ├── audit-logger.ts      # Audit logging for tool operations
 │   │       └── types.ts             # Tool type definitions
+│   ├── views/
+│   │   ├── components/              # UI components
+│   │   ├── modals/                  # Modal dialogs
+│   │   └── services/                # Business logic services
 │   └── utils/
 │       ├── error-handler.ts         # Unified error handling system
 │       ├── validators.ts            # Input validation utilities
 │       ├── constants.ts             # Configuration constants
 │       └── debounce-throttle.ts     # Debounce/throttle utilities
 ├── docs/
-│   ├── ARCHITECTURE.md              # Architecture Decision Records
-│   ├── AGENTS.md                    # Agent configuration documentation
-│   └── OPENCODE-SERVER-PLUGIN.md    # Tool documentation
+│   ├── README.md                    # Documentation index
+│   ├── architecture/                # Architecture documentation
+│   ├── agents/                      # Agent documentation
+│   ├── tools/                       # Tool documentation
+│   ├── development/                 # Development documentation
+│   └── analysis/                    # Analysis and improvement documentation
 ├── __mocks__/
 │   └── obsidian.ts                  # Obsidian API mock for tests
 ├── styles.css                       # Styles (automatically loaded by Obsidian)
@@ -385,9 +392,28 @@ Contributions are welcome! Please follow these guidelines:
 
 ## Documentation
 
-### Architecture Documentation
+The documentation is organized into several categories for better navigation:
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture decision records, module responsibilities, and data flow documentation.
+### Complete Documentation
+
+See [docs/README.md](docs/README.md) for the complete documentation index with all available documentation files.
+
+### Core Documentation
+
+-   **[Architecture](docs/architecture/ARCHITECTURE.md)** - Detailed architecture design and decision records
+-   **[Agents & Skills](docs/agents/AGENTS.md)** - User guide for creating and using custom agents
+-   **[OpenCode Server Integration](docs/tools/OPENCODE-SERVER-PLUGIN.md)** - OpenCode Server integration documentation
+
+### Development Documentation
+
+-   **[Developer Guide](docs/development/developer-guide.md)** - Development setup and guidelines
+-   **[Code Review Process](docs/development/CODE_REVIEW.md)** - Code review guidelines
+-   **[Implementation Status](docs/development/IMPLEMENTATION_STATUS_VERIFICATION.md)** - Implementation status verification
+
+### Analysis & Improvements
+
+-   **[Feature Gap Analysis](docs/analysis/FEATURE_GAP_ANALYSIS.md)** - Detailed feature gap analysis
+-   **[Improvements Remaining](docs/analysis/IMPROVEMENTS-REMAINING.md)** - List of planned improvements
 
 ### API Documentation
 

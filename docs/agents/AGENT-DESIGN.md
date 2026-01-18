@@ -20,6 +20,7 @@ This document describes the design and implementation details for the Agent syst
 - ✅ Agent ID passed to `startSession` (via system message)
 - ✅ Agent selector in settings UI
 - ✅ `session.command` API supports `agent` parameter
+- ✅ **Agent dynamic list (REQ-004)** - Agents can be loaded dynamically
 
 **What's Planned**:
 - ⏳ Session-level agent binding (conversation-specific agents)

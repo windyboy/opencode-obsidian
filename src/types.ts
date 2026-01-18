@@ -264,3 +264,80 @@ export interface SessionDiff {
   /** Array of file diffs */
   files: FileDiff[]
 }
+
+/**
+ * Search query options
+ * 
+ * @interface SearchQuery
+ */
+export interface SearchQuery {
+  /** Search pattern */
+  pattern: string
+  /** Optional file path filter */
+  path?: string
+  /** Optional language filter */
+  language?: string
+  /** Optional maximum number of results */
+  limit?: number
+  /** Whether to enable case-sensitive search */
+  caseSensitive?: boolean
+  /** Whether to enable regex search */
+  regex?: boolean
+}
+
+/**
+ * Search result entry
+ * Represents a single result from a text search
+ * 
+ * @interface SearchResult
+ */
+export interface SearchResult {
+  /** File path relative to project root */
+  path: string
+  /** Line number where the match was found */
+  line: number
+  /** Match content with context */
+  content: string
+  /** Language identifier for syntax highlighting */
+  language?: string
+}
+
+/**
+ * File search result
+ * Represents a single file match from a file search
+ * 
+ * @interface FileResult
+ */
+export interface FileResult {
+  /** File path relative to project root */
+  path: string
+  /** File size in bytes */
+  size: number
+  /** Last modified timestamp */
+  lastModified: number
+  /** File content (optional, for small files) */
+  content?: string
+  /** Language identifier for syntax highlighting */
+  language?: string
+}
+
+/**
+ * Symbol search result
+ * Represents a single symbol match from a symbol search
+ * 
+ * @interface SymbolResult
+ */
+export interface SymbolResult {
+  /** Symbol name */
+  name: string
+  /** Symbol type (function, class, variable, etc.) */
+  type: string
+  /** File path where the symbol is defined */
+  path: string
+  /** Line number where the symbol is defined */
+  line: number
+  /** Column number where the symbol is defined */
+  column: number
+  /** Parent symbol (if applicable) */
+  parent?: string
+}

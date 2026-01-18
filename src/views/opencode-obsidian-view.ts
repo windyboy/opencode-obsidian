@@ -23,6 +23,7 @@ import { InputAreaComponent } from "./components/input-area";
 import { AttachmentModal } from "./modals/attachment-modal";
 import { ConfirmationModal } from "./modals/confirmation-modal";
 import { DiffViewerModal } from "./modals/diff-viewer-modal";
+import { SearchPanel } from "./components/search-panel";
 import { ConversationManager } from "./services/conversation-manager";
 import { MessageSender } from "./services/message-sender";
 import { ConversationSync } from "./services/conversation-sync";
@@ -64,6 +65,9 @@ export class OpenCodeObsidianView extends ItemView {
 	private messageListComponent: MessageListComponent;
 	private messageRendererComponent: MessageRendererComponent;
 	private inputAreaComponent: InputAreaComponent;
+	private searchPanel: SearchPanel | null = null;
+	private searchPanelContainer: HTMLElement | null = null;
+	private isSearchPanelVisible = false;
 
 	// Services
 	private conversationManager: ConversationManager;
@@ -370,6 +374,15 @@ export class OpenCodeObsidianView extends ItemView {
 		
 		empty(container);
 		this.headerComponent.render(container.createDiv("opencode-obsidian-header"));
+		
+		// Create search panel container
+		this.searchPanelContainer = container.createDiv("opencode-obsidian-search-panel");
+		if (this.isSearchPanelVisible && this.plugin.opencodeClient) {
+			this.searchPanel = new SearchPanel(this.plugin, this.searchPanelContainer);
+		} else {
+			this.searchPanelContainer.hide();
+		}
+		
 		this.conversationSelectorComponent.render(container.createDiv("opencode-obsidian-conversation-selector"));
 		this.messageListComponent.render(container.createDiv("opencode-obsidian-messages"));
 		this.inputAreaComponent.render(container.createDiv("opencode-obsidian-input"));
@@ -392,6 +405,47 @@ export class OpenCodeObsidianView extends ItemView {
 	private updateMessages(): void {
 		const messages = this.getContainer()?.querySelector(".opencode-obsidian-messages") as HTMLElement;
 		if (messages) this.messageListComponent.render(messages);
+	}
+
+	/**
+	 * Show the search panel
+	 */
+	public openSearchPanel(): void {
+		if (!this.searchPanelContainer || !this.plugin.opencodeClient) {
+			return;
+		}
+
+		this.isSearchPanelVisible = true;
+		this.searchPanelContainer.show();
+		this.searchPanel = new SearchPanel(this.plugin, this.searchPanelContainer);
+		this.searchPanel.focus();
+	}
+
+	/**
+	 * Hide the search panel
+	 */
+	public closeSearchPanel(): void {
+		if (!this.searchPanelContainer) {
+			return;
+		}
+
+		this.isSearchPanelVisible = false;
+		this.searchPanelContainer.hide();
+		if (this.searchPanel) {
+			this.searchPanel.destroy();
+			this.searchPanel = null;
+		}
+	}
+
+	/**
+	 * Toggle the search panel visibility
+	 */
+	public toggleSearchPanel(): void {
+		if (this.isSearchPanelVisible) {
+			this.closeSearchPanel();
+		} else {
+			this.openSearchPanel();
+		}
 	}
 
 	private updateStreamingStatus(isStreaming: boolean): void {

@@ -14,8 +14,8 @@ This document describes the architecture and key design decisions for the OpenCo
 
 ## Related Documentation
 
--   [Agent Design Document](./AGENT-DESIGN.md) - Detailed design for the Agent system
--   [Agents User Guide](./AGENTS.md) - User-facing documentation for creating and using agents
+-   [Agent Design Document](../agents/AGENT-DESIGN.md) - Detailed design for the Agent system
+-   [Agents User Guide](../agents/AGENTS.md) - User-facing documentation for creating and using agents
 
 ## Overview
 

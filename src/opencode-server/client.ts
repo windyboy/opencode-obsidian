@@ -15,7 +15,7 @@ import type {
 	ProgressUpdate,
 	ReconnectAttemptInfo,
 } from "./types";
-import type { SessionListItem, Message } from "../types";
+import type { SessionListItem, Message, SearchQuery, SearchResult, FileResult, SymbolResult } from "../types";
 import { ConnectionHandler } from "./connection-handler";
 import { StreamHandler } from "./stream-handler";
 import { SessionOperations } from "./session-operations";
@@ -760,6 +760,27 @@ export class OpenCodeServerClient {
 	 */
 	async getSessionDiff(sessionId: string): Promise<import("../types").SessionDiff> {
 		return this.sessionOps.getSessionDiff(sessionId);
+	}
+
+	/**
+	 * Search for text across all files
+	 */
+	async searchText(query: SearchQuery): Promise<SearchResult[]> {
+		return this.sessionOps.searchText(query);
+	}
+
+	/**
+	 * Search for files by name or pattern
+	 */
+	async searchFiles(query: string, limit?: number): Promise<FileResult[]> {
+		return this.sessionOps.searchFiles(query, limit);
+	}
+
+	/**
+	 * Search for symbols across all files
+	 */
+	async searchSymbols(query: string, limit?: number): Promise<SymbolResult[]> {
+		return this.sessionOps.searchSymbols(query, limit);
 	}
 
 	/**

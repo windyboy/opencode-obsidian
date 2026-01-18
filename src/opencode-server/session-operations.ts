@@ -3,7 +3,7 @@ import { ErrorHandler, ErrorSeverity } from "../utils/error-handler";
 import { formatISOTimestamp } from "../utils/data-helpers";
 import { getErrorStatusCode } from "../utils/error-messages";
 import type { SessionContext } from "./types";
-import type { SessionListItem, Message, SessionDiff } from "../types";
+import type { SessionListItem, Message, SessionDiff, SearchQuery, SearchResult, FileResult, SymbolResult } from "../types";
 import type { OpenCodeClient } from "./client";
 
 /**
@@ -851,5 +851,103 @@ export class SessionOperations {
 		}
 
 		return parts.length > 0 ? parts.join("\n") : null;
+	}
+
+	/**
+	 * Search for text across all files
+	 */
+	async searchText(query: SearchQuery): Promise<SearchResult[]> {
+		try {
+			const response = await this.sdkClient.find.text({
+				query: {
+					pattern: query.pattern,
+					...(query.path ? { directory: query.path } : {}),
+				},
+				...(query.language ? { language: query.language } : {}),
+				...(query.limit ? { limit: query.limit } : {}),
+				...(query.caseSensitive ? { caseSensitive: query.caseSensitive } : {}),
+				...(query.regex ? { regex: query.regex } : {}),
+			});
+
+			if (response.error) {
+				throw new Error(`Failed to search text: ${response.error}`);
+			}
+
+			if (!response.data) {
+				return [];
+			}
+
+			// Transform SDK search results to our SearchResult format
+			return response.data.map((result: any) => ({
+				path: result.path || "",
+				line: result.line || 0,
+				content: result.content || "",
+				language: result.language,
+			}));
+		} catch (error) {
+			this.handleSdkError(error, "searchText", "searching text");
+		}
+	}
+
+	/**
+	 * Search for files by name or pattern
+	 */
+	async searchFiles(query: string, limit?: number): Promise<FileResult[]> {
+		try {
+			const response = await this.sdkClient.find.files({
+				query: { query },
+				...(limit ? { limit } : {}),
+			});
+
+			if (response.error) {
+				throw new Error(`Failed to search files: ${response.error}`);
+			}
+
+			if (!response.data) {
+				return [];
+			}
+
+			// Transform SDK file results to our FileResult format
+			return response.data.map((result: any) => ({
+				path: result.path || "",
+				size: result.size || 0,
+				lastModified: result.lastModified || Date.now(),
+				language: result.language,
+			}));
+		} catch (error) {
+			this.handleSdkError(error, "searchFiles", "searching files");
+		}
+	}
+
+	/**
+	 * Search for symbols across all files
+	 */
+	async searchSymbols(query: string, limit?: number): Promise<SymbolResult[]> {
+		try {
+			const response = await this.sdkClient.find.symbols({
+				query: { query },
+				...(limit ? { limit } : {}),
+			});
+
+			if (response.error) {
+				throw new Error(`Failed to search symbols: ${response.error}`);
+			}
+
+			if (!response.data) {
+				return [];
+			}
+
+			// Transform SDK symbol results to our SymbolResult format
+			return response.data.map((result: any) => ({
+				name: result.name || "",
+				type: result.type || "",
+				path: result.path || "",
+				line: result.line || 0,
+				column: result.column || 0,
+				parent: result.parent,
+			}));
+		} catch (error) {
+			this.handleSdkError(error, "searchSymbols", "searching symbols");
+		}
 	}
 }

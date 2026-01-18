@@ -7,33 +7,40 @@
 #### 1. Session List and History Management (0.95)
 ✅ **Session listing API implementation**:
 - Added `listSessions()` method to `OpenCodeServerClient` that calls the server API (`GET /session`)
-- Added proper caching and error handling in `SessionManager.listSessions()`
-- Implemented `listSessionsWithRetry()` for better reliability
-- Added UI integration in `ConversationSelectorComponent` to show synced sessions
+- Added 5-minute caching mechanism in `SessionManager.listSessions()`
+- Implemented generic `retryOperation()` method for exponential backoff retry logic
+- Added `listSessionsWithRetry()` for better reliability
+- Added `createSessionWithRetry()` for session creation reliability
+- Added `localOnlyMode` support for offline operation
+- Added server session loading capability in `ConversationManager`
 
 ✅ **Session retrieval API**:
-- Added `getSessionMessages()` method to fetch complete message history for a session
-- Implemented proper error handling and session-not-found callback
-- Added message loading on conversation switch
+- Added `getSessionMessages()` method to `OpenCodeServerClient` to fetch complete message history
+- Implemented `loadSessionMessages()` in `SessionManager` with proper error handling
+- Added `loadSessionMessagesWithRetry()` for better reliability
+- Added session-not-found callback to remove invalid sessions from local cache
 
 #### 2. Message History Complete Loading (0.92)
-✅ **Message history API implementation**:
-- Added `getSessionMessages()` to `OpenCodeServerClient` that calls the server API (`GET /session/:id/message`)
-- Implemented message history loading in `ConversationManager.loadSessionMessages()`
-- Added UI integration to load messages when switching conversations
+✅ **Message history loading implementation**:
+- Implemented `loadSessionMessages()` in `SessionManager` to fetch complete message history
+- Added proper 404 error handling with session removal callback
+- Ensured message continuity when switching conversations
+- Integrated with the session not-found handling system
 
 #### 3. Permission System Integration (0.90)
 ✅ **Permission request event system**:
 - Added `PermissionRequestEvent` interface to `SessionEventBus`
-- Added permission request listeners and emitters
+- Implemented permission request event infrastructure in the session event system
 - Added `respondToPermission()` method to `OpenCodeServerClient` for the server API (`POST /session/:id/permissions/:permissionID`)
+- Created `PermissionModal` UI component for user permission approval
 
 ### 🟡 High Priority Features (0.75-0.89)
 
 #### 4. Session Fork and Branch Management (0.85)
 ✅ **Session fork API implementation**:
 - Added `forkSession()` to `OpenCodeServerClient` that calls the server API (`POST /session/:id/fork`)
-- Implemented `forkSession()` and `forkSessionWithRetry()` in `SessionManager`
+- Implemented `forkSession()` in `SessionManager` that uses the generic `retryOperation()` method
+- Added `forkSessionWithRetry()` in `SessionManager` for better reliability
 - Added `forkConversation()` to `ConversationManager` to create new local conversations from forked sessions
 - **UI Integration**: Added a fork button (🍴) to message actions that allows users to fork a conversation from any message
 
@@ -46,8 +53,9 @@
 #### 6. File Diff Viewer (0.80)
 ✅ **Session diff API implementation**:
 - Added `getSessionDiff()` to `OpenCodeServerClient` that calls the server API (`GET /session/:id/diff`)
-- Implemented UI integration in `ConversationSelectorComponent` with "View changes" context menu option
-- Added `DiffViewerModal` for displaying file changes
+- Implemented `getSessionDiff()` in `SessionOperations` for server diff retrieval
+- Implemented UI integration in `ConversationSelectorComponent` with "View changes" context menu
+- Enhanced `DiffViewerModal` to display file changes from server diff API
 
 ## Remaining Work
 
@@ -72,23 +80,42 @@
 
 1. **`src/opencode-server/client.ts`**:
    - Added `forkSession()`, `listSessions()`, `getSessionMessages()`, `respondToPermission()` methods
-   - Enhanced error handling and proper type conversion
+   - Added `revertSession()` and `unrevertSession()` methods
+   - Added `getSessionDiff()` method for file change viewing
+   - Enhanced error handling and proper type conversion between server and client data structures
 
 2. **`src/views/services/session-manager.ts`**:
    - Added `forkSession()`, `forkSessionWithRetry()` methods
-   - Enhanced error handling and retry logic
+   - Added `getSessionMessages()`, `loadSessionMessages()` methods
+   - Added `listSessions()` and `listSessionsWithRetry()` methods
+   - Added `getSessionDiff()` and `getSessionDiffWithRetry()` methods
+   - Enhanced error handling and retry logic for all session operations
 
 3. **`src/views/services/conversation-manager.ts`**:
    - Added `forkConversation()` method to create new conversations from forked sessions
+   - Enhanced session switching logic with message history loading
+   - Added server session syncing capability
 
 4. **`src/views/components/message-renderer.ts`**:
-   - Added fork button to message actions
+   - Added fork button (🍴) to message actions
+   - Enhanced message action bar with new functionality
 
 5. **`src/views/opencode-obsidian-view.ts`**:
-   - Added `forkConversation()` method to handle the UI interaction
+   - Added `forkConversation()` method to handle UI interaction
+   - Updated `revertToMessage()` to integrate with server API
+   - Updated `unrevertSession()` to integrate with server API
 
 6. **`src/session/session-event-bus.ts`**:
    - Added `PermissionRequestEvent` interface for permission system integration
+   - Enhanced event system for better session management
+
+7. **`src/tools/obsidian/permission-modal.ts`**:
+   - Created permission modal UI for user approval of server permission requests
+   - Implemented permission action buttons and detail display
+
+8. **`src/views/components/conversation-selector.ts`**:
+   - Enhanced to support server session loading and syncing
+   - Added "View changes" context menu option
 
 ### Technical Approach
 
