@@ -78,6 +78,12 @@ export interface OpenCodeObsidianSettings {
     reconnectDelay?: number
     /** Maximum number of reconnection attempts (default: 10, 0 = unlimited) */
     reconnectMaxAttempts?: number
+    /** Whether to use embedded OpenCode Server */
+    useEmbeddedServer?: boolean
+    /** Path to OpenCode executable (for embedded server) */
+    opencodePath?: string
+    /** Port for embedded OpenCode Server (default: 4096) */
+    embeddedServerPort?: number
   }
 
   /** Tool permission level (default: 'read-only') */

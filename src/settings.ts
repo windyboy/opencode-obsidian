@@ -30,6 +30,9 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 				autoReconnect: true,
 				reconnectDelay: 3000,
 				reconnectMaxAttempts: 10,
+				useEmbeddedServer: false,
+				opencodePath: "opencode",
+				embeddedServerPort: 4096,
 			};
 		}
 		return this.plugin.settings.opencodeServer;
@@ -72,102 +75,154 @@ export class OpenCodeObsidianSettingTab extends PluginSettingTab {
 			cls: "setting-item-description",
 		});
 
-		// Server URL
+		// Use embedded server toggle
+		const serverConfig = this.ensureServerConfig();
+		const embeddedServerEnabled = serverConfig.useEmbeddedServer ?? false;
+
 		new Setting(containerEl)
-			.setName("Server URL")
-			.setDesc(
-				"HTTP URL for OpenCode Server (e.g., http://127.0.0.1:4096 or https://opencode.example.com)",
-			)
-			.addText((text) => {
-				// eslint-disable-next-line obsidianmd/ui/sentence-case
-				text.setPlaceholder("http://127.0.0.1:4096")
-					.setValue(this.plugin.settings.opencodeServer?.url || "")
-					.inputEl.classList.add("opencode-setting-url");
-				text.onChange(async (value: string) => {
-					const trimmedValue = value.trim();
-					const serverConfig = this.ensureServerConfig();
-					serverConfig.url = trimmedValue;
-
-					// Validate URL format
-					if (trimmedValue && !this.isValidHttpUrl(trimmedValue)) {
-						text.inputEl.classList.add("mod-invalid");
-					} else {
-						text.inputEl.classList.remove("mod-invalid");
-					}
-
-					await this.plugin.debouncedSaveSettings();
-				});
-			})
-			.addButton((button) => {
-				button
-					.setButtonText("Test connection")
-					.setTooltip("Test connection to the OpenCode server")
-					.onClick(async () => {
-						button.setDisabled(true);
-						button.setButtonText("Testing...");
-
-						const serverConfig = this.ensureServerConfig();
-						const url = serverConfig.url.trim();
-
-						if (!url) {
-							new Notice("Please enter a server address");
-							button.setDisabled(false);
-							button.setButtonText("Test connection");
-							return;
-						}
-
-						if (!this.isValidHttpUrl(url)) {
-							new Notice("Invalid HTTP URL");
-							button.setDisabled(false);
-							button.setButtonText("Test connection");
-							return;
-						}
-
-						try {
-							// Use existing client or create temporary client
-							let client = this.plugin.opencodeClient;
-							const currentClientUrl = client?.getConfig()?.url;
-							const normalizedCurrentUrl = currentClientUrl
-								? normalizePath(currentClientUrl)
-								: "";
-							const normalizedNewUrl = normalizePath(url);
-
-							if (!client || normalizedCurrentUrl !== normalizedNewUrl) {
-								// Create temporary client for health check
-								const { OpenCodeServerClient } = await import(
-									"./opencode-server/client"
-								);
-								client = new OpenCodeServerClient(
-									serverConfig,
-									this.plugin.errorHandler,
-								);
-							}
-
-							const isHealthy = await client.healthCheck();
-
-							if (isHealthy) {
-								new Notice("Connection successful");
-							} else {
-								new Notice(
-									"Connection failed: Server health check failed",
-								);
-							}
-						} catch (error) {
-							console.error(
-								"[OpenCodeSettings] Connection test failed:",
-								error,
-							);
-							const errorMessage =
-								error instanceof Error
-									? error.message
-									: String(error);
-							new Notice(`Connection failed: ${errorMessage}`);
-						} finally {
-							button.setDisabled(false);
-							button.setButtonText("Test connection");
-						}
+			.setName("Use embedded server")
+			.setDesc("Run OpenCode Server directly within Obsidian (experimental)")
+			.addToggle((toggle) => {
+				toggle
+					.setValue(embeddedServerEnabled)
+					.onChange(async (value) => {
+						serverConfig.useEmbeddedServer = value;
+						await this.plugin.saveSettings();
+						// Re-render to show/hide dependent settings
+						this.display();
 					});
 			});
+
+		// Embedded server configuration (only shown when enabled)
+		if (embeddedServerEnabled) {
+			// OpenCode executable path
+			new Setting(containerEl)
+				.setName("OpenCode executable path")
+				.setDesc("Path to the opencode executable (e.g., /usr/local/bin/opencode or C:\\Program Files\\OpenCode\\opencode.exe)")
+				.addText((text) => {
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
+					text.setPlaceholder("opencode")
+						.setValue(serverConfig.opencodePath || "opencode");
+					text.onChange(async (value: string) => {
+						serverConfig.opencodePath = value.trim() || "opencode";
+						await this.plugin.debouncedSaveSettings();
+					});
+			});
+
+			// Embedded server port
+			new Setting(containerEl)
+				.setName("Embedded server port")
+				.setDesc("Port to run the embedded OpenCode Server on")
+				.addText((text) => {
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
+					text.setPlaceholder("4096")
+						.setValue((serverConfig.embeddedServerPort || 4096).toString());
+					text.inputEl.type = "number";
+					text.inputEl.min = "1024";
+					text.inputEl.max = "65535";
+					text.onChange(async (value: string) => {
+						const port = parseInt(value.trim(), 10);
+						serverConfig.embeddedServerPort = isNaN(port) || port < 1024 || port > 65535 ? 4096 : port;
+						await this.plugin.debouncedSaveSettings();
+					});
+			});
+		} else {
+			// External server URL (only shown when embedded server is disabled)
+			new Setting(containerEl)
+				.setName("Server URL")
+				.setDesc(
+					"HTTP URL for OpenCode Server (e.g., http://127.0.0.1:4096 or https://opencode.example.com)",
+				)
+				.addText((text) => {
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
+					text.setPlaceholder("http://127.0.0.1:4096")
+						.setValue(this.plugin.settings.opencodeServer?.url || "")
+						.inputEl.classList.add("opencode-setting-url");
+					text.onChange(async (value: string) => {
+						const trimmedValue = value.trim();
+						const serverConfig = this.ensureServerConfig();
+						serverConfig.url = trimmedValue;
+
+						// Validate URL format
+						if (trimmedValue && !this.isValidHttpUrl(trimmedValue)) {
+							text.inputEl.classList.add("mod-invalid");
+						} else {
+							text.inputEl.classList.remove("mod-invalid");
+						}
+
+						await this.plugin.debouncedSaveSettings();
+					});
+			})
+				.addButton((button) => {
+					button
+						.setButtonText("Test connection")
+						.setTooltip("Test connection to the OpenCode server")
+						.onClick(async () => {
+							button.setDisabled(true);
+							button.setButtonText("Testing...");
+
+							const serverConfig = this.ensureServerConfig();
+							const url = serverConfig.url.trim();
+
+							if (!url) {
+								new Notice("Please enter a server address");
+								button.setDisabled(false);
+								button.setButtonText("Test connection");
+								return;
+							}
+
+							if (!this.isValidHttpUrl(url)) {
+								new Notice("Invalid HTTP URL");
+								button.setDisabled(false);
+								button.setButtonText("Test connection");
+								return;
+							}
+
+							try {
+								// Use existing client or create temporary client
+								let client = this.plugin.opencodeClient;
+								const currentClientUrl = client?.getConfig()?.url;
+								const normalizedCurrentUrl = currentClientUrl
+									? normalizePath(currentClientUrl)
+									: "";
+								const normalizedNewUrl = normalizePath(url);
+
+								if (!client || normalizedCurrentUrl !== normalizedNewUrl) {
+									// Create temporary client for health check
+									const { OpenCodeServerClient } = await import(
+										"./opencode-server/client"
+									);
+									client = new OpenCodeServerClient(
+										serverConfig,
+										this.plugin.errorHandler,
+									);
+								}
+
+								const isHealthy = await client.healthCheck();
+
+								if (isHealthy) {
+									new Notice("Connection successful");
+								} else {
+									new Notice(
+										"Connection failed: Server health check failed",
+									);
+								}
+							} catch (error) {
+								console.error(
+									"[OpenCodeSettings] Connection test failed:",
+									error,
+								);
+								const errorMessage = error instanceof Error
+									? error.message
+									: String(error);
+								new Notice(`Connection failed: ${errorMessage}`);
+							} finally {
+								button.setDisabled(false);
+								button.setButtonText("Test connection");
+							}
+						});
+				});
+		}
 	}
 
 	/**

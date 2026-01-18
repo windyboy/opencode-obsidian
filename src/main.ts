@@ -18,6 +18,8 @@ import type { PermissionScope } from "./tools/obsidian/permission-types";
 import { ConnectionManager } from "./session/connection-manager";
 import { SessionEventBus } from "./session/session-event-bus";
 import { PermissionCoordinator } from "./tools/obsidian/permission-coordinator";
+import { ServerManager } from "./server/ServerManager";
+import { ServerStateChangeEvent } from "./server/types";
 
 /**
  * Maps string permission level settings to ToolPermission enum values
@@ -62,6 +64,9 @@ const DEFAULT_SERVER_CONFIG = {
 	autoReconnect: true,
 	reconnectDelay: 3000,
 	reconnectMaxAttempts: 10,
+	useEmbeddedServer: false,
+	opencodePath: "opencode",
+	embeddedServerPort: 4096,
 } as const;
 
 const DEFAULT_SETTINGS: OpenCodeObsidianSettings = {
@@ -81,6 +86,7 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 	toolRegistry: ObsidianToolRegistry | null = null;
 	permissionManager: PermissionManager | null = null;
 	permissionCoordinator: PermissionCoordinator | null = null;
+	serverManager: ServerManager | null = null;
 
 	private bindClientCallbacks(client: OpenCodeServerClient): void {
 		client.onStreamToken((sessionId, token, done) =>
@@ -141,6 +147,7 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 				agent: this.settings.agent,
 				opencodeServer:
 					this.settings.opencodeServer?.url || "not configured",
+				useEmbeddedServer: this.settings.opencodeServer?.useEmbeddedServer,
 			});
 
 			// Initialize tool execution layer
@@ -167,7 +174,10 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 						this.app,
 					);
 
-					// Initialize OpenCode Server client
+					// Initialize server (external or embedded)
+					await this.initializeServer();
+
+					// Initialize OpenCode Server client if URL is configured
 					if (this.settings.opencodeServer?.url) {
 						this.opencodeClient = new OpenCodeServerClient(
 							this.settings.opencodeServer,
@@ -227,16 +237,6 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 						this.loadAgents().catch(error => {
 							console.warn("Failed to load agents from server, using defaults", error);
 						});
-					} else {
-						this.errorHandler.handleError(
-							new Error("OpenCode Server URL not configured"),
-							{
-								module: "OpenCodeObsidianPlugin",
-								function: "onload",
-								operation: "Initial health check",
-							},
-							ErrorSeverity.Warning,
-						);
 					}
 				}
 			} catch (error) {
@@ -335,6 +335,12 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 		// Cleanup permission coordinator
 		this.permissionCoordinator = null;
 
+		// Stop embedded server if running
+		if (this.serverManager) {
+			this.serverManager.stop();
+			this.serverManager = null;
+		}
+
 		// Disconnect from OpenCode Server
 		if (this.opencodeClient) {
 			void this.opencodeClient.disconnect().then(() => {
@@ -344,6 +350,65 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 		}
 
 		console.debug("[OpenCode Obsidian] Plugin unloaded");
+	}
+
+	/**
+	 * Initialize server based on configuration (external or embedded)
+	 */
+	private async initializeServer(): Promise<void> {
+		const serverConfig = this.settings.opencodeServer;
+		if (!serverConfig) return;
+
+		// Check if embedded server is enabled
+		if (serverConfig.useEmbeddedServer) {
+			console.debug("[OpenCode Obsidian] Initializing embedded OpenCode Server...");
+
+			// Create server manager
+			this.serverManager = new ServerManager(
+				{
+					opencodePath: serverConfig.opencodePath || "opencode",
+					port: serverConfig.embeddedServerPort || 4096,
+					hostname: "127.0.0.1",
+					startupTimeout: 5000,
+					workingDirectory: ".",
+				},
+				this.errorHandler,
+				(event) => this.handleServerStateChange(event)
+			);
+
+			// Start embedded server
+			const started = await this.serverManager.start();
+			if (started) {
+				// Update server URL in settings
+				if (!serverConfig.url) {
+					serverConfig.url = this.serverManager.getUrl();
+					await this.saveSettings();
+				}
+				console.debug("[OpenCode Obsidian] Embedded OpenCode Server started successfully");
+			} else {
+				console.error("[OpenCode Obsidian] Failed to start embedded OpenCode Server");
+				// Fallback: don't set URL, client won't initialize
+				serverConfig.url = ""; // Clear URL instead of deleting since it's not optional
+			}
+		} else {
+			console.debug("[OpenCode Obsidian] Using external OpenCode Server");
+			// External server - nothing to initialize here
+		}
+	}
+
+	/**
+	 * Handle server state changes
+	 */
+	private handleServerStateChange(event: ServerStateChangeEvent): void {
+		console.debug("[OpenCode Obsidian] Server state change:", event);
+
+		if (event.state === "error" && event.error) {
+			this.errorHandler.handleError(
+				new Error(`Server error: ${event.error.message}`),
+				{ module: "OpenCodeObsidianPlugin", function: "handleServerStateChange" },
+				ErrorSeverity.Error
+			);
+		}
 	}
 
 	async loadSettings() {
