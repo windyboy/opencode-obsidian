@@ -19,6 +19,8 @@ export class SessionOperations {
 	private currentSessionId: string | null = null;
 	private sessions: Map<string, Session> = new Map();
 	private promptInFlightSessionId: string | null = null;
+	private promptInFlightTimeoutId: ReturnType<typeof setTimeout> | null = null;
+	private messageQueues: Map<string, Array<{ content: string; resolve: () => void; reject: (error: Error) => void }>> = new Map();
 
 	constructor(
 		sdkClient: OpenCodeClient,
@@ -58,6 +60,23 @@ export class SessionOperations {
 		this.promptInFlightSessionId = sessionId;
 	}
 
+	clearPromptInFlight(sessionId: string | null): void {
+		if (this.promptInFlightSessionId === sessionId || sessionId === null) {
+			const clearedSessionId = this.promptInFlightSessionId;
+			if (!clearedSessionId) {
+				return;
+			}
+			this.promptInFlightSessionId = null;
+			if (this.promptInFlightTimeoutId) {
+				clearTimeout(this.promptInFlightTimeoutId);
+				this.promptInFlightTimeoutId = null;
+			}
+			if (sessionId) {
+				this.processNextMessage(sessionId);
+			}
+		}
+	}
+
 	/**
 	 * Get sessions map
 	 */
@@ -65,13 +84,15 @@ export class SessionOperations {
 		return this.sessions;
 	}
 
-	/**
-	 * Clear all session state
-	 */
 	clearSessionState(): void {
 		this.currentSessionId = null;
 		this.promptInFlightSessionId = null;
+		if (this.promptInFlightTimeoutId) {
+			clearTimeout(this.promptInFlightTimeoutId);
+			this.promptInFlightTimeoutId = null;
+		}
 		this.sessions.clear();
+		this.messageQueues.clear();
 	}
 
 	/**
@@ -117,6 +138,7 @@ export class SessionOperations {
 
 	/**
 	 * Handle operation error with consistent error handling
+	 * @deprecated Use errorHandler.wrapOperation instead
 	 */
 	private handleOperationError(
 		error: unknown,
@@ -143,6 +165,7 @@ export class SessionOperations {
 
 	/**
 	 * Handle SDK response error with status code handling
+	 * @deprecated Use errorHandler.wrapSdkOperation instead
 	 */
 	private handleSdkError(
 		error: unknown,
@@ -300,6 +323,8 @@ export class SessionOperations {
 
 	/**
 	 * Send a message to a session
+	 * Messages are queued per session to allow consecutive sending.
+	 * When one completes (via session.idle or session.ended), the next is automatically sent.
 	 */
 	async sendMessage(sessionId: string, content: string): Promise<void> {
 		if (
@@ -310,11 +335,20 @@ export class SessionOperations {
 				"A different session is already running. Only one session can run at a time.",
 			);
 		}
+
 		if (this.promptInFlightSessionId === sessionId) {
-			throw new Error(
-				"A message is already in progress for this session. Please wait for it to finish.",
-			);
+			return new Promise<void>((resolve, reject) => {
+				if (!this.messageQueues.has(sessionId)) {
+					this.messageQueues.set(sessionId, []);
+				}
+				this.messageQueues.get(sessionId)!.push({ content, resolve, reject });
+			});
 		}
+
+		return this.processMessage(sessionId, content);
+	}
+
+	private async processMessage(sessionId: string, content: string): Promise<void> {
 		try {
 			let session = this.sessions.get(sessionId);
 			if (!session) {
@@ -330,47 +364,65 @@ export class SessionOperations {
 
 			this.promptInFlightSessionId = sessionId;
 
-			// Streaming operation - use timeout to avoid blocking
-			const promptPromise = this.sdkClient.session.prompt({
+			if (this.promptInFlightTimeoutId) {
+				clearTimeout(this.promptInFlightTimeoutId);
+				this.promptInFlightTimeoutId = null;
+			}
+
+			this.promptInFlightTimeoutId = setTimeout(() => {
+				if (this.promptInFlightSessionId === sessionId) {
+					console.warn(
+						`[SessionOperations] Safety timeout: clearing promptInFlightSessionId for ${sessionId} after 60s`,
+					);
+					this.clearPromptInFlight(sessionId);
+					this.processNextMessage(sessionId);
+				}
+			}, 60000);
+
+			this.sdkClient.session.prompt({
 				path: { id: sessionId },
 				body: {
 					parts: [{ type: "text", text: content }],
 				},
-			});
-			
-			const timeoutPromise = new Promise<{ error?: string; data?: any }>((resolve) => {
-				setTimeout(() => resolve({ data: {} }), 5000);
-			});
-			
-			const response = await Promise.race([promptPromise, timeoutPromise]);
-			
-			// Log background errors without blocking
-			promptPromise.catch((error) => {
+			}).catch((error) => {
+				if (this.promptInFlightSessionId === sessionId) {
+					this.clearPromptInFlight(sessionId);
+					this.processNextMessage(sessionId);
+				}
 				this.errorHandler.handleError(
 					error instanceof Error ? error : new Error(String(error)),
 					{
 						module: "SessionOperations",
-						function: "sendMessage",
-						operation: "Background prompt error",
+						function: "processMessage",
+						operation: "Prompt error",
 						metadata: { sessionId },
 					},
-					ErrorSeverity.Warning,
+					ErrorSeverity.Error,
 				);
 			});
-			if (response.error) {
-				throw new Error(`Failed to send message: ${response.error}`);
-			}
 		} catch (error) {
-			if (this.promptInFlightSessionId === sessionId) {
-				this.promptInFlightSessionId = null;
-			}
+			this.clearPromptInFlight(sessionId);
+			this.processNextMessage(sessionId);
 			this.handleOperationError(
 				error,
-				"sendMessage",
+				"processMessage",
 				"Sending message",
 				{ sessionId, contentLength: content.length },
 			);
+			throw error;
 		}
+	}
+
+	private processNextMessage(sessionId: string): void {
+		const queue = this.messageQueues.get(sessionId);
+		if (!queue || queue.length === 0) {
+			return;
+		}
+
+		const next = queue.shift()!;
+		this.processMessage(sessionId, next.content)
+			.then(() => next.resolve())
+			.catch((error) => next.reject(error instanceof Error ? error : new Error(String(error))));
 	}
 
 	/**

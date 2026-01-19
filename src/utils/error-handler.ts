@@ -249,6 +249,59 @@ export class ErrorHandler {
 			}
 		}) as T;
 	}
+
+	/**
+	 * Wrap an async operation with automatic error handling
+	 * @param operation The async operation to execute
+	 * @param context Error context
+	 * @param severity Error severity (default: Error)
+	 * @returns The result of the operation
+	 * @throws The error after handling it
+	 */
+	async wrapOperation<T>(
+		operation: () => Promise<T>,
+		context: ErrorContext,
+		severity: ErrorSeverity = ErrorSeverity.Error,
+	): Promise<T> {
+		try {
+			return await operation();
+		} catch (error) {
+			const err = error instanceof Error ? error : new Error(String(error));
+			this.handleError(err, context, severity);
+			throw err;
+		}
+	}
+
+	/**
+	 * Wrap an SDK operation with automatic error handling and friendly error messages
+	 * @param operation The SDK operation to execute
+	 * @param context Error context
+	 * @param friendlyMessage Optional user-friendly error message
+	 * @returns The result of the operation
+	 * @throws An enhanced error with friendly message if provided
+	 */
+	async wrapSdkOperation<T>(
+		operation: () => Promise<T>,
+		context: ErrorContext,
+		friendlyMessage?: string,
+	): Promise<T> {
+		try {
+			return await operation();
+		} catch (error) {
+			const err = error instanceof Error ? error : new Error(String(error));
+
+			// If friendly message is provided, create enhanced error
+			if (friendlyMessage) {
+				const enhancedError = new Error(friendlyMessage);
+				enhancedError.cause = err;
+				this.handleError(enhancedError, context, ErrorSeverity.Error);
+				throw enhancedError;
+			}
+
+			this.handleError(err, context, ErrorSeverity.Error);
+			throw err;
+		}
+	}
 }
 
 /**

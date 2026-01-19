@@ -34,6 +34,7 @@ The documentation is organized into the following categories:
 
 ### Analysis & Improvements
 
+- **[CODE_REVIEW_ISSUES.md](analysis/CODE_REVIEW_ISSUES.md)** - Comprehensive code review report identifying design issues and improvement opportunities
 - **[FEATURE_GAP_ANALYSIS.md](analysis/FEATURE_GAP_ANALYSIS.md)** - Feature gap analysis
 - **[CORRECTED_FEATURE_GAP_ANALYSIS.md](analysis/CORRECTED_FEATURE_GAP_ANALYSIS.md)** - Corrected feature gap analysis
 - **[feature_gap_claude.md](analysis/feature_gap_claude.md)** - Claude-specific feature gap analysis

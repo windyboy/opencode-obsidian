@@ -1,21 +1,4 @@
 /**
- * Skill definition
- * Skills are reusable prompt components that can be referenced by agents
- * 
- * @interface Skill
- */
-export interface Skill {
-  /** Skill identifier - directory name from .opencode/skill/{id}/SKILL.md */
-  id: string
-  /** Display name for the skill - from frontmatter or derived from id */
-  name: string
-  /** Optional description from frontmatter */
-  description?: string
-  /** Markdown content after YAML frontmatter - the skill's prompt content */
-  content: string
-}
-
-/**
  * Agent definition
  * Agents are AI assistant configurations with system prompts, model overrides, and tool configurations
  * Loaded from .opencode/agent/*.md files
@@ -61,8 +44,6 @@ export interface OpenCodeObsidianSettings {
   agent: string
   /** Loaded agents from .opencode/agent/*.md files (for display/selection) */
   agents?: Agent[]
-  /** Loaded skills from .opencode/skill/{skill-name}/SKILL.md files (for reference) */
-  skills?: Skill[]
   /** Instruction file paths or glob patterns (managed by OpenCode Server) */
   instructions?: string[]
 
@@ -225,20 +206,6 @@ export interface ToolResult {
   content: string
   /** Whether the tool execution resulted in an error */
   isError: boolean
-}
-
-/**
- * AI model information
- * 
- * @interface ModelInfo
- */
-export interface ModelInfo {
-  /** Model identifier (e.g., "claude-3-5-sonnet-20241022", "gpt-4") */
-  id: string
-  /** Optional display name for the model */
-  name?: string
-  /** Provider identifier - supports built-in and custom provider IDs */
-  providerID: string
 }
 
 /**

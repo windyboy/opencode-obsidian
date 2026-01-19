@@ -291,7 +291,7 @@ this.errorHandler.handleError(error, {
 - `permission-manager.test.ts` - Validation rules, permission levels
 - `permission-modal.test.ts` - UI behavior, countdown, auto-deny
 
-**Property-Based Tests:**
+**Additional Coverage:**
 - Event flow integrity
 - Malformed event handling
 - Plugin validation precedence

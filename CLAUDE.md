@@ -1,12 +1,8 @@
-# CLAUDE.md
+# OpenCode Obsidian - Developer Guide
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+AI-powered chat interface for Obsidian, integrating with OpenCode Server for agent orchestration and tool execution.
 
-## Project Overview
-
-OpenCode Obsidian is an Obsidian plugin providing an AI-powered chat interface that integrates with OpenCode Server for agent orchestration and tool execution.
-
-**Tech Stack:** TypeScript (strict mode), Obsidian Plugin API, OpenCode SDK, Vitest, esbuild
+**Stack:** TypeScript (strict), Obsidian API, OpenCode SDK, Vitest, esbuild
 
 ## Essential Commands
 
@@ -30,210 +26,93 @@ npm version patch/minor/major  # Auto-updates manifest.json, package.json, versi
 
 ## Architecture
 
-### Core Pattern: Event-Driven Modular Architecture
+**Pattern:** Event-driven modular architecture with dependency injection
 
-```
-Plugin (main.ts)
-├── OpenCodeServerClient    # HTTP + SSE communication with server
-│   ├── ConnectionHandler   # Connection lifecycle
-│   ├── StreamHandler       # SSE event processing
-│   └── SessionOperations   # Session CRUD
-├── SessionEventBus         # Pub-sub event system (decouples components)
-├── ConnectionManager       # Connection diagnostics and retry logic
-├── Tool System
-│   ├── ToolRegistry        # 6 Obsidian tools registration
-│   ├── ToolExecutor        # Execution with permission checks
-│   ├── PermissionManager   # 3-level permission model
-│   └── AuditLogger         # Logs to .opencode/audit/
-└── ErrorHandler            # Unified error handling with severity levels
-```
+**Key Components:**
+- `OpenCodeServerClient` - HTTP + SSE communication (ConnectionHandler, StreamHandler, SessionOperations)
+- `ServerManager` - Embedded server lifecycle
+- `SessionEventBus` - Pub-sub event system
+- `Tool System` - Registry, Executor, PermissionManager, AuditLogger
+- `ErrorHandler` - Unified error handling
+- `RetryHelper` - Retry logic with exponential backoff
 
-### Key Principles
+**Principles:** Event-driven decoupling, single responsibility, strict type safety, Zod validation for external data
 
-1. **Event-Driven**: SessionEventBus decouples producers/consumers
-2. **Dependency Injection**: Components receive dependencies via constructor
-3. **Single Responsibility**: Each module has one clear purpose
-4. **Type Safety**: Strict TypeScript + Zod validation for external data
+## Critical Details
 
-## Critical Implementation Details
-
-### Obsidian API Constraints
-
-**Must use `requestUrl` instead of `fetch`:**
-- Obsidian plugins cannot use standard `fetch` API
-- OpenCodeServerClient implements custom fetch adapter
-- Message/prompt endpoints: 60s timeout (longer processing)
-
-**File operations:**
-- Use `app.vault.read()`, `app.vault.create()`, `app.vault.modify()`
-- Never use Node.js `fs` module
+**Obsidian API:**
+- Use `app.vault.read/create/modify()` not Node.js `fs`
+- Use `requestUrl()` not `fetch` (custom adapter in client)
 - All paths relative to vault root
 
-### SSE Event Stream
+**SSE:** Non-blocking connection, async event processing, validate all event data
 
-- `connect()` is non-blocking - SSE loop runs in background
-- Events processed asynchronously
-- Always validate event data before processing
+**Sessions:** Single active session, multiple conversations cached (LRU, max 50)
 
-### Session Management
-
-- Single active OpenCode session at a time
-- Multiple conversations stored locally
-- Sessions cached (LRU, max 50) to reduce server requests
-
-### Permission System
-
-**Three levels:**
-1. `read-only` - Auto-approve reads, deny writes
-2. `scoped-write` - Require approval for writes to allowed paths
-3. `full-write` - Require approval for all writes
-
-**Path matching:** Uses `minimatch` for glob patterns (e.g., `["notes/**/*.md", "!notes/private/**"]`)
+**Permissions:** 3 levels (read-only, scoped-write, full-write), uses `minimatch` for path patterns
 
 ## Common Patterns
 
-### Error Handling
+**Error Handling:** Use `ErrorHandler.handleError(error, context, severity)`
 
-Always use ErrorHandler for consistency:
+**Events:** Always unsubscribe to prevent leaks: `const unsub = eventBus.on...; unsub()`
 
-```typescript
-try {
-    await operation();
-} catch (error) {
-    this.errorHandler.handleError(error, {
-        module: "ModuleName",
-        function: "functionName",
-        operation: "What was being done"
-    }, ErrorSeverity.Error);
-}
+**Retry:** Use `RetryHelper.withRetry(operation, { maxAttempts, delayMs, backoffMultiplier })`
+
+**New Tool:** Define schema → Register → Implement → Check permissions → Log audit
+
+## Key Files
+
 ```
-
-### Event Subscription
-
-Always unsubscribe to prevent memory leaks:
-
-```typescript
-const unsubscribe = eventBus.onStreamToken(event => {
-    // Handle event
-});
-
-// Cleanup when component unmounts
-unsubscribe();
+src/
+├── main.ts, settings.ts, types/
+├── client/          # HTTP + SSE (client, connection-handler, stream-handler, session-operations)
+├── embedded-server/ # ServerManager, types
+├── session/         # connection-manager, session-event-bus
+├── tools/obsidian/  # tool-registry, tool-executor, permission-manager, audit-logger
+├── utils/           # error-handler, retry-helper, constants
+└── views/           # UI components
 ```
-
-### Adding a New Tool
-
-1. Define schema in `src/tools/obsidian/types.ts`
-2. Register in `ObsidianToolRegistry.registerTools()`
-3. Implement execution in `ObsidianToolExecutor`
-4. Check permissions, execute, log to audit
-
-## Key File Locations
-
-**Core:**
-- `src/main.ts` - Plugin entry point
-- `src/types.ts` - Global types
-- `src/settings.ts` - Settings UI
-
-**OpenCode Server:**
-- `src/opencode-server/client.ts` - Main client wrapper
-- `src/opencode-server/connection-handler.ts` - Connection lifecycle
-- `src/opencode-server/stream-handler.ts` - SSE processing
-- `src/opencode-server/session-operations.ts` - Session CRUD
-
-**Session:**
-- `src/session/connection-manager.ts` - Connection diagnostics
-- `src/session/session-event-bus.ts` - Event pub-sub
-
-**Tools:**
-- `src/tools/obsidian/tool-registry.ts` - Tool registration
-- `src/tools/obsidian/tool-executor.ts` - Tool execution
-- `src/tools/obsidian/permission-manager.ts` - Permission checks
-- `src/tools/obsidian/audit-logger.ts` - Audit logging
-
-**Utils:**
-- `src/utils/error-handler.ts` - Error handling
-- `src/utils/constants.ts` - Configuration constants
 
 ## Testing
 
-**Test files:** `**/*.test.ts` or `**/*.spec.ts`
+**Files:** `**/*.test.ts`, mocks in `__mocks__/obsidian.ts`
 
-**Obsidian API mocked in:** `__mocks__/obsidian.ts`
+**Run:** `bun vitest run` (all) or `bun vitest run src/path/to/file.test.ts` (specific)
 
-**Coverage excludes:** UI components (main.ts, opencode-obsidian-view.ts, settings.ts)
-
-**Test structure:**
-```typescript
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-
-describe('ComponentName', () => {
-    let component: ComponentName;
-
-    beforeEach(() => {
-        component = new ComponentName(mockDeps);
-    });
-
-    it('should handle success case', async () => {
-        const result = await component.doSomething();
-        expect(result).toBe(expected);
-    });
-});
-```
+**Coverage excludes:** UI components (main.ts, views, settings)
 
 ## Code Conventions
 
-**Naming:**
-- Classes/Interfaces: `PascalCase`
-- Functions/Methods: `camelCase`
-- Constants: `UPPER_SNAKE_CASE`
-- Private members: prefix with `_`
+**Naming:** PascalCase (classes), camelCase (functions), UPPER_SNAKE_CASE (constants), `_prefix` (private)
 
-**Type Safety:**
-- Avoid `any` - use `unknown` with type guards
-- Use Zod for runtime validation of external data
-- Strict TypeScript already configured
+**Type Safety:** Avoid `any`, use `unknown` + type guards, Zod for external data validation
 
-**Imports:**
-```typescript
-// Absolute imports from src/
-import { ErrorHandler } from "utils/error-handler";
-import { OpenCodeServerClient } from "opencode-server/client";
-```
+**Imports:** Absolute from `src/` - e.g., `import { ErrorHandler } from "utils/error-handler"`
 
 ## Debugging
 
-**Open Developer Console:**
-- macOS: `Cmd + Option + I`
-- Windows/Linux: `Ctrl + Shift + I`
+**Console:** `Cmd+Option+I` (macOS) or `Ctrl+Shift+I` (Windows/Linux)
 
 **Common Issues:**
-- Plugin not loading → Check console, verify `manifest.json`, run `bun run build`
-- Connection issues → Verify server running, check URL in settings, test with `curl http://localhost:4096/health`
-- Tool failures → Check permissions, verify paths relative to vault root, check `.opencode/audit/` logs
+- Not loading → Check console, verify `manifest.json`, run `bun run build`
+- Connection → Verify server running, check URL in settings, test `curl http://localhost:4096/health`
+- Tool failures → Check permissions, verify vault-relative paths, check `.opencode/audit/` logs
 
 ## Known Limitations
 
-**Implementation Status: ~68% complete** (see `docs/analysis/feature_gap_claude.md`)
+**Status:** ~68% complete - Missing session fork, permission events, search APIs, dynamic agent loading
 
-**Missing Critical Features:**
-- Session fork/branch functionality
-- Permission request event system (server → client)
-- File and symbol search APIs
-- Dynamic agent loading from server
+See `docs/analysis/feature_gap_claude.md` for details
 
 ## Documentation
 
-**Key Docs:**
-- `README.md` - User guide, installation, usage
+**Project Docs:**
+- `README.md` - User guide, installation
+- `docs/REFACTORING_PLAN.md` - Prioritized refactoring tasks
+- `docs/analysis/` - Code review audit, issues, feature gaps
 - `docs/architecture/ARCHITECTURE.md` - Architecture decisions
-- `docs/analysis/feature_gap_claude.md` - Feature gap analysis
-- `docs/agents/AGENTS.md` - Custom agents and skills
 
-**Module Docs:**
-- `src/opencode-server/CLAUDE.md` - Client implementation, SSE handling
-- `src/session/CLAUDE.md` - Event bus, session management
+**Module Docs:** Each module has `CLAUDE.md` (client, embedded-server, session, tools, utils, views)
 
-**External:**
-- Obsidian Plugin API: https://docs.obsidian.md
-- OpenCode SDK: `node_modules/@opencode-ai/sdk/dist/index.d.ts`
+**External:** [Obsidian API](https://docs.obsidian.md), OpenCode SDK in `node_modules/@opencode-ai/sdk/`

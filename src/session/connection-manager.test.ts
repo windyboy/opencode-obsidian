@@ -63,7 +63,8 @@ describe("ConnectionManager", () => {
 		const manager = new ConnectionManager(client, errorHandler);
 
 		const promise = manager.ensureConnected(1000);
-		await vi.runAllTimersAsync();
+		// Wait for async operations (use a small delay instead of runAllTimersAsync)
+		await vi.advanceTimersByTimeAsync(100);
 		await expect(promise).resolves.toBeUndefined();
 		expect(manager.getDiagnostics().state).toBe("connected");
 

@@ -253,20 +253,9 @@ class MyComponent {
 - Unsubscribe removes listener
 - Event data integrity (all fields present)
 
-### Property-Based Tests
+### Additional Coverage
 
-**Property 1: Event flow integrity**
-- Generate random valid PermissionRequestEvent
-- Register multiple listeners
-- Emit event
-- Verify all listeners received complete data
-- Run 100+ iterations
-
-**Property 2: Unsubscribe correctness**
-- Register N listeners
-- Unsubscribe random subset
-- Emit event
-- Verify only active listeners called
+- Event data integrity (required and optional fields)
 
 ## Integration Points
 
@@ -356,7 +345,7 @@ emitPermissionRequest(event: PermissionRequestEvent): void {
 1. **Keep event types focused** (single responsibility)
 2. **Version event structures** (add optional fields, don't break)
 3. **Document event lifecycle** (when emitted, who consumes)
-4. **Test event flow** (unit + property tests)
+4. **Test event flow** (unit tests)
 
 <claude-mem-context>
 # Recent Activity

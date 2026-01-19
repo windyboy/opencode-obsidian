@@ -99,243 +99,315 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 		console.debug("[OpenCode Obsidian] Plugin loading...");
 
 		try {
-			// Initialize error handler with Obsidian Notice integration
-			this.errorHandler = new ErrorHandler({
-				showUserNotifications: true,
-				logToConsole: true,
-				collectErrors: false,
-				notificationCallback: (
-					message: string,
-					severity: ErrorSeverity,
-				) => {
-					new Notice(
-						message,
-						severity === ErrorSeverity.Critical ? 10000 : 5000,
-					);
-				},
-			});
-			console.debug("[OpenCode Obsidian] Error handler initialized");
-
-			await this.loadSettings();
-
-			// Migrate old settings format if needed
-			this.migrateSettings();
-
-			console.debug("[OpenCode Obsidian] Settings loaded:", {
-				agent: this.settings.agent,
-				opencodeServer:
-					this.settings.opencodeServer?.url || "not configured",
-				useEmbeddedServer: this.settings.opencodeServer?.useEmbeddedServer,
-			});
-
-			// Initialize tool execution layer
-			try {
-				if (this.app && this.app.vault) {
-					this.permissionManager = new PermissionManager(
-						this.app.vault,
-						getPermissionLevel(this.settings.toolPermission),
-						toPermissionScope(this.settings.permissionScope),
-					);
-
-					const auditLogger = new AuditLogger(this.app.vault);
-
-					const toolExecutor = new ObsidianToolExecutor(
-						this.app.vault,
-						this.app,
-						this.app.metadataCache,
-						this.permissionManager,
-						auditLogger,
-					);
-
-					this.toolRegistry = new ObsidianToolRegistry(
-						toolExecutor,
-						this.app,
-					);
-
-					// Initialize server (external or embedded)
-					if (this.settings.opencodeServer) {
-						const serverConfig = this.settings.opencodeServer;
-						try {
-							this.serverManager = await ServerManager.initializeFromConfig(
-								serverConfig,
-								this.errorHandler,
-								(event) => this.handleServerStateChange(event),
-								undefined
-							);
-						} catch (error) {
-							this.errorHandler.handleError(
-								error,
-								{
-									module: "OpenCodeObsidianPlugin",
-									function: "onload",
-									operation: "Server initialization",
-								},
-								ErrorSeverity.Warning,
-							);
-							// Continue loading plugin even if server initialization fails
-						}
-					}
-
-					// Initialize OpenCode Server client if conditions are met
-					const opencodeServer = this.settings.opencodeServer;
-					if (opencodeServer) {
-						const useEmbeddedServer = opencodeServer.useEmbeddedServer;
-						const hasServerUrl = opencodeServer.url;
-						const embeddedServerReady = useEmbeddedServer && this.serverManager && this.serverManager.getState() === "running";
-						const externalServerConfigured = !useEmbeddedServer && hasServerUrl;
-
-						// Only initialize client if:
-						// 1. Using embedded server and serverManager is ready and running, OR
-						// 2. Using external server and URL is configured
-						if ((embeddedServerReady || externalServerConfigured) && hasServerUrl) {
-							const clientSetup = await initializeClient(
-					opencodeServer,
-					this.errorHandler,
-					this.sessionEventBus,
-					this.permissionManager,
-					auditLogger,
-					this.app,
-					async (agents: Agent[]) => {
-						// Only save if agents have actually changed to avoid infinite loop
-						const agentsChanged = JSON.stringify(this.settings.agents) !== JSON.stringify(agents);
-						if (agentsChanged) {
-							this.settings.agents = agents;
-							await this.saveSettings();
-						}
-					},
-					() => this.getDefaultAgents()
-				);
-
-							if (clientSetup) {
-								this.opencodeClient = clientSetup.client;
-								this.connectionManager = clientSetup.connectionManager;
-								this.permissionCoordinator = clientSetup.permissionCoordinator;
-							}
-						}
-					}
-				}
-			} catch (error) {
-				this.errorHandler.handleError(
-					error,
-					{
-						module: "OpenCodeObsidianPlugin",
-						function: "onload",
-						operation: "Initializing tool execution layer",
-					},
-					ErrorSeverity.Warning,
-				);
-				// Continue loading plugin even if tool execution layer fails
-			}
-
-			// Initialize Todo Manager
-			try {
-				this.todoManager = new TodoManager({}, this.errorHandler);
-				console.debug("[OpenCode Obsidian] Todo Manager initialized");
-			} catch (error) {
-				this.errorHandler.handleError(
-					error,
-					{ module: "OpenCodeObsidianPlugin", function: "onload" },
-					ErrorSeverity.Warning
-				);
-			}
-
-			// Register the main view
-			this.registerView(
-				VIEW_TYPE_OPENCODE_OBSIDIAN,
-				(leaf) => new OpenCodeObsidianView(leaf, this),
-			);
-
-			// Add ribbon icon
-			this.addRibbonIcon("bot", "Open opencode", () => {
-				void this.activateView();
-			});
-
-			// Add command to open view
-			this.addCommand({
-				id: "open-view",
-				name: "Open chat view",
-				callback: () => {
-					void this.activateView();
-				},
-			});
-
-			// Add command to create new conversation
-			this.addCommand({
-				id: "new-conversation",
-				name: "New conversation",
-				hotkeys: [{ modifiers: ["Mod"], key: "n" }],
-				callback: () => {
-					const view = this.getActiveView();
-					if (view) {
-						void view.createNewConversation();
-					} else {
-						new Notice("Please open the chat view first");
-					}
-				},
-			});
-
-			// Add command to open search panel
-			this.addCommand({
-				id: "open-search-panel",
-				name: "Search files",
-				hotkeys: [{ modifiers: ["Mod"], key: "f" }],
-				callback: () => {
-					const view = this.getActiveView();
-					if (view) {
-						view.openSearchPanel();
-					} else {
-						new Notice("Please open the chat view first");
-					}
-				},
-			});
-
-			// Add command to open todo list
-			this.addCommand({
-				id: "open-todo-list",
-				name: "Open Todo List",
-				hotkeys: [{ modifiers: ["Mod"], key: "t" }],
-				callback: () => {
-					const view = this.getActiveView();
-					if (view) {
-						// 这里将在OpenCodeObsidianView中实现显示待办事项列表的方法
-						if (typeof (view as any).showTodoList === 'function') {
-							(view as any).showTodoList();
-						} else {
-							new Notice("Todo list functionality not available in this view");
-						}
-					} else {
-						new Notice("Please open the chat view first");
-					}
-				},
-			});
-
-			// Add settings tab
-			this.addSettingTab(new OpenCodeObsidianSettingTab(this.app, this));
-
-				// Server status check after plugin fully loaded
-			void this.checkServerStatusAndPrompt();
+			await this.initializeCore();
+			await this.initializeToolSystem();
+			await this.initializeServerAndClient();
+			await this.initializeTodoManager();
+			this.registerUIComponents();
+			await this.finalizeSetup();
 
 			console.debug("[OpenCode Obsidian] Plugin loaded successfully ✓");
 		} catch (error) {
-			if (this.errorHandler) {
-				this.errorHandler.handleError(
-					error,
-					{
-						module: "OpenCodeObsidianPlugin",
-						function: "onload",
-						operation: "Plugin loading",
-					},
-					ErrorSeverity.Critical,
-				);
-			} else {
-				// Fallback if errorHandler is not initialized
-				console.error("[OpenCode Obsidian] Failed to load plugin:", error);
-				// eslint-disable-next-line obsidianmd/ui/sentence-case
-				new Notice(
-					"Failed to load OpenCode Obsidian plugin. Check console for details.",
-				);
-			}
+			this.handleLoadError(error);
 			throw error; // Re-throw to let Obsidian handle the error
+		}
+	}
+
+	/**
+	 * Initialize core components (error handler, settings)
+	 */
+	private async initializeCore(): Promise<void> {
+		// Initialize error handler with Obsidian Notice integration
+		this.errorHandler = new ErrorHandler({
+			showUserNotifications: true,
+			logToConsole: true,
+			collectErrors: false,
+			notificationCallback: (
+				message: string,
+				severity: ErrorSeverity,
+			) => {
+				new Notice(
+					message,
+					severity === ErrorSeverity.Critical ? 10000 : 5000,
+				);
+			},
+		});
+		console.debug("[OpenCode Obsidian] Error handler initialized");
+
+		await this.loadSettings();
+
+		// Migrate old settings format if needed
+		this.migrateSettings();
+
+		console.debug("[OpenCode Obsidian] Settings loaded:", {
+			agent: this.settings.agent,
+			opencodeServer:
+				this.settings.opencodeServer?.url || "not configured",
+			useEmbeddedServer: this.settings.opencodeServer?.useEmbeddedServer,
+		});
+	}
+
+	/**
+	 * Initialize tool execution system (permissions, audit logging, tool registration)
+	 */
+	private async initializeToolSystem(): Promise<void> {
+		if (!this.app || !this.app.vault) {
+			throw new Error("Obsidian app or vault not available");
+		}
+
+		this.permissionManager = new PermissionManager(
+			this.app.vault,
+			getPermissionLevel(this.settings.toolPermission),
+			toPermissionScope(this.settings.permissionScope),
+		);
+
+		const auditLogger = new AuditLogger(this.app.vault);
+
+		const toolExecutor = new ObsidianToolExecutor(
+			this.app.vault,
+			this.app,
+			this.app.metadataCache,
+			this.permissionManager,
+			auditLogger,
+		);
+
+		this.toolRegistry = new ObsidianToolRegistry(
+			toolExecutor,
+			this.app,
+		);
+
+		console.debug("[OpenCode Obsidian] Tool system initialized");
+	}
+
+	/**
+	 * Initialize server and client
+	 */
+	private async initializeServerAndClient(): Promise<void> {
+		if (!this.app || !this.app.vault) {
+			return;
+		}
+
+		const opencodeServer = this.settings.opencodeServer;
+		if (!opencodeServer) {
+			console.debug("[OpenCode Obsidian] No server configuration, skipping");
+			return;
+		}
+
+		// Initialize server (if using embedded server)
+		try {
+			this.serverManager = await ServerManager.initializeFromConfig(
+				opencodeServer,
+				this.errorHandler,
+				(event) => this.handleServerStateChange(event),
+				undefined
+			);
+		} catch (error) {
+			this.errorHandler.handleError(
+				error,
+				{
+					module: "OpenCodeObsidianPlugin",
+					function: "initializeServerAndClient",
+					operation: "Server initialization",
+				},
+				ErrorSeverity.Warning,
+			);
+			// Continue loading plugin even if server initialization fails
+		}
+
+		// Initialize client
+		await this.initializeClient();
+	}
+
+	/**
+	 * Initialize OpenCode client
+	 */
+	private async initializeClient(): Promise<void> {
+		if (!this.app || !this.app.vault) {
+			return;
+		}
+
+		const opencodeServer = this.settings.opencodeServer;
+		if (!opencodeServer) {
+			return;
+		}
+
+		const useEmbeddedServer = opencodeServer.useEmbeddedServer;
+		const hasServerUrl = opencodeServer.url;
+		const embeddedServerReady = useEmbeddedServer &&
+			this.serverManager &&
+			this.serverManager.getState() === "running";
+		const externalServerConfigured = !useEmbeddedServer && hasServerUrl;
+
+		// Only initialize client if:
+		// 1. Using embedded server and serverManager is ready and running, OR
+		// 2. Using external server and URL is configured
+		if ((embeddedServerReady || externalServerConfigured) && hasServerUrl) {
+			if (!this.permissionManager) {
+				return;
+			}
+
+			const auditLogger = new AuditLogger(this.app.vault);
+
+			const clientSetup = await initializeClient(
+				opencodeServer,
+				this.errorHandler,
+				this.sessionEventBus,
+				this.permissionManager,
+				auditLogger,
+				this.app,
+				async (agents: Agent[]) => {
+					// Only save if agents have actually changed to avoid infinite loop
+					const agentsChanged = JSON.stringify(this.settings.agents) !==
+						JSON.stringify(agents);
+					if (agentsChanged) {
+						this.settings.agents = agents;
+						await this.saveSettings();
+					}
+				},
+				() => this.getDefaultAgents()
+			);
+
+			if (clientSetup) {
+				this.opencodeClient = clientSetup.client;
+				this.connectionManager = clientSetup.connectionManager;
+				this.permissionCoordinator = clientSetup.permissionCoordinator;
+			}
+		}
+	}
+
+	/**
+	 * Initialize Todo Manager
+	 */
+	private async initializeTodoManager(): Promise<void> {
+		try {
+			this.todoManager = new TodoManager({}, this.errorHandler);
+			console.debug("[OpenCode Obsidian] Todo Manager initialized");
+		} catch (error) {
+			this.errorHandler.handleError(
+				error,
+				{ module: "OpenCodeObsidianPlugin", function: "initializeTodoManager" },
+				ErrorSeverity.Warning
+			);
+		}
+	}
+
+	/**
+	 * Register UI components (views, commands, settings)
+	 */
+	private registerUIComponents(): void {
+		// Register the main view
+		this.registerView(
+			VIEW_TYPE_OPENCODE_OBSIDIAN,
+			(leaf) => new OpenCodeObsidianView(leaf, this),
+		);
+
+		// Add ribbon icon
+		this.addRibbonIcon("bot", "Open opencode", () => {
+			void this.activateView();
+		});
+
+		// Register commands
+		this.registerCommands();
+
+		// Add settings tab
+		this.addSettingTab(new OpenCodeObsidianSettingTab(this.app, this));
+
+		console.debug("[OpenCode Obsidian] UI components registered");
+	}
+
+	/**
+	 * Register all commands
+	 */
+	private registerCommands(): void {
+		// Add command to open view
+		this.addCommand({
+			id: "open-view",
+			name: "Open chat view",
+			callback: () => {
+				void this.activateView();
+			},
+		});
+
+		// Add command to create new conversation
+		this.addCommand({
+			id: "new-conversation",
+			name: "New conversation",
+			hotkeys: [{ modifiers: ["Mod"], key: "n" }],
+			callback: () => {
+				const view = this.getActiveView();
+				if (view) {
+					void view.createNewConversation();
+				} else {
+					new Notice("Please open the chat view first");
+				}
+			},
+		});
+
+		// Add command to open search panel
+		this.addCommand({
+			id: "open-search-panel",
+			name: "Search files",
+			hotkeys: [{ modifiers: ["Mod"], key: "f" }],
+			callback: () => {
+				const view = this.getActiveView();
+				if (view) {
+					view.openSearchPanel();
+				} else {
+					new Notice("Please open the chat view first");
+				}
+			},
+		});
+
+		// Add command to open todo list
+		this.addCommand({
+			id: "open-todo-list",
+			name: "Open Todo List",
+			hotkeys: [{ modifiers: ["Mod"], key: "t" }],
+			callback: () => {
+				const view = this.getActiveView();
+				if (view) {
+					// 这里将在OpenCodeObsidianView中实现显示待办事项列表的方法
+					if (typeof (view as any).showTodoList === 'function') {
+						(view as any).showTodoList();
+					} else {
+						new Notice("Todo list functionality not available in this view");
+					}
+				} else {
+					new Notice("Please open the chat view first");
+				}
+			},
+		});
+	}
+
+	/**
+	 * Finalize setup (server status check)
+	 */
+	private async finalizeSetup(): Promise<void> {
+		// Server status check after plugin fully loaded
+		void this.checkServerStatusAndPrompt();
+	}
+
+	/**
+	 * Handle load error
+	 */
+	private handleLoadError(error: unknown): void {
+		if (this.errorHandler) {
+			this.errorHandler.handleError(
+				error,
+				{
+					module: "OpenCodeObsidianPlugin",
+					function: "onload",
+					operation: "Plugin loading",
+				},
+				ErrorSeverity.Critical,
+			);
+		} else {
+			// Fallback if errorHandler is not initialized
+			console.error("[OpenCode Obsidian] Failed to load plugin:", error);
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			new Notice(
+				"Failed to load OpenCode Obsidian plugin. Check console for details.",
+			);
 		}
 	}
 

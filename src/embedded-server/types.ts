@@ -17,10 +17,6 @@ export interface ServerManagerConfig {
 	startupTimeout: number;
 	/** Working directory */
 	workingDirectory: string;
-	/** Whether to automatically restart the server if it crashes */
-	autoRestart?: boolean;
-	/** Maximum number of restart attempts */
-	maxRestartAttempts?: number;
 }
 
 /**

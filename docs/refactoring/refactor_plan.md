@@ -29,6 +29,28 @@
 
 ---
 
+## 2025-01 独立复核补充（现状与计划有效性）
+
+> 说明：以下补充用于确认当前问题是否已修复，以及本计划是否覆盖全部问题。
+
+### 现状结论（问题仍存在）
+
+- 客户端分层问题仍存在：`OpenCodeServerClient → ConnectionHandler → StreamHandler → SessionOperations` 结构未变。
+- 事件系统多层转发仍存在：`StreamHandler callbacks → bindClientCallbacks → SessionEventBus → View` 未简化。
+- `main.ts` 的 `onload()` 仍为长方法（约 98-399 行范围），未拆分。
+- 错误处理重复与 SessionManager 过宽职责仍存在。
+
+### 计划有效性结论（需补强）
+
+当前计划主要聚焦目录扁平化与文件合并，但缺少以下三类问题的可执行步骤与验收标准：
+1. 错误处理重复的消除策略
+2. SessionManager 的职责拆分策略
+3. 事件系统多层转发的具体改造
+
+因此，仅执行本计划无法保证“改掉所有问题”。建议在后续阶段补充上述三项的明确任务与验收标准。
+
+---
+
 ## 重构哲学：小型项目视角
 
 ### ❌ 不要做的事

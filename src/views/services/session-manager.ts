@@ -1,7 +1,8 @@
 import type { OpenCodeServerClient } from "../../client/client";
 import type { SessionListItem, Message, Conversation } from "../../types";
 import { ErrorHandler, ErrorSeverity } from "../../utils/error-handler";
-import { getUserFriendlyErrorMessage, isRetryableError, getErrorStatusCode } from "../../utils/error-messages";
+import { getUserFriendlyErrorMessage, getErrorStatusCode } from "../../utils/error-messages";
+import { RetryHelper } from "../../utils/retry-helper";
 
 /**
  * Cache entry for session list with TTL
@@ -11,23 +12,6 @@ interface SessionListCache {
 	fetchedAt: number;
 }
 
-/**
- * Retry configuration for failed operations
- */
-interface RetryConfig {
-	maxAttempts: number;
-	delayMs: number;
-	backoffMultiplier: number;
-}
-
-/**
- * Default retry configuration
- */
-const DEFAULT_RETRY_CONFIG: RetryConfig = {
-	maxAttempts: 3,
-	delayMs: 1000,
-	backoffMultiplier: 2,
-};
 
 /**
  * SessionManager handles all session operations with the OpenCode Server
@@ -523,67 +507,14 @@ export class SessionManager {
 
 	// Using imported getErrorStatusCode from utils/error-messages.ts
 
-	/**
-	 * Sleep for specified milliseconds
-	 */
-	private sleep(ms: number): Promise<void> {
-		return new Promise((resolve) => setTimeout(resolve, ms));
-	}
-
-	/**
-	 * Retry an operation with exponential backoff
-	 * Only retries if the error is retryable (network errors, 500 errors)
-	 */
-	private async retryOperation<T>(
-		operation: () => Promise<T>,
-		operationName: string,
-		config: RetryConfig = DEFAULT_RETRY_CONFIG,
-	): Promise<T> {
-		let lastError: Error | null = null;
-		let delay = config.delayMs;
-
-		for (let attempt = 1; attempt <= config.maxAttempts; attempt++) {
-			try {
-				return await operation();
-			} catch (error) {
-				lastError = error instanceof Error ? error : new Error(String(error));
-				const statusCode = getErrorStatusCode(error);
-
-				// Check if error is retryable
-				if (!isRetryableError(error, statusCode)) {
-					// Not retryable, throw immediately
-					throw lastError;
-				}
-
-				// If this was the last attempt, throw
-				if (attempt === config.maxAttempts) {
-					throw lastError;
-				}
-
-				// Log retry attempt
-				console.debug(
-					`[SessionManager] Retrying ${operationName} (attempt ${attempt}/${config.maxAttempts}) after ${delay}ms`,
-				);
-
-				// Wait before retrying
-				await this.sleep(delay);
-
-				// Increase delay for next attempt (exponential backoff)
-				delay *= config.backoffMultiplier;
-			}
-		}
-
-		// Should never reach here, but throw last error just in case
-		throw lastError || new Error(`Failed to ${operationName} after ${config.maxAttempts} attempts`);
-	}
 
 	/**
 	 * List sessions with automatic retry on failure
 	 */
 	async listSessionsWithRetry(forceRefresh: boolean = false): Promise<SessionListItem[]> {
-		return this.retryOperation(
+		return RetryHelper.withRetry(
 			() => this.listSessions(forceRefresh),
-			"list sessions",
+			{ operationName: "list sessions" },
 		);
 	}
 
@@ -591,9 +522,9 @@ export class SessionManager {
 	 * Create session with automatic retry on failure
 	 */
 	async createSessionWithRetry(title?: string): Promise<string> {
-		return this.retryOperation(
+		return RetryHelper.withRetry(
 			() => this.createSession(title),
-			"create session",
+			{ operationName: "create session" },
 		);
 	}
 
@@ -601,9 +532,9 @@ export class SessionManager {
 	 * Load session messages with automatic retry on failure
 	 */
 	async loadSessionMessagesWithRetry(sessionId: string): Promise<Message[]> {
-		return this.retryOperation(
+		return RetryHelper.withRetry(
 			() => this.loadSessionMessages(sessionId),
-			"load session messages",
+			{ operationName: "load session messages" },
 		);
 	}
 
@@ -611,9 +542,9 @@ export class SessionManager {
 	 * Update session title with automatic retry on failure
 	 */
 	async updateSessionTitleWithRetry(sessionId: string, title: string): Promise<void> {
-		return this.retryOperation(
+		return RetryHelper.withRetry(
 			() => this.updateSessionTitle(sessionId, title),
-			"update session title",
+			{ operationName: "update session title" },
 		);
 	}
 
@@ -621,9 +552,9 @@ export class SessionManager {
 	 * Delete session with automatic retry on failure
 	 */
 	async deleteSessionWithRetry(sessionId: string): Promise<void> {
-		return this.retryOperation(
+		return RetryHelper.withRetry(
 			() => this.deleteSession(sessionId),
-			"delete session",
+			{ operationName: "delete session" },
 		);
 	}
 
@@ -635,9 +566,9 @@ export class SessionManager {
 		messageId?: string,
 		title?: string,
 	): Promise<string> {
-		return this.retryOperation(
+		return RetryHelper.withRetry(
 			() => this.forkSession(sessionId, messageId, title),
-			"fork session",
+			{ operationName: "fork session" },
 		);
 	}
 }

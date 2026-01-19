@@ -3,10 +3,22 @@ import { OpenCodeServerClient } from "./client";
 import { ErrorHandler } from "../utils/error-handler";
 import type { OpenCodeServerConfig } from "./types";
 
+const mockSdkClient = {
+	session: {
+		list: vi.fn(),
+		messages: vi.fn(),
+		update: vi.fn(),
+		delete: vi.fn(),
+	},
+};
+
+vi.mock("@opencode-ai/sdk/client", () => ({
+	createOpencodeClient: vi.fn(() => mockSdkClient),
+}));
+
 describe("OpenCodeServerClient - Session Methods", () => {
 	let client: OpenCodeServerClient;
 	let errorHandler: ErrorHandler;
-	let mockSdkClient: any;
 
 	beforeEach(() => {
 		errorHandler = new ErrorHandler();
@@ -16,19 +28,10 @@ describe("OpenCodeServerClient - Session Methods", () => {
 		};
 
 		client = new OpenCodeServerClient(config, errorHandler);
-
-		// Mock the SDK client
-		mockSdkClient = {
-			session: {
-				list: vi.fn(),
-				messages: vi.fn(),
-				update: vi.fn(),
-				delete: vi.fn(),
-			},
-		};
-
-		// Replace the SDK client with our mock
-		(client as any).sdkClient = mockSdkClient;
+		mockSdkClient.session.list.mockReset();
+		mockSdkClient.session.messages.mockReset();
+		mockSdkClient.session.update.mockReset();
+		mockSdkClient.session.delete.mockReset();
 	});
 
 	describe("listSessions", () => {

@@ -80,22 +80,12 @@ describe('ServerManager', () => {
 		it('should initialize with correct configuration', () => {
 			expect(serverManager.getState()).toBe('stopped');
 			expect(serverManager.getUrl()).toBe('http://127.0.0.1:4096');
-			expect(errorHandler.handleError).toHaveBeenCalledWith(
-					expect.objectContaining({ message: expect.stringContaining('ServerManager initialized') }),
-					expect.anything(),
-					expect.anything()
-				);
 		});
 
 		it('should update configuration correctly', () => {
 			const newConfig = { port: 8080, hostname: 'localhost' };
 			serverManager.updateConfig(newConfig);
 			expect(serverManager.getUrl()).toBe('http://localhost:8080');
-			expect(errorHandler.handleError).toHaveBeenCalledWith(
-					expect.objectContaining({ message: expect.stringContaining('ServerManager config updated') }),
-					expect.anything(),
-					expect.anything()
-				);
 		});
 	});
 

@@ -37,6 +37,7 @@ export class StreamHandler {
 		sessions: Map<string, any>;
 		currentSessionId: string | null;
 	};
+	private clearPromptInFlightCallback?: (sessionId: string | null) => void;
 
 	constructor(
 		config: OpenCodeServerConfig,
@@ -47,11 +48,13 @@ export class StreamHandler {
 			sessions: Map<string, any>;
 			currentSessionId: string | null;
 		},
+		clearPromptInFlightCallback?: (sessionId: string | null) => void,
 	) {
 		this.config = config;
 		this.errorHandler = errorHandler;
 		this.sdkClient = sdkClient;
 		this.sessionState = sessionState;
+		this.clearPromptInFlightCallback = clearPromptInFlightCallback;
 	}
 
 	/**
@@ -461,8 +464,8 @@ export class StreamHandler {
 	 * Handle session.idle events for completion
 	 */
 	private handleSessionIdle(sessionId: string): void {
-		if (this.sessionState.promptInFlightSessionId === sessionId) {
-			this.sessionState.promptInFlightSessionId = null;
+		if (this.clearPromptInFlightCallback) {
+			this.clearPromptInFlightCallback(sessionId);
 		}
 		this.invokeCallbacks(this.streamTokenCallbacks, [sessionId, "", true], "stream token completion");
 	}
@@ -483,13 +486,12 @@ export class StreamHandler {
 	private handleSessionEnded(event: any, sessionId: string): void {
 		const reason = event.data?.reason || event.reason || "completed";
 
-		// Clean up session state
 		this.sessionState.sessions.delete(sessionId);
 		if (this.sessionState.currentSessionId === sessionId) {
 			this.sessionState.currentSessionId = null;
 		}
-		if (this.sessionState.promptInFlightSessionId === sessionId) {
-			this.sessionState.promptInFlightSessionId = null;
+		if (this.clearPromptInFlightCallback) {
+			this.clearPromptInFlightCallback(sessionId);
 		}
 
 		this.invokeCallbacks(this.sessionEndCallbacks, [sessionId, reason], "session end");

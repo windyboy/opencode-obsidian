@@ -288,6 +288,7 @@ describe("ConversationSync", () => {
 		});
 
 		afterEach(() => {
+			conversationSync.stopPeriodicSync();
 			vi.useRealTimers();
 		});
 
@@ -296,6 +297,9 @@ describe("ConversationSync", () => {
 
 			// Verify timer is set (we can't directly check the timer, but we can verify behavior)
 			expect(true).toBe(true);
+			
+			// Clean up
+			conversationSync.stopPeriodicSync();
 		});
 
 		it("should stop periodic sync timer", () => {
@@ -323,8 +327,14 @@ describe("ConversationSync", () => {
 
 			conversationSync.startPeriodicSync();
 
-			// Fast-forward 5 minutes
+			// Fast-forward 5 minutes (just enough to trigger the interval once)
 			await vi.advanceTimersByTimeAsync(300000);
+			
+			// Stop timer immediately to prevent it from triggering again
+			conversationSync.stopPeriodicSync();
+			
+			// Wait for async operations to complete (use a small delay instead of runAllTimersAsync)
+			await vi.advanceTimersByTimeAsync(100);
 
 			// Should have called listSessions for background sync
 			expect(mockSessionManager.listSessions).toHaveBeenCalled();
@@ -351,19 +361,28 @@ describe("ConversationSync", () => {
 				.mockReturnValueOnce(firstCall)
 				.mockResolvedValue(serverSessions);
 
+			// Start periodic sync
 			conversationSync.startPeriodicSync();
 
-			// Trigger first sync
+			// Trigger first background sync (via setInterval) - advance just enough to trigger once
 			await vi.advanceTimersByTimeAsync(300000);
-
-			// Trigger second sync while first is still running
-			await vi.advanceTimersByTimeAsync(300000);
+			
+			// Stop timer immediately to prevent it from triggering again
+			conversationSync.stopPeriodicSync();
+			
+			// Manually trigger second background sync while first is still running
+			// This simulates performBackgroundSync being called again before first completes
+			const secondSyncPromise = (conversationSync as any).performBackgroundSync();
 
 			// Resolve first sync
 			resolveFirst!();
 			await firstCall;
+			
+			// Wait for all async operations (use a small delay instead of runAllTimersAsync)
+			await vi.advanceTimersByTimeAsync(100);
+			await secondSyncPromise;
 
-			// Should only have called listSessions once (second call skipped)
+			// Should only have called listSessions once (second call skipped due to isSyncing check)
 			expect(mockSessionManager.listSessions).toHaveBeenCalledTimes(1);
 		});
 
@@ -405,8 +424,8 @@ describe("ConversationSync", () => {
 			// Stop timer to prevent infinite loop
 			conversationSync.stopPeriodicSync();
 
-			// Wait for async operations
-			await vi.runAllTimersAsync();
+			// Wait for async operations (use a small delay instead of runAllTimersAsync)
+			await vi.advanceTimersByTimeAsync(100);
 
 			// Should update to server version (newer timestamp)
 			expect(conversations[0]?.title).toBe("Server Title");
@@ -450,8 +469,8 @@ describe("ConversationSync", () => {
 			// Stop timer to prevent infinite loop
 			conversationSync.stopPeriodicSync();
 
-			// Wait for async operations
-			await vi.runAllTimersAsync();
+			// Wait for async operations (use a small delay instead of runAllTimersAsync)
+			await vi.advanceTimersByTimeAsync(100);
 
 			// Should keep local version (newer timestamp)
 			expect(conversations[0]?.title).toBe("Local Title");

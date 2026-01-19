@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from "child_process";
+import { spawn, ChildProcess, execSync } from "child_process";
 import { ErrorHandler, ErrorSeverity } from "../utils/error-handler";
 import { 
 	ServerState, 
@@ -9,6 +9,99 @@ import {
 } from "./types";
 import { performHealthCheck } from "../utils/health-check";
 
+/**
+ * Find executable path (node, bun, etc.)
+ * Tries common locations and PATH lookup
+ */
+function findExecutablePath(executable: string): string | null {
+	// Common paths on macOS/Linux
+	const commonPaths = [
+		`/usr/local/bin/${executable}`,
+		`/opt/homebrew/bin/${executable}`, // Apple Silicon Homebrew
+		`/usr/bin/${executable}`,
+		`/opt/${executable}/bin/${executable}`,
+		`${process.env.HOME}/.bun/bin/${executable}`, // Bun user install
+		`${process.env.HOME}/.local/bin/${executable}`,
+	];
+
+	// Try common paths first
+	for (const path of commonPaths) {
+		try {
+			execSync(`test -x "${path}"`, { stdio: "ignore" });
+			return path;
+		} catch {
+			// Path doesn't exist or not executable
+		}
+	}
+
+	// Try to find in PATH
+	try {
+		const execPath = execSync(`which ${executable}`, { encoding: "utf-8" }).trim();
+		if (execPath) {
+			return execPath;
+		}
+	} catch {
+		// which command failed or executable not in PATH
+	}
+
+	return null;
+}
+
+/**
+ * Build environment variables with node and bun in PATH
+ */
+function buildEnvWithNodeAndBun(): NodeJS.ProcessEnv {
+	const env = { ...process.env };
+	const pathsToAdd: string[] = [];
+	
+	// Find and add node
+	const nodePath = findExecutablePath("node");
+	if (nodePath) {
+		const nodeDir = nodePath.replace(/\/node$/, "");
+		pathsToAdd.push(nodeDir);
+		// #region agent log
+		fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:findExecutablePath',message:'Node path found',data:{nodePath,nodeDir},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+		// #endregion
+	}
+	
+	// Find and add bun
+	const bunPath = findExecutablePath("bun");
+	if (bunPath) {
+		const bunDir = bunPath.replace(/\/bun$/, "");
+		pathsToAdd.push(bunDir);
+		// #region agent log
+		fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:findExecutablePath',message:'Bun path found',data:{bunPath,bunDir},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+		// #endregion
+	}
+	
+	// Also check for bunx
+	const bunxPath = findExecutablePath("bunx");
+	if (bunxPath) {
+		const bunxDir = bunxPath.replace(/\/bunx$/, "");
+		if (!pathsToAdd.includes(bunxDir)) {
+			pathsToAdd.push(bunxDir);
+		}
+		// #region agent log
+		fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:findExecutablePath',message:'Bunx path found',data:{bunxPath,bunxDir},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+		// #endregion
+	}
+	
+	if (pathsToAdd.length > 0) {
+		const currentPath = env.PATH || "";
+		// Prepend found directories to PATH
+		env.PATH = `${pathsToAdd.join(":")}:${currentPath}`;
+		// #region agent log
+		fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:buildEnvWithNodeAndBun',message:'Updated PATH with node and bun',data:{newPath:env.PATH,addedPaths:pathsToAdd},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+		// #endregion
+	} else {
+		// #region agent log
+		fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:buildEnvWithNodeAndBun',message:'No node or bun found in PATH',data:{currentPath:env.PATH},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+		// #endregion
+	}
+	
+	return env;
+}
+
 export class ServerManager {
 	private process: ChildProcess | null = null;
 	private state: ServerState = "stopped";
@@ -17,9 +110,6 @@ export class ServerManager {
 	private config: ServerManagerConfig;
 	private errorHandler: ErrorHandler;
 	private onStateChange: (event: ServerStateChangeEvent) => void;
-	private restartAttempts: number = 0;
-	private maxRestartAttempts: number = 3;
-	private autoRestartEnabled: boolean = true;
 
 	/**
 	 * 从配置初始化服务器管理器
@@ -40,26 +130,42 @@ export class ServerManager {
 		onStateChange: (event: ServerStateChangeEvent) => void,
 		onUrlReady?: (url: string) => Promise<void>
 	): Promise<ServerManager | null> {
+		// #region agent log
+		fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:29',message:'initializeFromConfig entry',data:{useEmbeddedServer:config.useEmbeddedServer,opencodePath:config.opencodePath,port:config.embeddedServerPort,url:config.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+		// #endregion
 		// 检查是否启用内嵌服务器
 		if (!config.useEmbeddedServer) {
+			// #region agent log
+			fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:42',message:'useEmbeddedServer is false, returning null',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+			// #endregion
 			return null;
 		}
 
 		// 创建服务器管理器
+		const managerConfig = {
+			opencodePath: config.opencodePath || "opencode",
+			port: config.embeddedServerPort || 4096,
+			hostname: "127.0.0.1",
+			startupTimeout: 5000,
+			workingDirectory: ".",
+		};
+		// #region agent log
+		fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:52',message:'Creating ServerManager with config',data:{config:managerConfig},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+		// #endregion
 		const manager = new ServerManager(
-			{
-				opencodePath: config.opencodePath || "opencode",
-				port: config.embeddedServerPort || 4096,
-				hostname: "127.0.0.1",
-				startupTimeout: 5000,
-				workingDirectory: ".",
-			},
+			managerConfig,
 			errorHandler,
 			onStateChange
 		);
 
 		// 启动服务器
+		// #region agent log
+		fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:59',message:'Calling manager.start()',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+		// #endregion
 		const started = await manager.start();
+		// #region agent log
+		fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:62',message:'manager.start() returned',data:{started,state:manager.getState(),lastError:manager.getLastError()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+		// #endregion
 
 		// 如果启动成功且提供了 URL 回调，则调用
 		if (started && onUrlReady && !config.url) {
@@ -77,23 +183,13 @@ export class ServerManager {
 		this.config = config;
 		this.errorHandler = errorHandler;
 		this.onStateChange = onStateChange;
-		this.autoRestartEnabled = config.autoRestart ?? true;
-		this.maxRestartAttempts = config.maxRestartAttempts ?? 3;
-		
-		this.errorHandler.handleError(
-		new Error(`ServerManager initialized with config: ${JSON.stringify(config)}`),
-		{ module: "ServerManager", function: "constructor" },
-		ErrorSeverity.Info
-	);
+
+		console.debug("[ServerManager] Initialized with config:", config);
 	}
 
 	updateConfig(config: Partial<ServerManagerConfig>): void {
 		this.config = { ...this.config, ...config };
-		this.errorHandler.handleError(
-		new Error(`ServerManager config updated: ${JSON.stringify(this.config)}`),
-		{ module: "ServerManager", function: "updateConfig" },
-		ErrorSeverity.Info
-	);
+		console.debug("[ServerManager] Config updated:", this.config);
 	}
 
 	getState(): ServerState {
@@ -109,12 +205,11 @@ export class ServerManager {
 	}
 
 	async start(): Promise<boolean> {
+		// #region agent log
+		fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:98',message:'start() entry',data:{currentState:this.state,config:this.config},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+		// #endregion
 		if (this.state === "running" || this.state === "starting") {
-			this.errorHandler.handleError(
-				new Error("Server already running or starting, skipping start request"),
-				{ module: "ServerManager", function: "start" },
-				ErrorSeverity.Info
-			);
+			console.debug("[ServerManager] Server already running or starting, skipping start request");
 			return true;
 		}
 
@@ -122,72 +217,102 @@ export class ServerManager {
 		this.earlyExitCode = null;
 
 		if (!this.config.workingDirectory) {
+			// #region agent log
+			fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:107',message:'Working directory not configured',data:{workingDirectory:this.config.workingDirectory},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+			// #endregion
 			return this.setError("Working directory not configured");
 		}
 
-		if (await this.checkServerHealth().then(result => result.isHealthy)) {
-			this.errorHandler.handleError(
-				new Error(`Server already running on ${this.getUrl()}`),
-				{ module: "ServerManager", function: "start" },
-				ErrorSeverity.Info
-			);
+		// #region agent log
+		fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:111',message:'Checking server health before start',data:{url:this.getUrl()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+		// #endregion
+		const existingHealthCheck = await this.checkServerHealth();
+		// #region agent log
+		fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:113',message:'Health check result before start',data:{isHealthy:existingHealthCheck.isHealthy,error:existingHealthCheck.error},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+		// #endregion
+		if (existingHealthCheck.isHealthy) {
+			console.debug(`[ServerManager] Server already running on ${this.getUrl()}`);
 			this.setState("running", null);
 			return true;
 		}
 
-		this.errorHandler.handleError(
-			new Error(`Starting OpenCode server at ${this.config.workingDirectory}:${this.config.port}`),
-			{ module: "ServerManager", function: "start" },
-			ErrorSeverity.Info
-		);
+		console.debug(`[ServerManager] Starting OpenCode server at ${this.config.workingDirectory}:${this.config.port}`);
 
 		try {
+			// Parse opencodePath - support commands like "bunx opencode" or "npx opencode"
+			const opencodePathParts = this.config.opencodePath.trim().split(/\s+/);
+			const command = opencodePathParts[0];
+			if (!command) {
+				return this.setError("OpenCode executable path is empty");
+			}
+			const commandArgs = opencodePathParts.slice(1);
+			
+			const spawnArgs = [
+				...commandArgs, // e.g., ["opencode"] if path is "bunx opencode"
+				"serve",
+				"--port",
+				this.config.port.toString(),
+				"--hostname",
+				this.config.hostname,
+				"--cors",
+				"app://obsidian.md",
+			];
+			// #region agent log
+			fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:220',message:'About to spawn process',data:{originalPath:this.config.opencodePath,command,commandArgs,spawnArgs,workingDirectory:this.config.workingDirectory},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+			// #endregion
+			// Build environment with node and bun in PATH
+			const envWithNodeAndBun = buildEnvWithNodeAndBun();
+			// #region agent log
+			fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:232',message:'Spawning process with env',data:{command,envPath:envWithNodeAndBun.PATH,hasNode:!!findExecutablePath('node'),hasBun:!!findExecutablePath('bun'),hasBunx:!!findExecutablePath('bunx')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+			// #endregion
 			this.process = spawn(
-				this.config.opencodePath,
-				[
-					"serve",
-					"--port",
-					this.config.port.toString(),
-					"--hostname",
-					this.config.hostname,
-					"--cors",
-					"app://obsidian.md",
-				],
+				command,
+				spawnArgs,
 				{
 					cwd: this.config.workingDirectory,
-					env: { ...process.env },
+					env: envWithNodeAndBun,
 					stdio: ["ignore", "pipe", "pipe"],
 					detached: false,
 				}
 			);
 
-			this.errorHandler.handleError(
-			new Error(`Process spawned with PID: ${this.process.pid}`),
-			{ module: "ServerManager", function: "start" },
-			ErrorSeverity.Info
-		);
+			const proc = this.process;
+			console.debug(`[ServerManager] Process spawned with PID: ${proc.pid}`);
+			// #region agent log
+			fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:239',message:'Process spawned',data:{pid:proc.pid,spawned:proc!==null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+			// #endregion
 
-			this.process.stdout?.on("data", (data) => {
-				this.errorHandler.handleError(
-				new Error(data.toString().trim()),
-				{ module: "OpenCodeServer", function: "stdout" },
-				ErrorSeverity.Info
-			);
+			proc.stdout?.on("data", (data) => {
+				const output = data.toString().trim();
+				console.debug("[OpenCodeServer] stdout:", output);
+				// #region agent log
+				fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:244',message:'Process stdout',data:{output},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+				// #endregion
 			});
 
-			this.process.stderr?.on("data", (data) => {
+			proc.stderr?.on("data", (data) => {
+				const output = data.toString().trim();
+				// #region agent log
+				fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:248',message:'Process stderr',data:{output},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+				// #endregion
 				this.errorHandler.handleError(
-				new Error(data.toString().trim()),
+				new Error(output),
 				{ module: "OpenCodeServer", function: "stderr" },
 				ErrorSeverity.Warning
 			);
 			});
 
-			this.process.on("exit", (code, signal) => {
+			proc.on("exit", (code, signal) => {
+				// #region agent log
+				fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:256',message:'Process exit event',data:{code,signal,state:this.state},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+				// #endregion
 				this.handleProcessExit(code, signal);
 			});
 
-			this.process.on("error", (err: NodeJS.ErrnoException) => {
+			proc.on("error", (err: NodeJS.ErrnoException) => {
+				// #region agent log
+				fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:260',message:'Process error event',data:{code:err.code,message:err.message,name:err.name,path:err.path},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+				// #endregion
 				this.errorHandler.handleError(
 					err,
 					{ module: "ServerManager", function: "process.error" },
@@ -202,10 +327,15 @@ export class ServerManager {
 				}
 			});
 
+			// #region agent log
+			fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:172',message:'Waiting for server to be ready',data:{timeout:this.config.startupTimeout},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+			// #endregion
 			const ready = await this.waitForServerOrExit(this.config.startupTimeout);
+			// #region agent log
+			fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:175',message:'waitForServerOrExit returned',data:{ready,state:this.state,earlyExitCode:this.earlyExitCode,processExists:this.process!==null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+			// #endregion
 			if (ready) {
 				this.setState("running", null);
-				this.restartAttempts = 0;
 				return true;
 			}
 
@@ -238,11 +368,7 @@ export class ServerManager {
 		}
 
 		const proc = this.process;
-		this.errorHandler.handleError(
-			new Error(`Stopping process with PID: ${proc.pid}`),
-			{ module: "ServerManager", function: "stop" },
-			ErrorSeverity.Info
-		);
+		console.debug(`[ServerManager] Stopping process with PID: ${proc.pid}`);
 
 		this.setState("stopped", null);
 		this.process = null;
@@ -266,7 +392,7 @@ export class ServerManager {
 		return await performHealthCheck(
 			{
 				url: this.getUrl(),
-				checkSessionsEndpoint: true,
+				checkSessionsEndpoint: false,
 				timeoutMs: 2000,
 				useRequestUrl: false
 			},
@@ -281,13 +407,9 @@ export class ServerManager {
 		this.process = null;
 
 		// 记录退出信息
-		this.errorHandler.handleError(
-			new Error(`Process exited: code=${code}, signal=${signal}`),
-			{ module: "ServerManager", function: "handleProcessExit" },
-			ErrorSeverity.Info
-		);
+		console.debug(`[ServerManager] Process exited: code=${code}, signal=${signal}`);
 
-		// 如果是正常停止，不重启
+		// 如果是正常停止，不处理
 		if (this.state === "stopped") {
 			return;
 		}
@@ -298,63 +420,8 @@ export class ServerManager {
 			return;
 		}
 
-		// 运行中崩溃，尝试自动重启
-		if (this.state === "running" && this.autoRestartEnabled) {
-			this.attemptAutoRestart();
-		} else {
-			this.setState("stopped", null);
-		}
-	}
-
-	/**
-	 * 尝试自动重启服务器
-	 */
-	private attemptAutoRestart(): void {
-		if (this.restartAttempts >= this.maxRestartAttempts) {
-			this.errorHandler.handleError(
-				new Error(`Max restart attempts (${this.maxRestartAttempts}) reached`),
-				{ module: "ServerManager", function: "attemptAutoRestart" },
-				ErrorSeverity.Error
-			);
-			this.setState("error", {
-				message: "Server crashed and failed to restart",
-				code: "MAX_RESTART_ATTEMPTS"
-			});
-			return;
-		}
-
-		this.restartAttempts++;
-		const delay = this.calculateBackoffDelay(this.restartAttempts);
-
-		this.errorHandler.handleError(
-			new Error(`Auto-restarting in ${delay}ms (attempt ${this.restartAttempts}/${this.maxRestartAttempts})`),
-			{ module: "ServerManager", function: "attemptAutoRestart" },
-			ErrorSeverity.Warning
-		);
-
-		setTimeout(() => {
-			void this.start().catch(error => {
-				// Log error but don't trigger max restart limit again
-				// The error was already handled by start() method
-				this.errorHandler.handleError(
-					error instanceof Error ? error : new Error(String(error)),
-					{
-						module: "ServerManager",
-						function: "attemptAutoRestart.restart",
-						operation: `Restart attempt ${this.restartAttempts}`,
-					},
-					ErrorSeverity.Warning
-				);
-			});
-		}, delay);
-	}
-
-	/**
-	 * 计算指数退避延迟
-	 */
-	private calculateBackoffDelay(attempt: number): number {
-		// 指数退避: 1s, 2s, 4s
-		return Math.min(1000 * Math.pow(2, attempt - 1), 4000);
+		// 运行中崩溃，设置状态为 stopped (不再自动重启)
+		this.setState("stopped", null);
 	}
 
 	private setState(state: ServerState, error: ServerError | null): void {
@@ -367,11 +434,7 @@ export class ServerManager {
 			timestamp: Date.now()
 		};
 		
-		this.errorHandler.handleError(
-			new Error(`Server state changed: ${state} ${error ? `(error: ${error.message})` : ""}`),
-			{ module: "ServerManager", function: "setState" },
-			ErrorSeverity.Info
-		);
+		console.debug(`[ServerManager] Server state changed: ${state}${error ? ` (error: ${error.message})` : ""}`);
 		
 		this.onStateChange(event);
 	}
@@ -399,15 +462,20 @@ export class ServerManager {
 
 		while (Date.now() - startTime < timeoutMs) {
 			if (!this.process) {
-				this.errorHandler.handleError(
-				new Error("Process exited before server became ready"),
-				{ module: "ServerManager", function: "waitForServerOrExit" },
-				ErrorSeverity.Info
-			);
+				console.debug("[ServerManager] Process exited before server became ready");
+				// #region agent log
+				fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:300',message:'Process is null during wait',data:{elapsed:Date.now()-startTime},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+				// #endregion
 				return false;
 			}
 
+			// #region agent log
+			fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:305',message:'Performing health check',data:{url:this.getUrl(),elapsed:Date.now()-startTime},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+			// #endregion
 			const healthCheckResult = await this.checkServerHealth();
+			// #region agent log
+			fetch('http://127.0.0.1:7243/ingest/c3197671-fe00-48d7-972f-f259c2c34eaa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ServerManager.ts:308',message:'Health check result',data:{isHealthy:healthCheckResult.isHealthy,error:healthCheckResult.error,statusCode:healthCheckResult.statusCode},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+			// #endregion
 			if (healthCheckResult.isHealthy) {
 				return true;
 			}
