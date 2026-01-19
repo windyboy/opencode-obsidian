@@ -196,6 +196,8 @@ export interface PluginSettingTab {
 }
 
 // Mock requestUrl function
+// Note: This is a simplified mock for testing purposes.
+// The actual Obsidian API provides more functionality (headers, timeout, etc.)
 export async function requestUrl(options: {
   url: string;
   method?: string;

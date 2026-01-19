@@ -24,18 +24,9 @@ export interface ServerManagerConfig {
 }
 
 /**
- * Server health check result
+ * Re-export HealthCheckResult from client types to maintain consistency
  */
-export interface HealthCheckResult {
-	/** Whether the server is healthy */
-	isHealthy: boolean;
-	/** Status code if available */
-	statusCode?: number;
-	/** Error message if health check failed */
-	error?: string;
-	/** List of endpoints that were checked */
-	checkedEndpoints?: string[];
-}
+export type { HealthCheckResult } from "../client/types";
 
 /**
  * Server error information
@@ -49,19 +40,7 @@ export interface ServerError {
 	originalError?: unknown;
 }
 
-/**
- * Process metrics interface
- */
-export interface ProcessMetrics {
-	/** CPU usage percentage */
-	cpu: number;
-	/** Memory usage in MB */
-	memory: number;
-	/** Process uptime in seconds */
-	uptime: number;
-	/** Collection timestamp */
-	timestamp: number;
-}
+
 
 /**
  * Server state change event

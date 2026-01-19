@@ -160,13 +160,7 @@ export default class OpenCodeObsidianPlugin extends Plugin {
 								serverConfig,
 								this.errorHandler,
 								(event) => this.handleServerStateChange(event),
-								async (url) => {
-									// URL 就绪回调：更新配置
-									if (!serverConfig.url) {
-										serverConfig.url = url;
-										await this.saveSettings();
-									}
-								}
+								undefined
 							);
 						} catch (error) {
 							this.errorHandler.handleError(

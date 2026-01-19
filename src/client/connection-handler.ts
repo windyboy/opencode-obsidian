@@ -1,4 +1,3 @@
-import { requestUrl } from "obsidian";
 import { ErrorHandler, ErrorSeverity } from "../utils/error-handler";
 import type {
 	OpenCodeServerConfig,
@@ -6,6 +5,7 @@ import type {
 	ReconnectAttemptInfo,
 	HealthCheckResult,
 } from "./types";
+import { performHealthCheck } from "../utils/health-check";
 
 /**
  * Handles connection state management and health checks for OpenCode Server
@@ -324,12 +324,10 @@ export class ConnectionHandler {
 					);
 					const delay = delayBase + jitter;
 
-					// Before reconnecting, check if server is actually available
-					// This prevents infinite reconnection attempts when server is completely unavailable
-					const healthCheckResult = await this.healthCheck();
-					if (!healthCheckResult.isHealthy) {
-						// If server is unavailable, stop reconnecting immediately
-						const err = new Error(`OpenCode Server is unavailable. Stopping reconnection attempts. ${healthCheckResult.error ? `Error: ${healthCheckResult.error}` : ''}`);
+					// Check max attempts before reconnecting
+					if (maxAttempts !== 0 && attempt >= maxAttempts) {
+						const err = 
+							error instanceof Error ? error : new Error(String(error));
 						this.lastConnectionError = err;
 						this.setConnectionState("error", { error: err });
 						throw err;
@@ -341,15 +339,28 @@ export class ConnectionHandler {
 						maxAttempts,
 					});
 
-					if (maxAttempts !== 0 && attempt >= maxAttempts) {
-						const err = 
-							error instanceof Error ? error : new Error(String(error));
-						this.lastConnectionError = err;
-						this.setConnectionState("error", { error: err });
-						throw err;
-					}
-
+					// Wait before reconnecting (exponential backoff)
 					await this.sleep(delay);
+
+					// After delay, check if server is actually available
+					// This prevents immediate failures when server is temporarily unavailable
+					const healthCheckResult = await this.healthCheck();
+					if (!healthCheckResult.isHealthy) {
+						// If server is still unavailable after delay, log and continue retry loop
+						// This allows retry mechanism to work properly even when server is restarting
+						this.errorHandler.handleError(
+							new Error(`Server health check failed after retry delay: ${healthCheckResult.error || 'Unknown error'}. Will retry.`),
+							{
+								module: "ConnectionHandler",
+								function: "startEventLoop",
+								operation: "Reconnection attempt",
+								metadata: { attempt: cappedAttempt, delay }
+							},
+							ErrorSeverity.Warning
+						);
+						// Continue to next iteration of retry loop
+						continue;
+					}
 				}
 			}
 		} catch (error) {
@@ -377,108 +388,18 @@ export class ConnectionHandler {
 
 	/**
 	 * Perform health check on OpenCode Server
+	 * Uses shared health check utility with requestUrl
 	 */
 	async healthCheck(): Promise<HealthCheckResult> {
-		try {
-			// Health check uses direct requestUrl to avoid JSON parsing issues
-			// Health endpoint may return HTML or plain text, not JSON
-
-			const healthUrl = `${this.config.url}/health`;
-			let response: Awaited<ReturnType<typeof requestUrl>>;
-
-			try {
-				// Use requestUrl directly with text/plain content type to avoid JSON parsing
-				// Note: requestUrl may still attempt to parse JSON based on response Content-Type header
-				response = await requestUrl({
-					url: healthUrl,
-					method: "GET",
-					contentType: "text/plain",
-				});
-			} catch (requestError) {
-				// Check if this is a JSON parsing error (expected for HTML responses)
-				const errorMessage = requestError instanceof Error ? requestError.message : String(requestError);
-				const isJsonParseError = errorMessage.includes("not valid JSON") ||
-					errorMessage.includes("Unexpected token");
-
-				if (isJsonParseError) {
-					// JSON parse errors are expected for /health endpoint that returns HTML
-					// Don't log this as an error - just treat as unhealthy
-					// The server is responding, but with HTML instead of JSON
-					this.setHealthStatus(false);
-					return {
-						isHealthy: false,
-						error: errorMessage,
-					};
-				}
-
-				// For other errors (connection errors, etc.), log but don't show to user
-				this.errorHandler.handleError(
-					requestError,
-					{
-						module: "ConnectionHandler",
-						function: "healthCheck",
-						operation: "Health check request",
-						metadata: { url: healthUrl },
-					},
-					ErrorSeverity.Warning,
-				);
-				this.setHealthStatus(false);
-				return {
-					isHealthy: false,
-					error: errorMessage,
-				};
-			}
-
-			const isHealthy = response.status >= 200 && response.status < 300;
-			if (!isHealthy) {
-				// Log non-2xx status as warning via error handler (not console)
-				this.errorHandler.handleError(
-					new Error(`Health check returned status ${response.status}`),
-					{
-						module: "ConnectionHandler",
-						function: "healthCheck",
-						operation: "Health check response",
-						metadata: { url: healthUrl, status: response.status },
-					},
-					ErrorSeverity.Warning,
-				);
-			}
-
-			this.setHealthStatus(isHealthy);
-			return {
-				isHealthy,
-				statusCode: response.status,
-			};
-		} catch (error) {
-			// Check if this is a JSON parsing error that bypassed inner catch
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			const isJsonParseError = errorMessage.includes("not valid JSON") ||
-				errorMessage.includes("Unexpected token");
-			if (isJsonParseError) {
-				// JSON parse error bypassed inner catch - treat as unhealthy without logging
-				this.setHealthStatus(false);
-				return {
-					isHealthy: false,
-					error: errorMessage,
-				};
-			}
-			// All errors are handled via error handler (Warning severity to avoid user notifications)
-			this.errorHandler.handleError(
-				error,
-				{
-					module: "ConnectionHandler",
-					function: "healthCheck",
-					operation: "Health check",
-					metadata: { serverUrl: this.config.url },
-				},
-				ErrorSeverity.Warning,
-			);
-			this.setHealthStatus(false);
-			return {
-				isHealthy: false,
-				error: errorMessage,
-			};
-		}
+		const result = await performHealthCheck(
+			{
+				url: this.config.url,
+				useRequestUrl: true
+			},
+			this.errorHandler
+		);
+		this.setHealthStatus(result.isHealthy);
+		return result;
 	}
 
 	/**

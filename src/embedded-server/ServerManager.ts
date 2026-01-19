@@ -5,9 +5,9 @@ import {
 	ServerManagerConfig, 
 	HealthCheckResult, 
 	ServerError,
-	ServerStateChangeEvent,
-	ProcessMetrics
+	ServerStateChangeEvent
 } from "./types";
+import { performHealthCheck } from "../utils/health-check";
 
 export class ServerManager {
 	private process: ChildProcess | null = null;
@@ -20,8 +20,6 @@ export class ServerManager {
 	private restartAttempts: number = 0;
 	private maxRestartAttempts: number = 3;
 	private autoRestartEnabled: boolean = true;
-	private metrics: ProcessMetrics | null = null;
-	private metricsInterval: ReturnType<typeof setInterval> | null = null;
 
 	/**
 	 * 从配置初始化服务器管理器
@@ -207,8 +205,7 @@ export class ServerManager {
 			const ready = await this.waitForServerOrExit(this.config.startupTimeout);
 			if (ready) {
 				this.setState("running", null);
-				this.restartAttempts = 0;  // 重置重启计数
-				this.startMetricsCollection();  // 开始收集指标
+				this.restartAttempts = 0;
 				return true;
 			}
 
@@ -235,8 +232,6 @@ export class ServerManager {
 	}
 
 	stop(): void {
-		this.stopMetricsCollection();  // 停止收集指标
-		
 		if (!this.process) {
 			this.setState("stopped", null);
 			return;
@@ -268,74 +263,15 @@ export class ServerManager {
 	}
 
 	async checkServerHealth(): Promise<HealthCheckResult> {
-		try {
-			const checkedEndpoints: string[] = ["/health"];
-			
-			// 1. 基础健康检查
-			const healthResponse = await fetch(`${this.getUrl()}/health`, {
-				method: "GET",
-				signal: AbortSignal.timeout(2000),
-			});
-
-			if (!healthResponse.ok) {
-				return {
-					isHealthy: false,
-					statusCode: healthResponse.status,
-					error: `Health endpoint returned ${healthResponse.status}`,
-					checkedEndpoints
-				};
-			}
-
-			// 2. 验证关键端点（可选，避免过度检查）
-			try {
-				checkedEndpoints.push("/sessions");
-				const sessionsResponse = await fetch(`${this.getUrl()}/sessions`, {
-					method: "GET",
-					signal: AbortSignal.timeout(2000),
-				});
-
-				if (!sessionsResponse.ok) {
-					return {
-						isHealthy: false,
-						statusCode: sessionsResponse.status,
-						error: "Sessions endpoint not responding",
-						checkedEndpoints
-					};
-				}
-			} catch (sessionError) {
-				// 如果/sessions检查失败，记录警告但仍认为健康检查通过
-				this.errorHandler.handleError(
-					new Error(`Sessions endpoint check failed: ${sessionError instanceof Error ? sessionError.message : "Unknown error"}`),
-					{ module: "ServerManager", function: "checkServerHealth" },
-					ErrorSeverity.Warning
-				);
-			}
-
-			this.errorHandler.handleError(
-				new Error(`Health check passed for endpoints: ${checkedEndpoints.join(", ")}`),
-				{ module: "ServerManager", function: "checkServerHealth" },
-				ErrorSeverity.Info
-			);
-			
-			return {
-				isHealthy: true,
-				statusCode: healthResponse.status,
-				checkedEndpoints
-			};
-		} catch (error) {
-			const errorMsg = error instanceof Error ? error.message : String(error);
-			this.errorHandler.handleError(
-				new Error(`Health check failed: ${errorMsg}`),
-				{ module: "ServerManager", function: "checkServerHealth" },
-				ErrorSeverity.Info
-			);
-			
-			return {
-				isHealthy: false,
-				error: errorMsg,
-				checkedEndpoints: ["/health"]
-			};
-		}
+		return await performHealthCheck(
+			{
+				url: this.getUrl(),
+				checkSessionsEndpoint: true,
+				timeoutMs: 2000,
+				useRequestUrl: false
+			},
+			this.errorHandler
+		);
 	}
 
 	/**
@@ -397,7 +333,19 @@ export class ServerManager {
 		);
 
 		setTimeout(() => {
-			void this.start();
+			void this.start().catch(error => {
+				// Log error but don't trigger max restart limit again
+				// The error was already handled by start() method
+				this.errorHandler.handleError(
+					error instanceof Error ? error : new Error(String(error)),
+					{
+						module: "ServerManager",
+						function: "attemptAutoRestart.restart",
+						operation: `Restart attempt ${this.restartAttempts}`,
+					},
+					ErrorSeverity.Warning
+				);
+			});
 		}, delay);
 	}
 
@@ -407,67 +355,6 @@ export class ServerManager {
 	private calculateBackoffDelay(attempt: number): number {
 		// 指数退避: 1s, 2s, 4s
 		return Math.min(1000 * Math.pow(2, attempt - 1), 4000);
-	}
-
-	/**
-	 * 开始收集进程指标
-	 */
-	private startMetricsCollection(): void {
-		// 每 30 秒采集一次（避免过度消耗资源）
-		this.metricsInterval = setInterval(() => {
-			void this.collectMetrics();
-		}, 30000);
-	}
-
-	/**
-	 * 停止收集进程指标
-	 */
-	private stopMetricsCollection(): void {
-		if (this.metricsInterval) {
-			clearInterval(this.metricsInterval);
-			this.metricsInterval = null;
-		}
-		this.metrics = null;
-	}
-
-	/**
-	 * 收集进程指标
-	 */
-	private async collectMetrics(): Promise<void> {
-		if (!this.process || !this.process.pid) {
-			return;
-		}
-
-		try {
-			// 使用 Node.js 内置 API
-			const usage = process.cpuUsage();
-			const memUsage = process.memoryUsage();
-
-			this.metrics = {
-				cpu: (usage.user + usage.system) / 1000000, // 转换为秒
-				memory: memUsage.rss / 1024 / 1024,         // 转换为 MB
-				uptime: process.uptime(),
-				timestamp: Date.now()
-			};
-
-			// 记录到日志（仅在异常时）
-			if (this.metrics.memory > 500) {  // 超过 500MB 警告
-				this.errorHandler.handleError(
-					new Error(`High memory usage: ${this.metrics.memory.toFixed(2)} MB`),
-					{ module: "ServerManager", function: "collectMetrics" },
-					ErrorSeverity.Warning
-				);
-			}
-		} catch (error) {
-			// 静默失败，不影响主流程
-		}
-	}
-
-	/**
-	 * 获取当前进程指标
-	 */
-	public getMetrics(): ProcessMetrics | null {
-		return this.metrics;
 	}
 
 	private setState(state: ServerState, error: ServerError | null): void {

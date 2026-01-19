@@ -79,6 +79,8 @@ export interface HealthCheckResult {
 	statusCode?: number;
 	/** Error message (only for failed responses) */
 	error?: string;
+	/** List of endpoints that were checked */
+	checkedEndpoints?: string[];
 }
 
 /**
